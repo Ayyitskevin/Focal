@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Sent emails · Mise admin{% endblock %}
+{% block content %}
+<main class="admin-main">
+  <div class="admin-bar">
+    <h1><a href="/admin">&larr;</a> Sent emails</h1>
+    <nav>
+      <a href="/admin/emails">Captured</a> ·
+      <span class="muted">{{ total }} total send{{ "s" if total != 1 }}</span>
+    </nav>
+  </div>
+
+  {% if kinds %}
+  <p class="muted sent-kinds">
+    {% for k in ["proposal", "contract", "invoice", "other"] %}
+    {% if kinds.get(k) %}<span class="kind-badge kind-{{ k }}">{{ k }}</span>
+    {{ kinds[k] }}{% if not loop.last %} · {% endif %}{% endif %}
+    {% endfor %}
+  </p>
+  {% endif %}
+
+  {% if rows %}
+  <table class="list">
+    <tr><th>Date</th><th>To</th><th>Kind</th><th>Subject</th><th>Project / Client</th></tr>
+    {% for r in rows %}
+    <tr>
+      <td class="muted">{{ r.created_at }}</td>
+      <td>{{ r.to_email }}</td>
+      <td><span class="kind-badge kind-{{ r.doc_kind }}">{{ r.doc_kind }}</span></td>
+      <td>{{ r.subject }}</td>
+      <td>{% if r.project_id %}<a href="/admin/studio/projects/{{ r.project_id }}">{{ r.project_title }}</a>
+        {% if r.client_name %}<span class="muted"> · {{ r.client_name }}{% if r.company %} ({{ r.company }}){% endif %}</span>{% endif %}
+        {% else %}<span class="muted">—</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  <p class="muted">
+    {% if offset > 0 %}<a href="/admin/sent?offset={{ [offset - page_size, 0]|max }}">&larr; Newer</a>{% endif %}
+    {% if rows|length == page_size %} ·
+    <a href="/admin/sent?offset={{ offset + page_size }}">Older &rarr;</a>{% endif %}
+  </p>
+  {% else %}
+  <p class="muted">No emails sent yet — proposals, contracts, invoices, and
+    gallery delivery emails land here once you click Send.</p>
+  {% endif %}
+</main>
+{% endblock %}

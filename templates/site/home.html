@@ -1,0 +1,67 @@
+{% extends "site/base_site.html" %}
+{% block title %}{{ site_name }} — Food &amp; Beverage Photography{% endblock %}
+{% block site_content %}
+<main class="site-main">
+  <section class="hero">
+    <h1>Photography that makes people hungry.</h1>
+    <p>Menus, dishes, drinks, and the rooms they live in — photographed for
+       restaurants, cafés, bars, and food brands that want their food to look
+       the way it tastes.</p>
+    <a class="btn" href="/book">Book a shoot</a>
+  </section>
+
+  {% if featured %}
+  <section>
+    <h2>Recent work</h2>
+    <div class="grid site-grid">
+      {% for a in featured %}
+      <figure class="tile" data-web="/site/img/{{ a.id }}">
+        <img src="/site/img/{{ a.id }}" loading="lazy"
+             alt="Food and beverage photography by {{ site_name }}"></figure>
+      {% endfor %}
+    </div>
+    <p class="center"><a href="/portfolio">See the full portfolio &rarr;</a></p>
+  </section>
+  {% endif %}
+
+  {% if press %}
+  <section class="press-strip">
+    <h2>As seen in</h2>
+    <ul class="press-wall">
+      {% for p in press %}
+      <li>
+        {% if p.url %}<a href="{{ p.url }}" target="_blank" rel="noopener noreferrer">{{ p.outlet }}</a>
+        {% else %}<span>{{ p.outlet }}</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    <p class="center"><a href="/press">See all press &rarr;</a></p>
+  </section>
+  {% endif %}
+
+  <section class="services">
+    <h2>How we work</h2>
+    <div class="service-cards">
+      <div class="service-card">
+        <h3>Photography</h3>
+        <p>Menus, dishes, drinks, and the rooms they live in. Half-day to
+           extended-day tiers with social crops baked in.</p>
+      </div>
+      <div class="service-card">
+        <h3>Videography</h3>
+        <p>Short-form social motion that earns the scroll, plus hero brand
+           films for launches and campaigns.</p>
+      </div>
+      <div class="service-card">
+        <h3>Brand Partner</h3>
+        <p>A monthly content rhythm — photo, photo + reels, or a two-day
+           schedule with quarterly hero video. Built-in discount vs ad-hoc.</p>
+      </div>
+    </div>
+    <p class="center"><a href="/services">See all tiers &rarr;</a></p>
+  </section>
+
+  {% include "site/_testimonials.html" %}
+</main>
+{% if featured %}{% include "site/_lightbox.html" %}{% endif %}
+{% endblock %}

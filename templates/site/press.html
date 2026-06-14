@@ -1,0 +1,28 @@
+{% extends "site/base_site.html" %}
+{% block title %}Press — {{ site_name }}{% endblock %}
+{% block site_content %}
+<main class="site-main site-narrow">
+  <h1>Press</h1>
+  {% if press %}
+  <p>Where the work has run — restaurants, menus, and food brands featured in
+     print and online.</p>
+  <ul class="press-list">
+    {% for p in press %}
+    <li class="press-item">
+      <span class="press-outlet">{{ p.outlet }}</span>
+      {% if p.title %}
+        {% if p.url %}<a href="{{ p.url }}" target="_blank" rel="noopener noreferrer" class="press-title">{{ p.title }}</a>
+        {% else %}<span class="press-title">{{ p.title }}</span>{% endif %}
+      {% elif p.url %}
+        <a href="{{ p.url }}" target="_blank" rel="noopener noreferrer" class="press-title">Read the piece &rarr;</a>
+      {% endif %}
+      {% if p.publish_date %}<span class="muted press-date">{{ p.publish_date[:4] }}</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>Featured press is on its way — check back soon.</p>
+  {% endif %}
+  <p><a class="btn" href="/contact">Work with me</a></p>
+</main>
+{% endblock %}

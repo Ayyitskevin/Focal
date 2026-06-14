@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Today · Mise admin{% endblock %}
+{% block content %}
+<main class="admin-main">
+  <div class="admin-bar">
+    <h1><a href="/admin">&larr;</a> Today &middot; last 24h</h1>
+    <nav><a href="/admin/studio">Studio</a> &middot;
+         <a href="/admin/sent">Sent log</a></nav>
+  </div>
+
+  {% set everything = inquiries|length + downloads|length + favorites|length + sent|length + portal_visits|length %}
+  {% if not everything %}
+  <section class="today-quiet">
+    <p>&#127811; <strong>Quiet day &mdash; nothing in the last 24 hours.</strong></p>
+    <p class="muted">The sparklines on the <a href="/admin/studio">studio dashboard</a> still show this week's pulse. Check back later, or refresh after lunch.</p>
+  </section>
+  {% else %}
+  <p class="muted today-summary">
+    <strong>{{ inquiries|length }}</strong> inquir{{ "ies" if inquiries|length != 1 else "y" }}
+    &middot; <strong>{{ downloads|length }}</strong> download{{ "s" if downloads|length != 1 else "" }}
+    &middot; <strong>{{ favorites|sum(attribute="n_assets") }}</strong> favorite{{ "s" if (favorites|sum(attribute="n_assets")) != 1 else "" }} across {{ favorites|length }} galler{{ "ies" if favorites|length != 1 else "y" }}
+    &middot; <strong>{{ sent|length }}</strong> sent email{{ "s" if sent|length != 1 else "" }}
+    &middot; <strong>{{ portal_visits|length }}</strong> portal visit{{ "s" if portal_visits|length != 1 else "" }}
+  </p>
+
+  <h2>Inquiries</h2>
+  {% if inquiries %}
+  <table class="list">
+    <tr><th>When</th><th>From</th><th>Kind</th><th>Subject</th></tr>
+    {% for i in inquiries %}
+    <tr>
+      <td class="muted">{{ i.created_at[11:16] }}</td>
+      <td>{{ i.name }} <span class="muted">&lt;{{ i.email }}&gt;</span>{% if i.business %} &middot; {{ i.business }}{% endif %}</td>
+      <td>{% if i.kind == "booking" %}<span title="Booking request">&#128197;</span> {{ i.service or "shoot" }} &middot; {{ i.shoot_date or "?" }}
+          {% else %}<span class="muted">message</span>{% endif %}</td>
+      <td><details><summary>view</summary><pre class="inquiry-msg">{{ i.message }}</pre></details></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">No inquiries in the last 24h.</p>{% endif %}
+
+  <h2>Downloads</h2>
+  {% if downloads %}
+  <table class="list">
+    <tr><th>When</th><th>Gallery</th><th>Visitor</th><th>Asset</th></tr>
+    {% for d in downloads %}
+    <tr>
+      <td class="muted">{{ d.created_at[11:16] }}</td>
+      <td><a href="/admin/galleries/{{ d.gallery_id }}/activity">{{ d.gallery_title }}</a></td>
+      <td>{{ d.visitor_email or "—" }}</td>
+      <td>{{ d.filename or "full ZIP" }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">No downloads in the last 24h.</p>{% endif %}
+
+  <h2>Favorites (by gallery)</h2>
+  {% if favorites %}
+  <table class="list">
+    <tr><th>Latest</th><th>Gallery</th><th>New favorites</th></tr>
+    {% for f in favorites %}
+    <tr>
+      <td class="muted">{{ f.most_recent[11:16] }}</td>
+      <td><a href="/admin/galleries/{{ f.gallery_id }}">{{ f.gallery_title }}</a></td>
+      <td>&hearts; {{ f.n_assets }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">No new favorites in the last 24h.</p>{% endif %}
+
+  <h2>Sent emails</h2>
+  {% if sent %}
+  <table class="list">
+    <tr><th>When</th><th>To</th><th>Kind</th><th>Subject</th><th>Project</th></tr>
+    {% for e in sent %}
+    <tr>
+      <td class="muted">{{ e.created_at[11:16] }}</td>
+      <td>{{ e.to_email }}</td>
+      <td><span class="kind-badge kind-{{ e.doc_kind }}">{{ e.doc_kind }}</span></td>
+      <td>{{ e.subject }}</td>
+      <td>{% if e.project_id %}<a href="/admin/studio/projects/{{ e.project_id }}">{{ e.project_title }}</a>{% else %}—{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">No emails sent in the last 24h.</p>{% endif %}
+
+  <h2>Portal visits</h2>
+  {% if portal_visits %}
+  <table class="list">
+    <tr><th>When</th><th>Client</th><th>Total visits</th></tr>
+    {% for p in portal_visits %}
+    <tr>
+      <td class="muted">{{ p.last_visit[11:16] }}</td>
+      <td>{{ p.company or p.client_name }}</td>
+      <td class="muted">{{ p.visits }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">No portal visits in the last 24h.</p>{% endif %}
+  {% endif %}
+</main>
+{% endblock %}

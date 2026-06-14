@@ -1,0 +1,25 @@
+[Unit]
+Description=Mise — F&B photography delivery (port 8400)
+After=network.target
+
+[Service]
+Type=simple
+User=mise
+Group=mise
+WorkingDirectory=/opt/mise
+EnvironmentFile=/opt/mise/.env
+ExecStart=/opt/mise/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8400
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/mise/data
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

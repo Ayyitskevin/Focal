@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Licenses · Studio · Mise{% endblock %}
+{% block content %}
+<main class="admin-main">
+  <div class="admin-bar">
+    <h1><a href="/admin/studio">&larr;</a> Licenses</h1>
+    <nav><a href="/admin">Galleries</a> · <a href="/admin/studio">Studio</a></nav>
+  </div>
+
+  <p class="muted">Usage-rights records — who licensed what, where it may run, for
+    how long. Create a license from a client's page. Money is the licensing
+    portion of the fee; published vs unpublished is the real-world state, not the
+    grant tier.</p>
+
+  {% if expiring %}
+  <section class="alert-strip">
+    <h2>Expiring soon / lapsed</h2>
+    <ul class="bare">
+      {% for l in expiring %}
+      <li>
+        <a href="/admin/studio/licenses/{{ l.id }}">{{ l.title }}</a>
+        — {{ l.holder_company or l.holder_name }} ·
+        {% if l.days_left < 0 %}<span class="danger">expired {{ -l.days_left }}d ago</span>
+        {% elif l.days_left == 0 %}<span class="danger">expires today</span>
+        {% else %}<span class="warn">{{ l.days_left }}d left</span>{% endif %}
+        ({{ l.ends_on }})
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  <h2>All licenses</h2>
+  {% if not licenses %}<p class="muted">No licenses yet.</p>{% endif %}
+  {% if licenses %}
+  <table class="data">
+    <thead><tr><th>Title</th><th>Holder</th><th>Tier</th><th>Term</th>
+      <th>Fee</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for l in licenses %}
+    <tr>
+      <td><a href="/admin/studio/licenses/{{ l.id }}">{{ l.title }}</a>
+        {% if l.exclusivity == 'exclusive' %}<span class="warn">excl</span>{% endif %}
+        {% if not l.published %}<span class="muted" title="unpublished">·unpub</span>{% endif %}
+      </td>
+      <td>{{ l.holder_company or l.holder_name }}</td>
+      <td>{{ l.usage_tier }}</td>
+      <td>{% if l.perpetual %}perpetual
+          {% elif l.ends_on %}{{ l.starts_on or '?' }} → {{ l.ends_on }}
+          {% else %}—{% endif %}</td>
+      <td>{% if l.fee_cents %}${{ "%.2f" % (l.fee_cents / 100) }}{% else %}—{% endif %}</td>
+      <td><span class="status-{{ l.status }}">{{ l.status }}</span></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</main>
+{% endblock %}

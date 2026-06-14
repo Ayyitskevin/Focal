@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Activity · {{ g.title }}{% endblock %}
+{% block content %}
+<main class="admin-main">
+  <div class="admin-bar">
+    <h1><a href="/admin/galleries/{{ g.id }}">&larr;</a> {{ g.title }} — activity</h1>
+    <a href="/admin/galleries/{{ g.id }}/favorites.txt">Export favorites</a>
+  </div>
+
+  <h2>Visitors ({{ visitors|length }})</h2>
+  <table class="list">
+    <tr><th>Email</th><th>First seen</th><th>Last seen</th><th>Downloads</th><th>Favorites</th></tr>
+    {% for v in visitors %}
+    <tr>
+      <td>{{ v.email or "—" }}</td>
+      <td>{{ v.first_seen }}</td>
+      <td>{{ v.last_seen or "—" }}</td>
+      <td>{{ v.n_dl }}</td>
+      <td>{{ v.n_fav }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  <h2>Favorites</h2>
+  <table class="list">
+    <tr><th>File</th><th>Hearts</th></tr>
+    {% for f in favorites %}
+    <tr><td>{{ f.filename }}</td><td>{{ f.n }}</td></tr>
+    {% endfor %}
+  </table>
+
+  <h2>Recent downloads</h2>
+  <table class="list">
+    <tr><th>When</th><th>What</th><th>Who</th></tr>
+    {% for d in downloads %}
+    <tr>
+      <td>{{ d.created_at }}</td>
+      <td>{{ d.filename or "Full gallery ZIP" }}</td>
+      <td>{{ d.email or "—" }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</main>
+{% endblock %}

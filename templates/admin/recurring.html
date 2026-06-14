@@ -1,0 +1,279 @@
+{% extends "base.html" %}
+{% block title %}{{ d.title }} · Recurring · Mise{% endblock %}
+{% block content %}
+<main class="admin-main">
+  <div class="admin-bar">
+    <h1>Recurring plan {% if d.active %}<span class="status-active">active</span>
+        {% else %}<span class="muted">paused</span>{% endif %}</h1>
+    <nav><a href="/admin/studio/projects/{{ p.id }}">{{ p.title }}</a> ·
+         <a href="/admin/studio">Studio</a></nav>
+  </div>
+
+  <p class="muted">Monthly retainer for <strong>{{ p.client_name }}</strong>. This
+    plan only ever creates a <strong>draft</strong> invoice — you still click Send,
+    and Stripe still collects. Nothing here charges or emails automatically.</p>
+
+  <form method="post" action="/admin/studio/recurring/{{ d.id }}" class="stack-form" style="max-width:680px">
+    <label>Title <input type="text" name="title" value="{{ d.title }}" required></label>
+    <table class="list">
+      <tr><th>Line item</th><th>Qty</th><th>Unit $</th></tr>
+      {% for row in rows %}
+      <tr>
+        <td><input type="text" name="item_label_{{ loop.index0 }}" value="{{ row.label or '' }}"></td>
+        <td><input type="number" name="item_qty_{{ loop.index0 }}" min="1"
+                   value="{{ row.qty or 1 }}" style="width:4.5em"></td>
+        <td><input type="number" name="item_price_{{ loop.index0 }}" min="0" step="0.01"
+                   value="{{ '%.2f' % (row.unit_cents / 100) if row.unit_cents is defined else '' }}"
+                   style="width:7em"></td>
+      </tr>
+      {% endfor %}
+    </table>
+
+    <h3 style="margin-top:1.2em">Monthly quota</h3>
+    <p class="muted">The deliverable commitment for this retainer — what you owe
+      each period. Advisory only; it never affects the invoice total above.</p>
+    <table class="list">
+      <tr><th>Deliverable</th><th>Target / month</th></tr>
+      {% for q in quota_rows %}
+      <tr>
+        <td><input type="text" name="quota_label_{{ loop.index0 }}"
+                   value="{{ q.label or '' }}" placeholder="e.g. Hero images"></td>
+        <td><input type="number" name="quota_target_{{ loop.index0 }}" min="0"
+                   value="{{ q.target if q.target is defined else '' }}" style="width:5em"></td>
+      </tr>
+      {% endfor %}
+    </table>
+
+    <div class="form-grid">
+      <label>Bill on day <input type="number" name="anchor_day" min="1" max="28"
+             value="{{ d.anchor_day }}" style="width:5em"></label>
+      <label class="row"><input type="checkbox" name="active" value="1"
+             {% if d.active %}checked{% endif %}> Active</label>
+    </div>
+    <p class="muted">Cadence: monthly. Day 1–28 (kept clear of short months). On
+      that day each month Mise auto-generates this period's <strong>draft</strong>
+      — you still review and Send it. You can also generate on demand below.</p>
+    <p><strong>Total: ${{ "%.2f" % (d.total_cents / 100) }}</strong>
+       <span class="muted">(recalculated on save)</span></p>
+    <label>Notes <textarea name="notes" rows="2">{{ d.notes or '' }}</textarea></label>
+    <button type="submit">Save plan</button>
+  </form>
+
+  <h2>Deliverables — {{ period }}</h2>
+  {% if progress or extra %}
+  <table class="list">
+    <tr><th>Deliverable</th><th>Delivered</th><th>Target</th><th>Status</th></tr>
+    {% for r in progress %}
+    <tr>
+      <td>{{ r.label }}</td>
+      <td>{{ r.done }}</td>
+      <td>{{ r.target }}</td>
+      <td>{% if r.done >= r.target %}<span class="status-active">met</span>
+          {% else %}<span class="warn">{{ r.target - r.done }} to go</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    {% for r in extra %}
+    <tr>
+      <td>{{ r.label }} <span class="muted">(extra)</span></td>
+      <td>{{ r.done }}</td>
+      <td class="muted">—</td>
+      <td><span class="muted">un-targeted</span></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">No quota set yet — add deliverable targets above to track progress.</p>
+  {% endif %}
+
+  {% if credit.label %}
+  <p class="warn">Pre-filled from a calendar slot marked delivered — review the qty and
+    click Log delivery. Nothing is recorded until you submit.</p>
+  {% endif %}
+  <form id="log-delivery" method="post" action="/admin/studio/recurring/{{ d.id }}/deliveries"
+        class="inline-form">
+    <input type="text" name="label" list="quota-labels" placeholder="Deliverable"
+           value="{{ credit.label }}"{% if credit.label %} autofocus{% endif %} required>
+    <datalist id="quota-labels">
+      {% for l in quota_labels %}<option value="{{ l }}">{% endfor %}
+    </datalist>
+    <input type="number" name="qty" min="1" value="{{ credit.qty or '1' }}"
+           style="width:4.5em" required>
+    <input type="text" name="period" value="{{ credit.period or period }}"
+           pattern="\d{4}-\d{2}" style="width:7em" title="YYYY-MM">
+    <input type="text" name="note" placeholder="note (optional)">
+    <button type="submit">Log delivery</button>
+  </form>
+
+  {% if deliveries %}
+  <table class="list">
+    <tr><th>Logged</th><th>Deliverable</th><th>Qty</th><th>Note</th><th></th></tr>
+    {% for e in deliveries %}
+    <tr>
+      <td class="muted">{{ e.created_at[:10] }}</td>
+      <td>{{ e.label }}</td>
+      <td>{{ e.qty }}</td>
+      <td class="muted">{{ e.note or '—' }}</td>
+      <td>
+        <form method="post" action="/admin/studio/recurring/{{ d.id }}/deliveries/{{ e.id }}/delete"
+              class="inline" onsubmit="return confirm('Remove this delivery log entry?')">
+          <button class="link danger">delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">Nothing logged for {{ period }} yet.</p>{% endif %}
+
+  <h2 id="calendar">Content calendar — {{ period }}</h2>
+  <p class="muted">Plan dated content for this retainer. Planning only — marking a slot
+    delivered doesn't change the delivery log above.</p>
+  <form method="post" action="/admin/studio/recurring/{{ d.id }}/calendar" class="inline-form">
+    <input type="date" name="slot_date" required>
+    <input type="text" name="label" list="quota-labels" placeholder="Deliverable" required>
+    <input type="text" name="title" placeholder="title (optional)">
+    <input type="text" name="note" placeholder="note (optional)">
+    <button type="submit">Add slot</button>
+  </form>
+
+  {% if calendar %}
+  <table class="list">
+    <tr><th>Date</th><th>Deliverable</th><th>Title</th><th>Status</th><th>Note</th><th></th></tr>
+    {% for s in calendar %}
+    <tr>
+      <td>{{ s.slot_date }}</td>
+      <td>{{ s.label }}</td>
+      <td class="muted">{{ s.title or '—' }}</td>
+      <td>
+        <form method="post" action="/admin/studio/recurring/{{ d.id }}/calendar/{{ s.id }}/status"
+              class="inline">
+          <select name="status" onchange="this.form.submit()">
+            {% for st in calendar_statuses %}
+            <option value="{{ st }}"{% if st == s.status %} selected{% endif %}>{{ st }}</option>
+            {% endfor %}
+          </select>
+        </form>
+      </td>
+      <td class="muted">{{ s.note or '—' }}</td>
+      <td>
+        <form method="post" action="/admin/studio/recurring/{{ d.id }}/calendar/{{ s.id }}/delete"
+              class="inline" onsubmit="return confirm('Remove this calendar slot?')">
+          <button class="link danger">delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">No content scheduled for {{ period }} yet.</p>{% endif %}
+
+  <h2 id="captions">Captions — {{ period }}</h2>
+  <p class="muted">Write the caption text for this retainer's deliverables. Manual for
+    now. Marking a caption <strong>approved</strong> pre-fills the delivery log above
+    (one click to credit) — it never auto-credits the quota count on its own.</p>
+  <form method="post" action="/admin/studio/recurring/{{ d.id }}/captions" class="stack-form"
+        style="max-width:680px">
+    <div class="form-grid">
+      <label>Deliverable <input type="text" name="label" list="quota-labels"
+             placeholder="Deliverable" required></label>
+      <label>Period <input type="text" name="period" value="{{ period }}"
+             pattern="\d{4}-\d{2}" style="width:7em" title="YYYY-MM"></label>
+      <label>Slot <select name="slot_id">
+          <option value="">— no slot —</option>
+          {% for s in calendar %}
+          <option value="{{ s.id }}">{{ s.slot_date }} · {{ s.label }}</option>
+          {% endfor %}
+        </select></label>
+    </div>
+    <label>Caption <textarea name="body" rows="3" required
+           placeholder="The caption text…"></textarea></label>
+    <label>Note <input type="text" name="note" placeholder="note (optional)"></label>
+    <button type="submit">Add caption</button>
+  </form>
+
+  {% if caption_error %}<p class="warn">Draft with AI: {{ caption_error }} — nothing was changed.</p>{% endif %}
+  {% if captions %}
+  {% for c in captions %}
+  {% set human_body = c.body and not (c.ai_drafted and c.body == c.ai_draft_original) %}
+  <div class="caption-card">
+    <form method="post" action="/admin/studio/recurring/{{ d.id }}/captions/{{ c.id }}"
+          class="stack-form" style="max-width:680px">
+      <div class="form-grid">
+        <label>Deliverable <input type="text" name="label" list="quota-labels"
+               value="{{ c.label }}" required></label>
+        <span class="muted">{{ c.period }}</span>
+      </div>
+      <label><textarea name="body" rows="3" required>{{ c.body }}</textarea></label>
+      <label>Note <input type="text" name="note" value="{{ c.note or '' }}"
+             placeholder="note (optional)"></label>
+      <button type="submit">Save caption</button>
+    </form>
+    {% if c.ai_drafted %}
+    <p class="muted">AI draft · {{ c.ai_model }} · {{ c.ai_drafted_at[:16] }}{% if c.body != c.ai_draft_original %} · human-edited{% endif %}</p>
+    {% endif %}
+    <div class="inline-form">
+      <form method="post" action="/admin/studio/recurring/{{ d.id }}/captions/{{ c.id }}/status"
+            class="inline">
+        <select name="status" onchange="this.form.submit()">
+          {% for st in caption_statuses %}
+          <option value="{{ st }}"{% if st == c.status %} selected{% endif %}>{{ st }}</option>
+          {% endfor %}
+        </select>
+      </form>
+      {% if ai_caption_enabled %}
+      {% if human_body %}
+      <form method="post" action="/admin/studio/recurring/{{ d.id }}/captions/{{ c.id }}/draft"
+            class="inline" onsubmit="return confirm('Replace your edited caption with a fresh AI draft? Your current text is overwritten (the AI keeps no copy of it).')">
+        <input type="hidden" name="replace" value="1">
+        <button type="submit">Replace with AI draft</button>
+      </form>
+      {% else %}
+      <form method="post" action="/admin/studio/recurring/{{ d.id }}/captions/{{ c.id }}/draft"
+            class="inline">
+        <button type="submit">{% if c.ai_drafted %}Re-draft with AI{% else %}Draft with AI{% endif %}</button>
+      </form>
+      {% endif %}
+      {% endif %}
+      <form method="post" action="/admin/studio/recurring/{{ d.id }}/captions/{{ c.id }}/delete"
+            class="inline" onsubmit="return confirm('Remove this caption?')">
+        <button class="link danger">delete</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+  {% else %}<p class="muted">No captions written for {{ period }} yet.</p>{% endif %}
+
+  <h2>Generate</h2>
+  {% if d.last_run_period == period %}
+  <p class="muted">A draft for <strong>{{ period }}</strong> has already been
+    generated — see below. Generating again this period is blocked to avoid
+    duplicates.</p>
+  {% else %}
+  <form method="post" action="/admin/studio/recurring/{{ d.id }}/generate"
+        onsubmit="return confirm('Create a draft invoice for {{ period }}? It will not be sent — you review and Send it yourself.')">
+    <button type="submit"{% if not d.active or d.total_cents <= 0 %} disabled{% endif %}>
+      Generate {{ period }} draft</button>
+    {% if not d.active %}<span class="muted">— activate the plan first</span>
+    {% elif d.total_cents <= 0 %}<span class="muted">— set a total above zero first</span>{% endif %}
+  </form>
+  {% endif %}
+
+  <h2>Generated invoices</h2>
+  {% if invoices %}
+  <table class="list">
+    <tr><th>Invoice</th><th>Total</th><th>Status</th><th>Created</th></tr>
+    {% for inv in invoices %}
+    <tr>
+      <td><a href="/admin/studio/invoices/{{ inv.id }}">{{ inv.title }}</a></td>
+      <td>${{ "%.2f" % (inv.total_cents / 100) }}</td>
+      <td>{{ inv.status }}</td>
+      <td class="muted">{{ inv.created_at[:10] }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">No invoices generated from this plan yet.</p>{% endif %}
+
+  <form method="post" action="/admin/studio/recurring/{{ d.id }}/delete"
+        onsubmit="return confirm('Soft-delete this recurring plan? Generated invoices are kept.')">
+    <button type="submit" class="link danger">Delete plan</button>
+  </form>
+</main>
+{% endblock %}

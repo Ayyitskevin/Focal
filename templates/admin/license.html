@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% from "admin/_audit.html" import diff_chips %}
+{% block title %}{{ d.title }} · License · Mise{% endblock %}
+{% block content %}
+<main class="admin-main">
+  <div class="admin-bar">
+    <h1><a href="/admin/studio/clients/{{ d.holder_client_id }}">&larr;</a> {{ d.title }}</h1>
+    <nav>
+      <span class="status-{{ d.status }}">{{ d.status }}</span> ·
+      <a href="/admin/studio/licenses">All licenses</a>
+    </nav>
+  </div>
+  <p class="muted">Holder: <strong>{{ d.holder_company or d.holder_name }}</strong>
+    · created {{ d.created_at[:10] }} · updated {{ d.updated_at[:10] }}</p>
+
+  <form method="post" action="/admin/studio/licenses/{{ d.id }}/status" class="inline-form">
+    <label>Status
+      <select name="status">
+        {% for s in statuses %}
+        <option value="{{ s }}" {% if d.status == s %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit">Update status</button>
+  </form>
+
+  <form method="post" action="/admin/studio/licenses/{{ d.id }}" class="stack-form">
+    <label>Title <input type="text" name="title" value="{{ d.title }}" required></label>
+    <label>Scope — which dishes / assets / specifics
+      <textarea name="scope" rows="2"
+                placeholder="Hero dishes from the Spring menu shoot; interiors excluded.">{{ d.scope }}</textarea></label>
+
+    <div class="form-grid">
+      <label>Usage tier
+        <select name="usage_tier">
+          {% for t in usage_tiers %}
+          <option value="{{ t }}" {% if d.usage_tier == t %}selected{% endif %}>{{ t }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Exclusivity
+        <select name="exclusivity">
+          {% for e in exclusivity_opts %}
+          <option value="{{ e }}" {% if d.exclusivity == e %}selected{% endif %}>{{ e }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Licensing fee ($)
+        <input type="number" step="0.01" name="fee"
+               value="{{ '%.2f' % (d.fee_cents / 100) }}"></label>
+    </div>
+    <p class="muted">Suggested ({{ suggested.market }} rate card):
+      <strong>${{ '%.2f' % (suggested.total_cents / 100) }}</strong> — base
+      ${{ '%.0f' % (suggested.base_cents / 100) }}
+      &times; {{ '%.2f' % suggested.territory_mult }} territory
+      &times; {{ '%.2f' % suggested.channel_mult }} channels
+      &times; {{ '%.2f' % suggested.term_mult }} term
+      &times; {{ '%.2f' % suggested.excl_mult }} exclusivity.
+      Suggestion only — the fee above is what you charge.</p>
+
+    <fieldset>
+      <legend>Territory</legend>
+      {% for t in territories_vocab %}
+      <label class="row"><input type="checkbox" name="territory" value="{{ t }}"
+             {% if t in sel_territory %}checked{% endif %}> {{ t }}</label>
+      {% endfor %}
+    </fieldset>
+
+    <fieldset>
+      <legend>Channels</legend>
+      {% for c in channels_vocab %}
+      <label class="row"><input type="checkbox" name="channels" value="{{ c }}"
+             {% if c in sel_channels %}checked{% endif %}> {{ c }}</label>
+      {% endfor %}
+    </fieldset>
+
+    <div class="form-grid">
+      <label>Starts on <input type="date" name="starts_on" value="{{ d.starts_on or '' }}"></label>
+      <label>Ends on <input type="date" name="ends_on" value="{{ d.ends_on or '' }}"></label>
+    </div>
+    {% if cue %}
+    <p class="muted">License period:
+      {% if cue.state == 'lapsed' %}<span class="danger">lapsed {{ cue.days }}d ago</span>
+      {% elif cue.days == 0 %}<span class="danger">expires today</span>
+      {% else %}<span class="warn">expiring — {{ cue.days }}d left</span>{% endif %}
+    </p>
+    {% endif %}
+    <label class="row"><input type="checkbox" name="perpetual" value="1"
+           {% if d.perpetual %}checked{% endif %}> Perpetual (no end date)</label>
+    <label class="row"><input type="checkbox" name="published" value="1"
+           {% if d.published %}checked{% endif %}> Published (real-world state)</label>
+    {% if press and not d.published %}
+    <p class="muted"><span class="warn">{{ press|length }} published press hit{{ '' if press|length == 1 else 's' }}
+      match this license</span> — review the evidence below and confirm published.</p>
+    {% endif %}
+
+    <details>
+      <summary>Coverage &amp; links</summary>
+      <label>Coverage scope
+        <select name="coverage_scope">
+          {% for cs in coverage_scopes %}
+          <option value="{{ cs }}" {% if d.coverage_scope == cs %}selected{% endif %}>{{ cs }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <p class="muted">Only <code>specific</code> uses the list below.
+        <code>holder_and_descendants</code> walks the client group hierarchy automatically.</p>
+      <p class="muted">Effective coverage:
+        {{ coverage|length }} client{{ '' if coverage|length == 1 else 's' }} reached.</p>
+      <ul class="coverage-list">
+        {% for c in coverage %}
+        <li>{{ c.name }}{% if c.company %} · {{ c.company }}{% endif %}
+          {% if c.id == d.holder_client_id %}<span class="muted">(holder)</span>{% endif %}</li>
+        {% endfor %}
+      </ul>
+      <fieldset>
+        <legend>Also covers (specific clients)</legend>
+        {% for c in all_clients %}{% if c.id != d.holder_client_id %}
+        <label class="row"><input type="checkbox" name="cover_client_ids" value="{{ c.id }}"
+               {% if c.id in covered_ids %}checked{% endif %}>
+          {{ c.name }}{% if c.company %} · {{ c.company }}{% endif %}</label>
+        {% endif %}{% endfor %}
+      </fieldset>
+      <label>Linked project
+        <select name="project_id">
+          <option value="">—</option>
+          {% for p in projects %}
+          <option value="{{ p.id }}" {% if d.project_id == p.id %}selected{% endif %}>{{ p.title }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Linked gallery
+        <select name="gallery_id">
+          <option value="">—</option>
+          {% for g in galleries %}
+          <option value="{{ g.id }}" {% if d.gallery_id == g.id %}selected{% endif %}>{{ g.title }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </details>
+
+    <label>Notes <textarea name="notes" rows="2">{{ d.notes or '' }}</textarea></label>
+    <button type="submit">Save license</button>
+  </form>
+
+  {% if press %}
+  <h2>Press evidence <span class="muted">({{ press|length }})</span></h2>
+  <p class="muted">Published press matching this license's gallery, project, or covered clients.
+    Read-only — confirming <strong>Published</strong> above stays your call.</p>
+  <ul class="bare press-evidence">
+    {% for p in press %}
+    <li>
+      <span class="ok">●</span>
+      <strong>{{ p.outlet }}</strong>{% if p.title %} · {{ p.title }}{% endif %}
+      <span class="muted"> · {{ p.publish_date }}</span>
+      {% if p.channel %}
+        {% if p.channel_overlap %}<span class="ok"> · {{ p.channel }} ✓ granted</span>
+        {% else %}<span class="warn"> · {{ p.channel }} — outside granted channels</span>{% endif %}
+      {% endif %}
+      {% if p.url %} · <a href="{{ p.url }}" target="_blank" rel="noopener">link</a>{% endif %}
+      {% if p.credit %}<span class="muted"> · {{ p.credit }}</span>{% endif %}
+      {% if p.note %}<div class="muted">{{ p.note }}</div>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  <form method="post" action="/admin/studio/licenses/{{ d.id }}/delete"
+        onsubmit="return confirm('Soft-delete this license? It will be hidden but kept in the audit log.')">
+    <button type="submit" class="link danger">Delete license</button>
+  </form>
+
+  <h2>Audit trail</h2>
+  {% if not trail %}<p class="muted">No audit entries.</p>{% endif %}
+  {% if trail %}
+  <ul class="bare audit-trail">
+    {% for t in trail %}
+    <li>
+      <span class="muted">{{ t.created_at[:16] }}</span> ·
+      <strong>{{ t.action }}</strong> · {{ t.actor }}
+      {% if t.diff %}{{ diff_chips(t.diff) }}{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</main>
+{% endblock %}

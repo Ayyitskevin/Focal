@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}{{ d.title }} · {{ site_name }}{% endblock %}
+{% block content %}
+<main class="doc-page">
+  <header class="doc-head">
+    <p class="muted">{{ site_name }}</p>
+    <h1>{{ d.title }}</h1>
+    <p class="muted">Billed to {{ d.client_name }}{% if d.company %} · {{ d.company }}{% endif %}
+       {% if d.due_date %}· due {{ d.due_date }}{% endif %}</p>
+  </header>
+
+  <table class="list doc-items">
+    <tr><th>Item</th><th>Qty</th><th>Unit</th><th>Amount</th></tr>
+    {% for i in items %}
+    <tr>
+      <td>{{ i.label }}</td>
+      <td>{{ i.qty }}</td>
+      <td>{% if i.unit_cents %}${{ "%.2f" % (i.unit_cents / 100) }}{% else %}included{% endif %}</td>
+      <td>{% if i.unit_cents %}${{ "%.2f" % (i.qty * i.unit_cents / 100) }}{% else %}—{% endif %}</td>
+    </tr>
+    {% endfor %}
+    <tr><td colspan="3"><strong>Total</strong></td>
+        <td><strong>${{ "%.2f" % (d.total_cents / 100) }}</strong></td></tr>
+    {% if d.deposit_cents %}
+    <tr><td colspan="3">Deposit to reserve your date</td>
+        <td>${{ "%.2f" % (d.deposit_cents / 100) }}</td></tr>
+    {% endif %}
+  </table>
+
+  {% if d.status == 'paid' %}
+  <p class="doc-accepted">✓ Paid in full {{ d.paid_at }} — thank you!</p>
+  {% elif amount_due %}
+  {% if d.status == 'deposit_paid' %}
+  <p class="doc-accepted">✓ Deposit received — your date is reserved.</p>
+  {% endif %}
+  {% if payments_on %}
+  <div class="doc-actions">
+    <form method="post" action="/i/{{ d.slug }}/pay">
+      <button type="submit">Pay {{ "deposit" if pay_kind == "deposit"
+        else ("balance" if pay_kind == "balance" else "now") }} —
+        ${{ "%.2f" % (amount_due / 100) }}</button>
+    </form>
+    <span class="muted">Secure checkout by Stripe · card or bank transfer</span>
+  </div>
+  {% else %}
+  <p class="muted">To pay, reply to the email thread — online payment is being set up.</p>
+  {% endif %}
+  {% endif %}
+</main>
+{% endblock %}

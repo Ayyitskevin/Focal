@@ -1,0 +1,15 @@
+<h2>Email to client</h2>
+<form method="post" action="{{ email_action }}" class="stack-form" style="max-width:680px"
+      onsubmit="return confirm('Send this email to ' + this.to.value + '?')">
+  <label>To <input type="email" name="to" value="{{ p.client_email or '' }}" required></label>
+  <label>Subject <input type="text" name="subject" value="{{ email_subject }}" required></label>
+  <textarea name="message" rows="9" required>Hi {{ p.client_name.split(' ')[0] }},
+
+{{ email_intro }}
+
+{{ email_link }}
+
+Thank you!
+{{ site_name }}</textarea>
+  <button type="submit">Send email</button>
+</form>

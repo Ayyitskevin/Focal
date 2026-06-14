@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}{{ d.title }} · Studio · Mise{% endblock %}
+{% import "admin/_copy_link.html" as cp %}
+{% block content %}
+<main class="admin-main">
+  <div class="admin-bar">
+    <h1>Contract · {{ d.status }}</h1>
+    <nav><a href="/admin/studio/projects/{{ p.id }}">{{ p.title }}</a> ·
+         <a href="/admin/studio">Studio</a></nav>
+  </div>
+
+  <p>Client link: <code class="slug">{{ base_url }}/c/{{ d.slug }}</code>
+  {{ cp.copy_link(base_url ~ "/c/" ~ d.slug) }}
+  {% if d.sent_at %}<span class="muted">· sent {{ d.sent_at }}</span>{% endif %}
+  {% if d.viewed_at %}<span class="muted">· viewed {{ d.viewed_at }}</span>{% endif %}
+  {% if d.signed_at %}<span class="muted">· signed {{ d.signed_at }}</span>{% endif %}</p>
+
+  {% if d.status == 'draft' %}
+  <form method="post" action="/admin/studio/contracts/{{ d.id }}" class="stack-form" style="max-width:680px">
+    <label>Title <input type="text" name="title" value="{{ d.title }}" required></label>
+    <textarea name="body" rows="28" required>{{ d.body }}</textarea>
+    <button type="submit">Save draft</button>
+  </form>
+  <form method="post" action="/admin/studio/contracts/{{ d.id }}/send"
+        onsubmit="return confirm('Lock this contract and mark it sent? The body hash is recorded and editing is disabled.')">
+    <button type="submit">Mark sent (locks body)</button>
+  </form>
+  {% else %}
+  {% if d.status == 'signed' %}
+  <p class="doc-accepted">✓ Signed by {{ d.signer_name }} on {{ d.signed_at }} (IP {{ d.signer_ip }})</p>
+  {% else %}
+  <p class="muted">Locked — awaiting client signature.</p>
+  {% endif %}
+  <p class="muted">SHA-256: <code>{{ d.body_sha256 }}</code></p>
+  <pre class="doc-body">{{ d.body }}</pre>
+
+  {% set email_action = "/admin/studio/contracts/" ~ d.id ~ "/email" %}
+  {% set email_subject = "Agreement to sign — " ~ p.title %}
+  {% set email_intro = "Your agreement is ready to review and sign online:" %}
+  {% set email_link = base_url ~ "/c/" ~ d.slug %}
+  {% include "admin/_email_form.html" %}
+  {% endif %}
+</main>
+{% endblock %}

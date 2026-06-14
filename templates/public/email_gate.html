@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Download · {{ g.title }}{% endblock %}
+{% block content %}
+<main class="center-card">
+  <h1>Almost there</h1>
+  <p class="muted">Enter your email to unlock downloads for this gallery.</p>
+  <form method="post" action="/g/{{ g.slug }}/email" class="pin-form">
+    <input type="email" name="email" placeholder="you@restaurant.com" autofocus required>
+    {% if asset_id is not none %}<input type="hidden" name="asset_id" value="{{ asset_id }}">{% endif %}
+    {% if fav %}<input type="hidden" name="fav" value="1">{% endif %}
+    {% if section is not none %}<input type="hidden" name="section" value="{{ section }}">{% endif %}
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    <button type="submit">Unlock downloads</button>
+  </form>
+  <p class="muted gate-help">
+    <a href="/contact?prefill=gallery_question&amp;gallery={{ g.title|urlencode }}">Have a question about this delivery? Get in touch &rarr;</a>
+  </p>
+</main>
+{% endblock %}

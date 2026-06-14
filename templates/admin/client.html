@@ -1,0 +1,274 @@
+{% extends "base.html" %}
+{% block title %}{{ c.name }} · Studio · Mise{% endblock %}
+{% import "admin/_copy_link.html" as cp %}
+{% block content %}
+<main class="admin-main">
+  <div class="admin-bar">
+    <h1>{{ c.name }}{% if c.company %} <span class="muted">· {{ c.company }}</span>{% endif %}</h1>
+    <nav><a href="/admin/studio">Studio</a></nav>
+  </div>
+
+  {% if money.n_invoices or money.n_delivered %}
+  <p class="muted lifetime-rollup">
+    <strong>${{ "%.2f" % (money.paid_cents / 100) }}</strong> paid lifetime
+    {% if money.invoiced_cents %}<span class="muted">of ${{ "%.2f" % (money.invoiced_cents / 100) }} invoiced
+      across {{ money.n_invoices }} invoice{{ "s" if money.n_invoices != 1 }}</span>{% endif %}
+    {% if money.outstanding_cents %}· <span class="warn">${{ "%.2f" % (money.outstanding_cents / 100) }} outstanding</span>{% endif %}
+    · <strong>{{ money.n_delivered }}</strong> shoot{{ "s" if money.n_delivered != 1 }} delivered
+  </p>
+  {% endif %}
+
+  <form method="post" action="/admin/studio/clients/{{ c.id }}" class="stack-form">
+    <label>Name <input type="text" name="name" value="{{ c.name }}" required></label>
+    <label>Company <input type="text" name="company" value="{{ c.company or '' }}"></label>
+    <label>Email <input type="email" name="email" value="{{ c.email or '' }}"></label>
+    <label>Phone <input type="text" name="phone" value="{{ c.phone or '' }}"></label>
+    <label>Notes <textarea name="notes" rows="3">{{ c.notes or '' }}</textarea></label>
+    <label>Usage rights <textarea name="usage_rights" rows="3"
+           placeholder="e.g. Social + web use, 12 months, no paid ads">{{ c.usage_rights or '' }}</textarea></label>
+    <label>Market
+      <select name="market">
+        {% for m in markets %}
+        <option value="{{ m }}"{% if m == c.market %} selected{% endif %}>{{ m|capitalize }}</option>
+        {% endfor %}
+      </select>
+      <span class="muted">Home market — sets the license-fee suggestion's base rate card.</span>
+    </label>
+    <button type="submit">Save</button>
+  </form>
+
+  <h2>Parent client</h2>
+  <p class="muted">Place this client under a hospitality group/region so it
+    inherits the parent's brand kit when it has none of its own.
+    {% if parent %}Currently under <a href="/admin/studio/clients/{{ parent.id }}">{{ parent.name }}</a>.{% endif %}</p>
+  <form method="post" action="/admin/studio/clients/{{ c.id }}/parent" class="inline-form">
+    <select name="parent_id">
+      <option value="">— none (top-level) —</option>
+      {% for p in parent_choices %}
+      <option value="{{ p.id }}"{% if parent and p.id == parent.id %} selected{% endif %}>{{ p.name }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit">Save parent</button>
+  </form>
+
+  {% if children %}
+  <h2>Venues under this group</h2>
+  <p class="muted">Everything beneath this client in the hierarchy (regions and
+    venues). Set a client's parent from its own page to change the tree.</p>
+  <table class="list">
+    <tr><th>Name</th><th>Company</th></tr>
+    {% for ch in children %}
+    <tr>
+      <td><a href="/admin/studio/clients/{{ ch.id }}">{{ ch.name }}</a></td>
+      <td>{{ ch.company or "—" }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  <h2>Portal</h2>
+  {% if portal %}
+    <p>Portal link: <code class="slug">{{ base_url }}/portal/{{ portal.slug }}</code>
+       &nbsp;PIN: <code>{{ portal.pin }}</code>
+       {{ cp.copy_link(base_url ~ "/portal/" ~ portal.slug, portal.pin) }}
+       <span class="muted">&nbsp;· {% if portal.visits %}{{ portal.visits }} visit{{ '' if portal.visits == 1 else 's' }}, last {{ portal.last_visit }} UTC{% else %}never visited{% endif %}</span></p>
+    <p class="muted portal-audit">
+      <strong>{{ totals.galleries_published }}</strong> published galler{{ "ies" if totals.galleries_published != 1 else "y" }}
+      · <strong>{{ totals.assets }}</strong> ready asset{{ "s" if totals.assets != 1 }}
+      · <strong>&hearts; {{ totals.favs }}</strong> favorite{{ "s" if totals.favs != 1 }}
+      · {% if totals.brand_bytes >= 1048576 %}{{ "%.1f" | format(totals.brand_bytes / 1048576) }} MB{% else %}{{ (totals.brand_bytes / 1024) | round(0) | int }} KB{% endif %} brand
+      · {% if totals.crop_bytes >= 1048576 %}{{ "%.1f" | format(totals.crop_bytes / 1048576) }} MB{% else %}{{ (totals.crop_bytes / 1024) | round(0) | int }} KB{% endif %} crops on disk
+    </p>
+    <form method="post" action="/admin/studio/clients/{{ c.id }}/portal/publish" class="inline-form">
+      <label class="row"><input type="checkbox" name="published" value="true"
+             {% if portal.published %}checked{% endif %}> Published</label>
+      <button type="submit">Save</button>
+    </form>
+    <h3>Linked galleries</h3>
+    {% if galleries %}
+    <table class="list">
+      <tr><th>Gallery</th><th>Published</th><th>Assets</th><th>Favorites</th></tr>
+      {% for g in galleries %}
+      <tr>
+        <td><a href="/admin/galleries/{{ g.id }}">{{ g.title }}</a></td>
+        <td>{{ 'yes' if g.published else 'no' }}</td>
+        <td class="muted">{{ g.n_assets }}</td>
+        <td class="muted">{% if g.n_favs %}&hearts; {{ g.n_favs }}{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="muted">No galleries linked — set this client on a gallery's settings page.</p>
+    {% endif %}
+  {% else %}
+    <form method="post" action="/admin/studio/clients/{{ c.id }}/portal" class="inline-form">
+      <button type="submit">Create portal</button>
+    </form>
+  {% endif %}
+
+  <h2>Brand assets</h2>
+  <form method="post" action="/admin/studio/clients/{{ c.id }}/brand"
+        enctype="multipart/form-data" class="inline-form">
+    <input type="file" name="files" multiple
+           accept=".pdf,.png,.jpg,.jpeg,.webp,.svg,.eps,.ai,.zip">
+    <button type="submit">Upload</button>
+  </form>
+  {% if brand %}
+  <table class="list">
+    <tr><th>File</th><th>Size</th><th>Added</th><th></th></tr>
+    {% for b in brand %}
+    <tr>
+      <td><a href="/admin/studio/clients/{{ c.id }}/brand/{{ b.id }}">{{ b.filename }}</a></td>
+      <td class="muted">{{ (b.bytes / 1024) | round(0) | int }} KB</td>
+      <td class="muted">{{ b.created_at[:10] }}</td>
+      <td>
+        <form method="post" action="/admin/studio/clients/{{ c.id }}/brand/{{ b.id }}/delete"
+              class="inline" onsubmit="return confirm('Delete {{ b.filename }}?')">
+          <button class="link danger">delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">No brand assets yet.</p>
+  {% endif %}
+
+  <h2>Brand kit (crop overlay)</h2>
+  <p class="muted">A raster logo composited onto social crops. Only the newest
+    <strong>active</strong> kit is used, and only on presets with brand overlay enabled.
+    Swapping a logo won't re-render crops already cached on disk.</p>
+  <form method="post" action="/admin/studio/clients/{{ c.id }}/kits"
+        enctype="multipart/form-data" class="inline-form">
+    <input type="file" name="logo" accept=".png,.webp,.jpg,.jpeg" required>
+    <input type="text" name="label" placeholder="Label (optional)">
+    <label>pos
+      <select name="position">
+        {% for p in ["tl","tc","tr","ml","c","mr","bl","bc","br"] %}
+        <option value="{{ p }}"{% if p == "br" %} selected{% endif %}>{{ p }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>opacity <input type="number" name="opacity" value="100" min="0" max="100" style="width:4em"></label>
+    <label>scale% <input type="number" name="scale_pct" value="22" min="1" max="100" style="width:4em"></label>
+    <label>margin% <input type="number" name="margin_pct" value="4" min="0" max="50" style="width:4em"></label>
+    <button type="submit">Add kit</button>
+  </form>
+  {% if brand_kits %}
+  <table class="list">
+    <tr><th>Logo</th><th>Settings</th><th>Active</th><th></th></tr>
+    {% for k in brand_kits %}
+    <tr>
+      <td><a href="/admin/studio/clients/{{ c.id }}/kits/{{ k.id }}/logo">{{ k.label or "logo" }}</a></td>
+      <td>
+        <form method="post" action="/admin/studio/clients/{{ c.id }}/kits/{{ k.id }}" class="inline-form">
+          <input type="text" name="label" value="{{ k.label or '' }}" placeholder="Label" style="width:8em">
+          <select name="position">
+            {% for p in ["tl","tc","tr","ml","c","mr","bl","bc","br"] %}
+            <option value="{{ p }}"{% if p == k.position %} selected{% endif %}>{{ p }}</option>
+            {% endfor %}
+          </select>
+          <input type="number" name="opacity" value="{{ k.opacity }}" min="0" max="100" style="width:4em" title="opacity %">
+          <input type="number" name="scale_pct" value="{{ k.scale_pct }}" min="1" max="100" style="width:4em" title="scale %">
+          <input type="number" name="margin_pct" value="{{ k.margin_pct }}" min="0" max="50" style="width:4em" title="margin %">
+          <label><input type="checkbox" name="active" value="1"{% if k.active %} checked{% endif %}> active</label>
+          <button type="submit">Save</button>
+        </form>
+      </td>
+      <td class="muted">{% if k.active %}yes{% else %}no{% endif %}</td>
+      <td>
+        <form method="post" action="/admin/studio/clients/{{ c.id }}/kits/{{ k.id }}/delete"
+              class="inline" onsubmit="return confirm('Delete this brand kit?')">
+          <button class="link danger">delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">No brand kit yet — crops render without an overlay.</p>
+  {% endif %}
+
+  <h2>Projects</h2>
+  <form method="post" action="/admin/studio/clients/{{ c.id }}/projects" class="inline-form">
+    <input type="text" name="title" placeholder="Project title (e.g. Spring menu shoot)" required>
+    <button type="submit">New project</button>
+  </form>
+  <table class="list">
+    <tr><th>Project</th><th>Status</th><th>Created</th></tr>
+    {% for p in projects %}
+    <tr>
+      <td><a href="/admin/studio/projects/{{ p.id }}">{{ p.title }}</a></td>
+      <td>{{ p.status }}</td>
+      <td class="muted">{{ p.created_at[:10] }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if not projects %}<p class="muted">No projects yet.</p>{% endif %}
+
+  <h2>Licenses <a href="/admin/studio/licenses" class="muted" style="font-size:0.7em">(all)</a></h2>
+  <p class="muted">Usage-rights grants this client holds. The free-text "Usage rights"
+    field above is a quick note; these are the structured, auditable records.</p>
+  <form method="post" action="/admin/studio/clients/{{ c.id }}/licenses" class="inline-form">
+    <input type="text" name="title" placeholder="License title (e.g. Spring menu — social, 12mo)" required>
+    <button type="submit">New license</button>
+  </form>
+  {% if licenses %}
+  <table class="list">
+    <tr><th>License</th><th>Tier</th><th>Term</th><th>Fee</th><th>Status</th></tr>
+    {% for l in licenses %}
+    <tr>
+      <td><a href="/admin/studio/licenses/{{ l.id }}">{{ l.title }}</a>
+        {% if l.exclusivity == 'exclusive' %}<span class="warn">excl</span>{% endif %}
+        {% if not l.published %}<span class="muted">·unpub</span>{% endif %}</td>
+      <td>{{ l.usage_tier }}</td>
+      <td>{% if l.perpetual %}perpetual
+          {% elif l.ends_on %}→ {{ l.ends_on }}
+            {% if l.status == 'active' and l.days_left is not none and l.days_left <= 45 %}
+              {% if l.days_left < 0 %}<span class="danger">(lapsed)</span>
+              {% else %}<span class="warn">({{ l.days_left }}d)</span>{% endif %}
+            {% endif %}
+          {% else %}—{% endif %}</td>
+      <td>{% if l.fee_cents %}${{ "%.2f" % (l.fee_cents / 100) }}{% else %}—{% endif %}</td>
+      <td>{{ l.status }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">No licenses yet.</p>{% endif %}
+
+  {% if covering %}
+  <h3>Also covered by</h3>
+  <p class="muted">Licenses this client doesn't hold but is reached by — a group
+    grant on a parent, or an explicit add elsewhere. Read-only here; edit on the
+    license itself.</p>
+  <table class="list">
+    <tr><th>License</th><th>Holder</th><th>Via</th><th>Tier</th><th>Status</th></tr>
+    {% for l in covering %}
+    <tr>
+      <td><a href="/admin/studio/licenses/{{ l.id }}">{{ l.title }}</a>
+        {% if l.exclusivity == 'exclusive' %}<span class="warn">excl</span>{% endif %}
+        {% if not l.published %}<span class="muted">·unpub</span>{% endif %}</td>
+      <td><a href="/admin/studio/clients/{{ l.holder_client_id }}">{{ l.holder_name }}</a></td>
+      <td>{% if l.rel == 'group' %}<span class="muted">group cascade</span>
+          {% else %}<span class="muted">added explicitly</span>{% endif %}</td>
+      <td>{{ l.usage_tier }}</td>
+      <td>{{ l.status }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  <h2>Delete client</h2>
+  {% if blockers %}
+    {% set blocker_summary = "WARNING: This client still has " ~ blockers|join(", ") ~ ". Deleting will cascade through portal/projects/brand (rmtree on disk) and unlink any galleries. Are you sure?" %}
+  {% else %}
+    {% set blocker_summary = "Delete " ~ c.name ~ "? This is final." %}
+  {% endif %}
+  <form method="post" action="/admin/studio/clients/{{ c.id }}/delete"
+        class="inline" onsubmit='return confirm({{ blocker_summary|tojson }})'>
+    {% if blockers %}<input type="hidden" name="force" value="1">{% endif %}
+    <button class="link danger">Delete client{% if blockers %} (despite {{ blockers|length }} blocker{{ "s" if blockers|length != 1 }}){% endif %}</button>
+  </form>
+  {% if blockers %}<p class="muted">Blockers: {{ blockers|join(" · ") }}</p>{% endif %}
+</main>
+{% endblock %}

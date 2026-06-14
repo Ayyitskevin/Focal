@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}{{ g.title }} · {{ site_name }}{% endblock %}
+{% block bodyclass %}gallery-body{% endblock %}
+{% block content %}
+<header class="gallery-header"
+        {% if g.cover_asset_id %}style="background-image:url('/media/{{ g.slug }}/web/{{ g.cover_asset_id }}')"{% endif %}>
+  <div class="gallery-header-inner">
+    <h1>{{ g.title }}</h1>
+    {% if g.client_name %}<p>{{ g.client_name }}</p>{% endif %}
+    <a class="btn" href="/g/{{ g.slug }}/download">Download all</a>
+    {% if favs %}<a class="btn" href="/g/{{ g.slug }}/download/favorites">&#9829; Favorites ({{ favs|length }})</a>{% endif %}
+  </div>
+</header>
+
+{% macro tile(a) %}
+<figure class="tile" data-id="{{ a.id }}" data-kind="{{ a.kind }}"
+        data-web="/media/{{ g.slug }}/web/{{ a.id }}"
+        data-fav="/g/{{ g.slug }}/fav/{{ a.id }}"
+        data-dl="/g/{{ g.slug }}/download?asset_id={{ a.id }}"
+        {% if a.section_id %}data-section="{{ a.section_id }}"{% endif %}
+        {% if a.kind == 'video' %}data-poster="/media/{{ g.slug }}/poster/{{ a.id }}"{% endif %}>
+  <img src="/media/{{ g.slug }}/thumb/{{ a.id }}" loading="lazy" alt="{{ a.filename }}">
+  {% if a.kind == 'video' %}<span class="play-badge">&#9654;</span>{% endif %}
+  <div class="tile-actions">
+    <button class="icon-btn" hx-post="/g/{{ g.slug }}/fav/{{ a.id }}" hx-swap="innerHTML"
+            title="Favorite">
+      {% if a.id in favs %}<span class="fav-btn faved">&#9829;</span>
+      {% else %}<span class="fav-btn">&#9825;</span>{% endif %}
+    </button>
+    <a class="icon-btn" href="/g/{{ g.slug }}/download?asset_id={{ a.id }}"
+       title="Download">&#8595;</a>
+  </div>
+</figure>
+{% endmacro %}
+
+{% set populated = [] %}
+{% for s in sections %}{% if by_section[s.id] %}{% if populated.append(s) %}{% endif %}{% endif %}{% endfor %}
+{% set n_targets = populated|length + (1 if unsectioned and sections else 0) %}
+{% if n_targets >= 2 %}
+<nav class="section-nav">
+  {% for s in populated %}<a href="#sec-{{ s.id }}">{{ s.name }}</a>{% endfor %}
+  {% if unsectioned and sections %}<a href="#sec-more">More</a>{% endif %}
+</nav>
+{% endif %}
+
+<main class="gallery-main">
+  <div id="proof-toast" class="proof-toast" hidden></div>
+  {% for s in sections %}
+    {% if by_section[s.id] %}
+      <h2 class="section-name" id="sec-{{ s.id }}">{{ s.name }}
+        <a class="sec-dl" href="/g/{{ g.slug }}/download/section/{{ s.id }}"
+           title="Download {{ s.name }}">&#8595;</a>
+        {% if s.proof_target %}
+          {% set picks = section_picks.get(s.id, 0) %}
+          <span id="proof-{{ s.id }}"
+                class="proof-progress {{ 'ok' if picks >= s.proof_target else 'muted' }}">{{ picks }} of {{ s.proof_target }} picked</span>
+        {% endif %}
+      </h2>
+      {% if s.caption %}<p class="section-caption">{{ s.caption }}</p>{% endif %}
+      <div class="grid">{% for a in by_section[s.id] %}{{ tile(a) }}{% endfor %}</div>
+    {% endif %}
+  {% endfor %}
+  {% if unsectioned %}
+    {% if sections %}<h2 class="section-name" id="sec-more">More</h2>{% endif %}
+    <div class="grid">{% for a in unsectioned %}{{ tile(a) }}{% endfor %}</div>
+  {% endif %}
+  {% if not assets %}<p class="muted center">Nothing here yet — check back soon.</p>{% endif %}
+</main>
+
+<div id="lightbox" class="lightbox" hidden data-slug="{{ g.slug }}">
+  <button class="lb-close" aria-label="Close">&times;</button>
+  <button class="lb-prev" aria-label="Previous">&#8249;</button>
+  <div class="lb-stage"></div>
+  <button class="lb-next" aria-label="Next">&#8250;</button>
+  <div class="lb-actions">
+    <span class="lb-proof" hidden></span>
+    <button class="lb-play" aria-label="Slideshow">&#9654;</button>
+    <button class="lb-fav" aria-label="Favorite">&#9825;</button>
+    <a class="lb-dl" aria-label="Download" href="#">&#8595;</a>
+  </div>
+  <div class="lb-comments" hidden>
+    <div class="vc-head">
+      <h3>Notes</h3>
+      <span class="vc-count"></span>
+      <label class="vc-filter-lbl"><input type="checkbox" class="vc-filter"> Hide resolved</label>
+    </div>
+    <ul class="vc-list"></ul>
+    <form class="vc-form">
+      <input type="hidden" class="vc-parent" value="">
+      <input type="hidden" class="vc-timecode" value="0">
+      <div class="vc-controls">
+        <button type="button" class="vc-at" title="Tag your note to the current frame">Comment at 0:00</button>
+        <button type="button" class="vc-cancel-reply" hidden>cancel reply</button>
+      </div>
+      <textarea class="vc-body" placeholder="Leave a note at this moment…" required></textarea>
+      <button type="submit" class="btn">Post note</button>
+    </form>
+  </div>
+</div>
+<script src="/static/lightbox.js?v={{ static_rev }}" defer></script>
+<script>
+  // Show a brief toast when a fav attempt hits the proofing cap.
+  document.body.addEventListener("proof-cap", e => {
+    const t = document.getElementById("proof-toast");
+    t.textContent = `Selection limit reached — unfavor one to pick a different photo (${e.detail.target} max).`;
+    t.hidden = false;
+    clearTimeout(window._proofToastTimer);
+    window._proofToastTimer = setTimeout(() => t.hidden = true, 3500);
+  });
+</script>
+{% endblock %}

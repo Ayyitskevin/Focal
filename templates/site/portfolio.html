@@ -1,0 +1,57 @@
+{% extends "site/base_site.html" %}
+{% block title %}Portfolio — {{ site_name }}{% endblock %}
+{% block site_content %}
+<main class="site-main">
+  <h1>Portfolio</h1>
+  {% if tags %}
+  <nav class="portfolio-filter" aria-label="Filter portfolio by tag">
+    <button class="pf-chip pf-chip-active" data-filter="">All
+      <span class="muted">({{ assets|length }})</span></button>
+    {% for tag in tags %}
+    {% set n = assets|selectattr("portfolio_tag", "equalto", tag)|list|length %}
+    <button class="pf-chip" data-filter="{{ tag|lower }}">{{ tag }}
+      <span class="muted">({{ n }})</span></button>
+    {% endfor %}
+  </nav>
+  {% endif %}
+  {% if assets %}
+  <div class="grid site-grid portfolio-grid">
+    {% for a in assets %}
+    <figure class="tile{% if a.portfolio_tag %} pf-tile{% endif %}"
+            {% if a.portfolio_tag %}data-tag="{{ a.portfolio_tag|lower }}"{% endif %}
+            data-web="/site/img/{{ a.id }}">
+      <img src="/site/img/{{ a.id }}" loading="lazy"
+           alt="Food and beverage photography by {{ site_name }}"></figure>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">Portfolio coming soon.</p>
+  {% endif %}
+  <p class="center"><a class="btn" href="/book">Book a shoot</a></p>
+</main>
+{% include "site/_lightbox.html" %}
+{% if tags %}
+<script>
+  // Tag chip filter — vanilla JS, no reload. Hash sync so #dishes is shareable.
+  (function () {
+    const tiles = document.querySelectorAll(".portfolio-grid .tile");
+    const chips = document.querySelectorAll(".pf-chip");
+    function apply(tag) {
+      tiles.forEach(t => {
+        const tt = t.dataset.tag || "";
+        t.classList.toggle("pf-hidden", tag !== "" && tt !== tag);
+      });
+      chips.forEach(c => c.classList.toggle(
+        "pf-chip-active", (c.dataset.filter || "") === (tag || "")));
+      if (tag) history.replaceState(null, "", "#" + tag);
+      else history.replaceState(null, "", location.pathname);
+    }
+    chips.forEach(c => c.addEventListener("click", () => apply(c.dataset.filter || "")));
+    const initial = (location.hash || "").slice(1);
+    if (initial && document.querySelector(`.pf-chip[data-filter="${CSS.escape(initial)}"]`)) {
+      apply(initial);
+    }
+  })();
+</script>
+{% endif %}
+{% endblock %}

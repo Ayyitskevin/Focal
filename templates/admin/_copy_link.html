@@ -1,0 +1,10 @@
+{# Reusable "Copy link [+ PIN]" button. Pair with /static/copy_link.js
+   loaded from admin/base.html. The `&#10;` between URL and PIN is a literal
+   HTML entity in the macro body so Jinja doesn't escape it, and the browser
+   decodes it back to a real newline when reading data-copy via dataset. #}
+{% macro copy_link(url, pin=None) %}
+<button type="button" class="link copy-link"
+        data-copy="{{ url }}{% if pin %}&#10;PIN: {{ pin }}{% endif %}"
+        title="Copy {{ 'URL + PIN' if pin else 'link' }} to clipboard">&#128203; Copy link{% if pin %} + PIN{% endif %}</button>
+<span class="copy-feedback muted" hidden>Copied!</span>
+{% endmacro %}

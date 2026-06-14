@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Share-card debugger · Mise{% endblock %}
+{% block content %}
+<main class="admin-main">
+  <div class="admin-bar">
+    <h1><a href="/admin">&larr;</a> Share-card debugger</h1>
+    <nav><a href="/admin">Galleries</a> · <a href="/admin/studio">Studio</a></nav>
+  </div>
+
+  <p class="muted">Every indexable URL on the marketing site plus every published
+    case study. The preview shows what's computed server-side (what Facebook,
+    LinkedIn, and OpenGraph.xyz will scrape). If a freshly-edited case-study
+    card still shows stale text or image, that's almost always a platform-side
+    unfurl cache — use the per-row debugger links to force a refresh.</p>
+
+  {% set ns = namespace(current_kind=None) %}
+  {% for u in urls %}
+    {% if u.kind != ns.current_kind %}
+      {% set ns.current_kind = u.kind %}
+      <h2>{% if u.kind == "marketing" %}Marketing pages{% else %}Case studies (/work/&lt;slug&gt;){% endif %}</h2>
+    {% endif %}
+    <article class="share-row">
+      <a class="share-thumb" href="{{ u.path }}" target="_blank" rel="noopener">
+        {% if u.og_image_id %}
+        <img src="/site/img/{{ u.og_image_id }}?variant=thumb"
+             alt="{{ u.title }}" loading="lazy">
+        {% else %}<span class="placeholder">no og:image</span>{% endif %}
+      </a>
+      <div class="share-meta">
+        <p class="muted share-path">
+          <a href="{{ u.path }}" target="_blank" rel="noopener">{{ u.full_url }}</a>
+          {% if u.client %} <span class="muted">· {{ u.client }}{% if u.location %} · {{ u.location }}{% endif %}</span>{% endif %}
+        </p>
+        <h3 class="share-title">{{ u.title }}</h3>
+        <p class="share-desc">{{ u.description or "(no description set)" }}</p>
+        <div class="share-debuggers">
+          <span class="muted">Force refresh:</span>
+          {% for label, link in u.debuggers %}
+          <a href="{{ link }}" target="_blank" rel="noopener">{{ label }}</a>
+          {% endfor %}
+        </div>
+      </div>
+    </article>
+  {% endfor %}
+</main>
+{% endblock %}

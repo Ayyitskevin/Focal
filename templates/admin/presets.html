@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% from "admin/_audit.html" import diff_chips %}
+{% block title %}Crop presets · Studio · Mise{% endblock %}
+{% block content %}
+<main class="admin-main">
+  <div class="admin-bar">
+    <h1><a href="/admin/studio">&larr;</a> Crop presets</h1>
+    <nav><a href="/admin">Galleries</a> · <a href="/admin/studio">Studio</a></nav>
+  </div>
+
+  <p class="muted">The export/crop formats every favorited photo is cut into.
+    A new channel (DoorDash, menu print) is a new row here — not new code.
+    <strong>Slug</strong> is the on-disk filename + portal URL token, so it can't
+    be changed after a preset exists. <strong>Brand overlay</strong> composites
+    the client's brand-kit logo into the crop. Deactivating a preset removes it
+    from delivery cleanly. Changes here apply to crops cut from now on — already
+    rendered crops re-cut on the next favorite, not on save.</p>
+
+  <h2>Presets</h2>
+  {% if not presets %}<p class="muted">No presets.</p>{% endif %}
+  {% for p in presets %}
+  <div class="preset-row {% if not p.active %}row-muted{% endif %}">
+    <div class="preset-head">
+      <code class="preset-slug">{{ p.slug }}</code>
+      <span class="muted">created {{ p.created_at[:10] }}</span>
+      <form method="post" action="/admin/studio/presets/{{ p.id }}/overlay" class="inline">
+        <button type="submit" class="chip {% if p.brand_overlay %}on{% endif %}"
+                title="Composite the client's brand-kit logo into this crop">
+          {% if p.brand_overlay %}overlay ON{% else %}overlay off{% endif %}</button>
+      </form>
+      <form method="post" action="/admin/studio/presets/{{ p.id }}/active" class="inline"
+            {% if p.active %}onsubmit='return confirm({{ ("Deactivate " ~ p.slug ~ "? Clients stop receiving this crop and its links 404. You can reactivate anytime.")|tojson }})'{% endif %}>
+        <button type="submit" class="chip {% if p.active %}on{% endif %}">
+          {% if p.active %}active{% else %}inactive{% endif %}</button>
+      </form>
+    </div>
+    <form method="post" action="/admin/studio/presets/{{ p.id }}" class="preset-edit">
+      <label>Name <input type="text" name="name" value="{{ p.name }}" required></label>
+      <label>Ratio <input type="text" name="ratio_label" value="{{ p.ratio_label }}"
+                          size="5" required></label>
+      <label>W <input type="number" name="width" value="{{ p.width }}"
+                      min="1" max="20000" required></label>
+      <label>H <input type="number" name="height" value="{{ p.height }}"
+                      min="1" max="20000" required></label>
+      <label>Cx <input type="number" name="centering_x" value="{{ p.centering_x }}"
+                       step="0.05" min="0" max="1"></label>
+      <label>Cy <input type="number" name="centering_y" value="{{ p.centering_y }}"
+                       step="0.05" min="0" max="1"></label>
+      <label>Channel <input type="text" name="target_channel"
+                            value="{{ p.target_channel or '' }}" size="8"></label>
+      <label>Sort <input type="number" name="sort" value="{{ p.sort }}" size="3"></label>
+      <button type="submit">Save</button>
+    </form>
+  </div>
+  {% endfor %}
+
+  <details id="add-preset" class="admin-add">
+    <summary>Add a preset</summary>
+    <form method="post" action="/admin/studio/presets" class="stack">
+      <label>Slug <span class="muted">(filename + URL token; lowercase, no spaces — e.g. <code>3x2</code>, <code>doordash</code>)</span>
+        <input type="text" name="slug" pattern="[a-z0-9][a-z0-9_-]{0,31}" required></label>
+      <label>Name <input type="text" name="name" placeholder="Landscape (3:2)" required></label>
+      <label>Ratio label <input type="text" name="ratio_label" placeholder="3:2" required></label>
+      <label>Width px <input type="number" name="width" min="1" max="20000" required></label>
+      <label>Height px <input type="number" name="height" min="1" max="20000" required></label>
+      <label>Centering X <input type="number" name="centering_x" value="0.5" step="0.05" min="0" max="1"></label>
+      <label>Centering Y <input type="number" name="centering_y" value="0.5" step="0.05" min="0" max="1"></label>
+      <label>Channel <span class="muted">(label only)</span>
+        <input type="text" name="target_channel" placeholder="instagram"></label>
+      <label>Sort <input type="number" name="sort" value="0"></label>
+      <button type="submit">Add preset</button>
+    </form>
+  </details>
+
+  <h2>Audit trail</h2>
+  <p class="muted">These rows record configuration intent. A toggle or edit here
+    does not re-cut existing crops — cached crops re-render on the next favorite.</p>
+  {% if not trail %}<p class="muted">No audit entries.</p>{% endif %}
+  {% if trail %}
+  <ul class="bare audit-trail">
+    {% for t in trail %}
+    <li>
+      <span class="muted">{{ t.created_at[:16] }}</span> ·
+      <strong>{{ t.action }}</strong> ·
+      <code>{{ slug_by_id.get(t.entity_id, "#" ~ t.entity_id) }}</code> · {{ t.actor }}
+      {% if t.diff %}{{ diff_chips(t.diff) }}{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</main>
+{% endblock %}

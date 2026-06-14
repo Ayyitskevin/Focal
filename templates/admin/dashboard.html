@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Galleries · Mise{% endblock %}
+{% block content %}
+<main class="admin-main">
+  <div class="admin-bar">
+    <h1>Galleries</h1>
+    <nav><a href="/admin/studio">Studio</a> ·
+      <a href="/admin/today">Today</a> ·
+      <a href="/admin/emails">Emails</a> ·
+      <a href="/admin/sent">Sent</a> ·
+      <a href="/admin/jobs">Jobs{% if failed_jobs %} <span class="warn">({{ failed_jobs }} failed)</span>{% endif %}</a> ·
+      <a href="/admin/share">Share</a></nav>
+    <form method="post" action="/admin/logout"><button class="link">Sign out</button></form>
+  </div>
+
+  <form method="post" action="/admin/galleries" class="inline-form">
+    <input type="text" name="title" placeholder="Gallery title" required>
+    <input type="text" name="client_name" placeholder="Client (optional)">
+    <button type="submit">Create gallery</button>
+  </form>
+
+  {% if n_unlinked_pub %}
+  <details id="d-orphans" class="unlinked-warn" open>
+    <summary><span class="warn">&#9888;</span> {{ n_unlinked_pub }} published galler{{ "ies" if n_unlinked_pub != 1 else "y" }} not linked to a studio client</summary>
+    {% if link_clients %}
+    <table class="list">
+      <tr><th>Gallery</th><th>Link to client</th></tr>
+      {% for o in orphans %}
+      <tr>
+        <td><a href="/admin/galleries/{{ o.id }}">{{ o.title }}</a></td>
+        <td>
+          <form method="post" action="/admin/galleries/{{ o.id }}/link-client" class="inline-form">
+            <select name="client_id" required>
+              <option value="">&mdash; pick a client &mdash;</option>
+              {% for c in link_clients %}
+              <option value="{{ c.id }}">{{ c.name }}{% if c.company %} &middot; {{ c.company }}{% endif %}</option>
+              {% endfor %}
+            </select>
+            <button type="submit">Link</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="muted">No studio clients yet &mdash; create one in <a href="/admin/studio">Studio</a> first, then come back to link.</p>
+    {% endif %}
+  </details>
+  {% endif %}
+
+  <table class="list">
+    <tr><th>Title</th><th>Client</th><th>Assets</th><th>Size</th><th>PIN</th><th>Link</th><th>Status</th><th></th></tr>
+    {% for g in galleries %}
+    <tr>
+      <td><a href="/admin/galleries/{{ g.id }}">{{ g.title }}</a>
+        {% if g.n_proof and not g.n_proof_pending %}
+        <span class="ok" title="Client has hit the target on every proofing section">&#10003; selects in</span>
+        {% endif %}</td>
+      <td>{{ g.client_name or "—" }}{% if not g.client_id and g.published %}
+        <span class="warn" title="Published but not linked to a studio client">&#9888;</span>{% endif %}</td>
+      <td>{{ g.n_assets }}{% if g.n_pending %} <span class="muted">({{ g.n_pending }} processing)</span>{% endif %}</td>
+      <td class="muted">{{ sizes[g.id] }}</td>
+      <td><code>{{ g.pin }}</code></td>
+      <td><code class="slug">{{ base_url }}/g/{{ g.slug }}</code></td>
+      <td>{{ "published" if g.published else "draft" }}
+        {% if g.expires_at %}
+          {% if g.expires_at < today %}<span class="warn">expired {{ g.expires_at }}</span>
+          {% elif g.expires_at <= soon %}<span class="expiring">expires {{ g.expires_at }}</span>
+          {% else %}<span class="muted">until {{ g.expires_at }}</span>{% endif %}
+        {% endif %}</td>
+      <td><a href="/admin/galleries/{{ g.id }}/activity">activity</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if not galleries %}<p class="muted">No galleries yet.</p>{% endif %}
+
+  <p class="muted">Disk: {{ "%.1f"|format(free_gb) }} GB free
+    {% if free_gb < min_free_gb %}<span class="warn">— below the {{ min_free_gb }} GB watermark, uploads refused</span>
+    {% elif free_gb < min_free_gb * 2 %}<span class="expiring">— nearing the {{ min_free_gb }} GB upload watermark</span>
+    {% endif %}
+    · Last backup:
+    {% if backup_age_h is none %}<span class="warn">none found — is mise-backup.timer running?</span>
+    {% elif backup_age_h > 48 %}<span class="warn">{{ "%.0f"|format(backup_age_h) }} h ago — check mise-backup.timer</span>
+    {% elif backup_age_h < 1 %}under an hour ago
+    {% else %}{{ "%.0f"|format(backup_age_h) }} h ago{% endif %}</p>
+</main>
+{% endblock %}

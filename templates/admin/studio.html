@@ -1,0 +1,299 @@
+{% extends "base.html" %}
+{% block title %}Studio · Mise{% endblock %}
+{% block content %}
+<main class="admin-main">
+  <div class="admin-bar">
+    <h1>Studio</h1>
+    <nav><a href="/admin">Galleries</a> · <a href="/admin/studio/licenses">Licenses</a> · <a href="/admin/studio/press">Press</a> · <a href="/admin/studio/presets">Crop presets</a> · <a href="/admin/studio/testimonials">Testimonials</a></nav>
+  </div>
+
+  {% if licenses_expiring %}
+  <section class="upcoming conflicts" aria-label="Licenses expiring">
+    <h2>&#9888; Licenses expiring / lapsed</h2>
+    <ul class="upcoming-strip">
+      {% for l in licenses_expiring %}
+      <li class="upcoming-chip{% if l.days_left is not none and l.days_left < 0 %} upcoming-overdue{% endif %}">
+        <span class="upcoming-when">
+          {% if l.days_left is not none and l.days_left < 0 %}lapsed {{ -l.days_left }}d
+          {% elif l.days_left == 0 %}today
+          {% else %}{{ l.days_left }}d left{% endif %}</span>
+        <span class="upcoming-date">{{ l.ends_on }}</span>
+        <a href="/admin/studio/licenses/{{ l.id }}">
+          <strong>{{ l.title }}</strong>
+          <span class="muted">{{ l.holder_company or l.holder_name }} · {{ l.usage_tier }}</span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {% if press_confirm %}
+  <section class="upcoming conflicts" aria-label="Press evidence — confirm published">
+    <h2>&#128240; Press evidence — confirm published</h2>
+    <ul class="upcoming-strip">
+      {% for l in press_confirm %}
+      <li class="upcoming-chip">
+        <span class="upcoming-when">{{ l.n }} hit{{ "s" if l.n != 1 }}</span>
+        <span class="upcoming-date">{{ l.latest.outlet }}{% if l.latest.publish_date %} · {{ l.latest.publish_date }}{% endif %}</span>
+        <a href="/admin/studio/licenses/{{ l.id }}" title="Review the press evidence and confirm this license as published">
+          <strong>{{ l.title }}</strong>
+          <span class="muted">{{ l.company or l.holder_name }} · {{ l.usage_tier }}</span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {% if retainer_drafts %}
+  <section class="upcoming conflicts" aria-label="Retainer drafts waiting to send">
+    <h2>&#9888; Retainer drafts waiting to send</h2>
+    <ul class="upcoming-strip">
+      {% for r in retainer_drafts %}
+      <li class="upcoming-chip{% if r.age_days is not none and r.age_days >= 3 %} upcoming-overdue{% endif %}">
+        <span class="upcoming-when">
+          {% if r.age_days is not none and r.age_days > 0 %}sat {{ r.age_days }}d{% else %}new{% endif %}</span>
+        <a href="/admin/studio/invoices/{{ r.id }}" title="Review and Send this auto-generated retainer draft">
+          <strong>{{ r.title }}</strong>
+          <span class="muted">{{ r.company or r.client_name }} · ${{ "%.2f" % (r.total_cents / 100) }} · draft</span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {% if quota_behind %}
+  <section class="upcoming conflicts" aria-label="Retainers behind quota">
+    <h2>&#9888; Retainers behind quota</h2>
+    <ul class="upcoming-strip">
+      {% for q in quota_behind %}
+      <li class="upcoming-chip{% if q.days_left <= 7 %} upcoming-overdue{% endif %}">
+        <span class="upcoming-when">{{ q.days_left }}d left</span>
+        <a href="/admin/studio/recurring/{{ q.id }}" title="Log deliveries against this retainer's quota">
+          <strong>{{ q.title }}</strong>
+          <span class="muted">{{ q.company or q.client_name }} ·
+            {{ q.worst.label }} {{ q.worst.done }}/{{ q.worst.target }} ({{ q.worst.to_go }} to go){% if q.behind|length > 1 %} +{{ q.behind|length - 1 }} more{% endif %}</span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {% if content_due %}
+  <section class="upcoming conflicts" aria-label="Content due">
+    <h2>&#128197; Content due</h2>
+    <ul class="upcoming-strip">
+      {% for q in content_due %}
+      <li class="upcoming-chip{% if q.worst.urgent %} upcoming-overdue{% endif %}">
+        <span class="upcoming-when">{% if q.worst.overdue %}overdue{% else %}{{ q.worst.slot_date[5:] }}{% endif %}</span>
+        <a href="/admin/studio/recurring/{{ q.id }}#calendar" title="Plan and mark this retainer's scheduled content">
+          <strong>{{ q.title }}</strong>
+          <span class="muted">{{ q.company or q.client_name }} ·
+            {{ q.worst.label }}{% if q.worst.title %} ({{ q.worst.title }}){% endif %} {{ q.worst.slot_date }}{% if q.slots|length > 1 %} +{{ q.slots|length - 1 }} more{% endif %}</span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  <nav class="spark-window-picker" aria-label="Sparkline window">
+    {% for w in [7, 30, 90] %}
+    <a href="/admin/studio?days={{ w }}"
+       class="spark-window-btn{% if spark_window == w %} spark-window-active{% endif %}">{{ w }}d</a>
+    {% endfor %}
+  </nav>
+
+  <section class="sparklines" aria-label="Last {{ spark_window }} days activity">
+    {% set bar_w = (100 / spark_window) - 0.2 if spark_window > 7 else (100 / spark_window) - 1 %}
+    {% set bar_step = 100 / spark_window %}
+    {% for s in sparklines %}
+    {% set peak = s.series|max if s.series|max > 0 else 1 %}
+    <div class="spark-card">
+      <p class="spark-head"><strong>{{ s.total }}</strong> {{ s.label }}
+        <span class="muted">· last {{ spark_window }}d</span></p>
+      <svg class="spark-svg" viewBox="0 0 100 20" preserveAspectRatio="none"
+           aria-label="{{ s.label }} per day for the last {{ spark_window }} days">
+        {% for n in s.series %}
+        {% set h = (n / peak * 18)|round(1) if n else 0 %}
+        <rect x="{{ (loop.index0 * bar_step)|round(2) }}" y="{{ 19 - h }}"
+              width="{{ bar_w|round(2) }}" height="{{ h if h > 0 else 0.6 }}"
+              fill="{{ 'var(--accent)' if n else 'var(--line)' }}">
+          <title>{{ spark_days[loop.index0] }}: {{ n }}</title>
+        </rect>
+        {% endfor %}
+      </svg>
+    </div>
+    {% endfor %}
+  </section>
+
+  {% if conflicts %}
+  <section class="upcoming conflicts" aria-label="Booking conflicts">
+    <h2>&#9888; Booking conflicts</h2>
+    <ul class="upcoming-strip">
+      {% for c in conflicts %}
+      <li class="upcoming-chip upcoming-overdue">
+        <span class="upcoming-when">{{ c.entries|length }} on one day</span>
+        <span class="upcoming-date">{{ c.shoot_date }}</span>
+        {% for it in c.entries %}
+        {% if it.kind == "project" %}
+        <a href="/admin/studio/projects/{{ it.id }}">
+          <strong>{{ it.title }}</strong>
+          <span class="muted">{{ it.who }}{% if it.company %} · {{ it.company }}{% endif %} · {{ it.status }}</span>
+        </a>
+        {% else %}
+        <a href="/admin/studio#inquiries">
+          <strong>{{ it.title }}</strong>
+          <span class="muted">{{ it.who }} · inquiry (not yet converted)</span>
+        </a>
+        {% endif %}
+        {% endfor %}
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {% if proofing_waiting %}
+  <section class="upcoming" aria-label="Proofing waiting">
+    <h2>Proofing waiting</h2>
+    <ul class="upcoming-strip">
+      {% for w in proofing_waiting %}
+      <li class="upcoming-chip upcoming-overdue">
+        <a href="/admin/galleries/{{ w.gallery_id }}" title="Open the gallery admin to re-fire the Proofing prompt email">
+          <span class="upcoming-when">&#9829; nudge?</span>
+          <strong>{{ w.project_title }}</strong>
+          <span class="muted">{{ w.client_name }}{% if w.company %} · {{ w.company }}{% endif %}</span>
+          <span class="muted">{{ w.n_chapters }} chapter{{ "s" if w.n_chapters != 1 }}
+            · {{ w.remaining }} pick{{ "s" if w.remaining != 1 }} remaining</span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  <section class="upcoming" aria-label="Upcoming shoots">
+    <h2>Upcoming shoots</h2>
+    {% if upcoming %}
+    <ul class="upcoming-strip">
+      {% for u in upcoming %}
+      {% set cls = "ok" if u.days_out > 0 else ("today" if u.days_out == 0 else "overdue") %}
+      <li class="upcoming-chip upcoming-{{ cls }}">
+        <a href="/admin/studio/projects/{{ u.id }}">
+          <span class="upcoming-when">
+            {% if u.days_out < 0 %}{{ -u.days_out }}d ago
+            {% elif u.days_out == 0 %}today
+            {% elif u.days_out == 1 %}tomorrow
+            {% else %}in {{ u.days_out }}d{% endif %}
+          </span>
+          <span class="upcoming-date">{{ u.shoot_date }}</span>
+          <strong>{{ u.title }}</strong>
+          <span class="muted">{{ u.client_name }}{% if u.company %} · {{ u.company }}{% endif %}</span>
+          {% if u.days_out < 0 and u.status in ("lead", "proposal", "contract", "invoice") %}
+          <span class="warn">· not yet shooting</span>
+          {% endif %}
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">Nothing on the calendar between a week ago and two weeks
+      out. Add a shoot date on any project and it'll surface here.</p>
+    {% endif %}
+  </section>
+
+  <div class="pipeline">
+    {% for s in statuses if s != 'archived' %}
+    <span class="pipeline-step{% if counts.get(s) %} active{% endif %}">
+      {{ s }} <strong>{{ counts.get(s, 0) }}</strong>{% if overdue_by_stage.get(s) %}
+      <span class="warn pipeline-overdue">({{ overdue_by_stage[s] }} overdue)</span>{% endif %}</span>
+    {% if not loop.last %}<span class="muted">→</span>{% endif %}
+    {% endfor %}
+    <span class="pipeline-money">
+      {% if outstanding.n %}${{ "%.2f" % (outstanding.cents / 100) }} outstanding
+      across {{ outstanding.n }} open invoice{{ "s" if outstanding.n != 1 }}
+      {% else %}nothing outstanding{% endif %}
+      {% set n_overdue = projects|sum(attribute="n_overdue") %}
+      {% if n_overdue %}<span class="warn">· {{ n_overdue }} overdue</span>{% endif %}</span>
+  </div>
+
+  <h2>Projects</h2>
+  <table class="list">
+    <tr><th>Project</th><th>Client</th><th>Status</th><th>Shoot date</th><th>Created</th></tr>
+    {% for p in projects %}
+    <tr>
+      <td><a href="/admin/studio/projects/{{ p.id }}">{{ p.title }}</a></td>
+      <td>{{ p.client_name }}{% if p.company %} <span class="muted">({{ p.company }})</span>{% endif %}</td>
+      <td><span class="status-{{ p.status }}">{{ p.status }}</span>
+        {% if p.n_overdue %}<span class="warn">overdue invoice{{ "s" if p.n_overdue != 1 }}</span>{% endif %}</td>
+      <td class="muted">{{ p.shoot_date or "—" }}</td>
+      <td class="muted">{{ p.created_at[:10] }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if not projects %}<p class="muted">No active projects.</p>{% endif %}
+
+  <h2>Clients</h2>
+  <form method="post" action="/admin/studio/clients" class="inline-form">
+    <input type="text" name="name" placeholder="Contact name" required>
+    <input type="text" name="company" placeholder="Company / venue">
+    <input type="email" name="email" placeholder="Email">
+    <input type="text" name="phone" placeholder="Phone">
+    <button type="submit">Add client</button>
+  </form>
+  <table class="list">
+    <tr><th>Name</th><th>Company</th><th>Email</th><th>Projects</th><th>Portal</th></tr>
+    {% for c in clients %}
+    {% set portal = client_portal_hints.get(c.id, ("muted", "—")) %}
+    <tr>
+      <td><a href="/admin/studio/clients/{{ c.id }}">{{ c.name }}</a></td>
+      <td>{{ c.company or "—" }}</td>
+      <td>{{ c.email or "—" }}</td>
+      <td>{{ c.n_projects }}</td>
+      <td><span class="{{ portal[0] }}">{{ portal[1] }}</span></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if not clients %}<p class="muted">No clients yet.</p>{% endif %}
+
+  <h2>Inquiries</h2>
+  <table class="list">
+    <tr><th>Date</th><th>From</th><th>Business</th><th>Request</th><th>Message</th><th></th></tr>
+    {% for i in inquiries %}
+    <tr class="{% if i.converted_at %}inquiry-converted{% endif %}">
+      <td class="muted">{{ i.created_at[:10] }}
+        {% if not i.emailed %}<span class="warn" title="Email send failed — only stored here">⚠</span>{% endif %}</td>
+      <td>{{ i.name }} <span class="muted">&lt;{{ i.email }}&gt;</span></td>
+      <td>{{ i.business or "—" }}</td>
+      <td>{% if i.kind == "booking" %}<span title="Booking request">📅</span>
+            {{ i.service or "shoot" }} · {{ i.shoot_date or "?" }}
+          {% else %}<span class="muted">message</span>{% endif %}</td>
+      <td><details><summary>view</summary><pre class="inquiry-msg">{{ i.message }}</pre></details></td>
+      <td>
+        {% if i.converted_at %}
+          {% if i.converted_project_id %}
+          <a href="/admin/studio/projects/{{ i.converted_project_id }}" class="muted" title="Converted {{ i.converted_at[:10] }}">&#10003; project</a>
+          {% elif i.converted_client_id %}
+          <a href="/admin/studio/clients/{{ i.converted_client_id }}" class="muted" title="Converted {{ i.converted_at[:10] }}">&#10003; client</a>
+          {% else %}<span class="muted">&#10003; converted</span>{% endif %}
+          <form method="post" action="/admin/studio/inquiries/{{ i.id }}/unconvert"
+                class="inline"
+                onsubmit="return confirm('Clear the conversion stamp on this inquiry? The spawned client/project will be left intact.');">
+            <button class="link inquiry-undo" title="Misclick? Clear the conversion stamp">undo</button>
+          </form>
+        {% else %}
+        <form method="post" action="/admin/studio/inquiries/{{ i.id }}/client" class="inline">
+          <button class="link">{% if i.kind == "booking" %}→ project{% else %}add as client{% endif %}</button></form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if not inquiries %}<p class="muted">No inquiries yet — the contact form and
+    booking page on the marketing site land here (and in your inbox).</p>{% endif %}
+</main>
+{% endblock %}

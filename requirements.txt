@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+jinja2
+itsdangerous
+pillow>=11.3
+pillow-heif
+python-multipart
+aiofiles
+stripe

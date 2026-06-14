@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block robots %}<meta name="robots" content="index, follow">{% endblock %}
+{% block head %}
+{% set og_img = og_image_id() %}
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="{{ site_name }}">
+<meta property="og:title" content="{{ site_name }} — photography that makes people hungry">
+<meta property="og:description" content="Menus, dishes, drinks, and the rooms they live in — food &amp; beverage photography.">
+<meta property="og:url" content="{{ base_url }}{{ request.url.path }}">
+{% if og_img %}<meta property="og:image" content="{{ base_url }}/site/img/{{ og_img }}">{% endif %}
+<meta name="twitter:card" content="{{ 'summary_large_image' if og_img else 'summary' }}">
+{% endblock %}
+{% block bodyclass %}site-body{% endblock %}
+{% block content %}
+<header class="site-nav">
+  <a href="/" class="site-brand">{{ site_name }}</a>
+  <nav>
+    <a href="/portfolio">Portfolio</a>
+    <a href="/work">Work</a>
+    <a href="/press">Press</a>
+    <a href="/services">Services</a>
+    <a href="/about">About</a>
+    <a href="/book">Book</a>
+    <a href="/contact">Contact</a>
+  </nav>
+</header>
+{% block site_content %}{% endblock %}
+<footer class="site-footer">
+  <p>{{ site_name }} — food &amp; beverage photography</p>
+  <p class="muted">&copy; {{ site_name }} · <a href="/contact">Work with me</a></p>
+</footer>
+{% endblock %}

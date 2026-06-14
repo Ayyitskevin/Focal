@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}{{ d.title }} · Studio · Mise{% endblock %}
+{% import "admin/_copy_link.html" as cp %}
+{% block content %}
+<main class="admin-main">
+  <div class="admin-bar">
+    <h1>Invoice · {{ d.status }}</h1>
+    <nav><a href="/admin/studio/projects/{{ p.id }}">{{ p.title }}</a> ·
+         <a href="/admin/studio">Studio</a></nav>
+  </div>
+
+  <p>Client link: <code class="slug">{{ base_url }}/i/{{ d.slug }}</code>
+  {{ cp.copy_link(base_url ~ "/i/" ~ d.slug) }}
+  {% if d.sent_at %}<span class="muted">· sent {{ d.sent_at }}</span>{% endif %}
+  {% if d.viewed_at %}<span class="muted">· viewed {{ d.viewed_at }}</span>{% endif %}
+  {% if d.paid_at %}<span class="muted">· paid {{ d.paid_at }}</span>{% endif %}</p>
+
+  {% if d.status == 'draft' %}
+  <form method="post" action="/admin/studio/invoices/{{ d.id }}" class="stack-form" style="max-width:680px">
+    <label>Title <input type="text" name="title" value="{{ d.title }}" required></label>
+    <table class="list">
+      <tr><th>Line item</th><th>Qty</th><th>Unit $</th></tr>
+      {% for row in rows %}
+      <tr>
+        <td><input type="text" name="item_label_{{ loop.index0 }}" value="{{ row.label or '' }}"></td>
+        <td><input type="number" name="item_qty_{{ loop.index0 }}" min="1"
+                   value="{{ row.qty or 1 }}" style="width:4.5em"></td>
+        <td><input type="number" name="item_price_{{ loop.index0 }}" min="0" step="0.01"
+                   value="{{ '%.2f' % (row.unit_cents / 100) if row.unit_cents is defined else '' }}"
+                   style="width:7em"></td>
+      </tr>
+      {% endfor %}
+    </table>
+    <label>Deposit $ <input type="number" name="deposit" min="0" step="0.01"
+           value="{{ '%.2f' % (d.deposit_cents / 100) }}" style="width:7em"></label>
+    <label>Due date <input type="date" name="due_date" value="{{ d.due_date or '' }}"></label>
+    <p><strong>Total: ${{ "%.2f" % (d.total_cents / 100) }}</strong>
+       <span class="muted">(recalculated on save · deposit 0 = no split)</span></p>
+    <button type="submit">Save draft</button>
+  </form>
+  <form method="post" action="/admin/studio/invoices/{{ d.id }}/send"
+        onsubmit="return confirm('Lock this invoice and mark it sent? It becomes payable at the client link.')">
+    <button type="submit">Mark sent (locks editing)</button>
+  </form>
+  {% else %}
+  <p class="muted">Locked — invoices can’t be edited after sending.</p>
+  <table class="list">
+    <tr><th>Line item</th><th>Qty</th><th>Unit</th><th>Amount</th></tr>
+    {% for row in rows if row.label %}
+    <tr>
+      <td>{{ row.label }}</td>
+      <td>{{ row.qty }}</td>
+      <td>${{ "%.2f" % (row.unit_cents / 100) }}</td>
+      <td>${{ "%.2f" % (row.qty * row.unit_cents / 100) }}</td>
+    </tr>
+    {% endfor %}
+    <tr><td colspan="3"><strong>Total</strong></td>
+        <td><strong>${{ "%.2f" % (d.total_cents / 100) }}</strong></td></tr>
+    {% if d.deposit_cents %}
+    <tr><td colspan="3">Deposit</td><td>${{ "%.2f" % (d.deposit_cents / 100) }}</td></tr>
+    {% endif %}
+  </table>
+
+  <h2>Payments</h2>
+  <table class="list">
+    <tr><th>When</th><th>Kind</th><th>Amount</th><th>Stripe event</th></tr>
+    {% for pay in payments %}
+    <tr>
+      <td class="muted">{{ pay.created_at }}</td>
+      <td>{{ pay.kind }}</td>
+      <td>${{ "%.2f" % (pay.amount_cents / 100) }}</td>
+      <td><code>{{ pay.stripe_event_id or "—" }}</code></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if not payments %}<p class="muted">No payments yet.</p>{% endif %}
+
+  {% set email_action = "/admin/studio/invoices/" ~ d.id ~ "/email" %}
+  {% set email_subject = "Invoice — " ~ p.title %}
+  {% set email_intro = "Your invoice is ready — you can pay securely online (card or bank transfer):" %}
+  {% set email_link = base_url ~ "/i/" ~ d.slug %}
+  {% include "admin/_email_form.html" %}
+  {% endif %}
+</main>
+{% endblock %}

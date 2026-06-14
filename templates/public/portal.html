@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}{{ p.company or p.client_name }} · {{ site_name }}{% endblock %}
+{% block content %}
+<main class="gallery-main portal-main">
+  <header class="portal-header">
+    <h1>{{ p.company or p.client_name }}</h1>
+    <p class="muted">Client portal · {{ site_name }}
+      · <a class="portal-share" href="{{ share_href }}" title="Open your email client with a prefilled message you can forward to a teammate">&#9993; Share this portal</a>
+    </p>
+  </header>
+
+  {% if changes %}
+  <section class="portal-changelog" aria-label="What's new">
+    {% if changes.n_galleries or changes.n_brand %}
+    <p>
+      <span class="changelog-new">NEW</span>
+      {% if changes.n_galleries %}{{ changes.n_galleries }} new galler{{ "ies" if changes.n_galleries != 1 else "y" }}{% endif %}
+      {% if changes.n_galleries and changes.n_brand %} &middot; {% endif %}
+      {% if changes.n_brand %}{{ changes.n_brand }} new brand asset{{ "s" if changes.n_brand != 1 else "" }}{% endif %}
+      {% if changes.when %}<span class="muted">since you visited {{ changes.when }}</span>{% endif %}
+    </p>
+    {% elif changes.when %}
+    <p class="muted">Nothing new since you visited {{ changes.when }}.</p>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {% set n_captioned = galleries|selectattr("captions")|list|length %}
+  <h2 class="section-name">Galleries
+    {% if galleries %}<span class="section-count">{{ galleries|length }}</span>{% endif %}
+  </h2>
+  {% if galleries %}
+  <ul class="portal-galleries">
+    {% for g in galleries %}
+    <li>
+      <a href="/g/{{ g.slug }}">{{ g.title }}</a>
+      {% if prev_visit and g.created_at > prev_visit %}<span class="new-pill" title="Added since your last visit">NEW</span>{% endif %}
+      {% if g.expires_at %}<span class="muted"> · available until {{ g.expires_at }}</span>{% endif %}
+      {% if g.captions %}
+      <details class="captions">
+        <summary>Caption drafts</summary>
+        <pre>{{ g.captions }}</pre>
+      </details>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% if n_captioned %}<p class="muted portal-meta">{{ n_captioned }} galler{{ "ies" if n_captioned != 1 else "y" }} include caption drafts &mdash; tap to expand.</p>{% endif %}
+  {% else %}
+  <p class="muted">No galleries yet — check back soon.</p>
+  {% endif %}
+
+  <h2 class="section-name">Social crops
+    {% if crops %}<span class="section-count">{{ crops|length }}</span>{% endif %}
+  </h2>
+  {% if fav_summary and fav_summary.n_faves %}
+  <p class="muted portal-meta">&hearts; {{ fav_summary.n_faves }} favorited photo{{ "s" if fav_summary.n_faves != 1 }} across {{ fav_summary.n_galleries }} galler{{ "ies" if fav_summary.n_galleries != 1 else "y" }} &mdash; every favorite gets the social crop pack below.
+    {% set biz = (p.company or p.client_name)|urlencode %}
+    <a class="portal-cta" href="/contact?prefill=gallery_formats&amp;business={{ biz }}&amp;count={{ fav_summary.n_faves }}">Need different formats or print sizes? &rarr;</a></p>
+  {% endif %}
+  <p class="muted">Ready-to-post crops of your favorited photos — square, portrait, and story.</p>
+  {% if crops %}
+  <p><a class="button" href="/portal/{{ p.slug }}/crops.zip">Download all crops (ZIP)</a></p>
+  <div class="grid">
+    {% for a in crops %}
+    <figure class="tile">
+      <img src="/portal/{{ p.slug }}/thumb/{{ a.id }}" loading="lazy" alt="{{ a.filename }}">
+      <figcaption>
+        <span class="muted">{{ a.gallery_title }}</span>
+        <span class="crop-links">
+          {% for r in ratios %}
+          <a href="/portal/{{ p.slug }}/crop/{{ a.id }}/{{ r }}">{{ r.replace('x', ':') }}</a>
+          {% endfor %}
+        </span>
+      </figcaption>
+    </figure>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">Favorite photos in your galleries and crops will appear here.</p>
+  {% endif %}
+
+  {% if brand %}
+  <h2 class="section-name">Brand assets
+    <span class="section-count">{{ brand|length }}</span>
+  </h2>
+  <ul class="portal-files">
+    {% for b in brand %}
+    <li><a href="/portal/{{ p.slug }}/brand/{{ b.id }}">{{ b.filename }}</a>
+      {% if prev_visit and b.created_at > prev_visit %}<span class="new-pill" title="Added since your last visit">NEW</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if p.usage_rights %}
+  <h2 class="section-name">Usage rights</h2>
+  <p class="usage-rights">{{ p.usage_rights }}</p>
+  {% endif %}
+</main>
+{% endblock %}

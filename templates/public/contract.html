@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}{{ d.title }} · {{ site_name }}{% endblock %}
+{% block content %}
+<main class="doc-page">
+  <header class="doc-head">
+    <p class="muted no-print">{{ site_name }}</p>
+    <h1>{{ d.title }}</h1>
+    <p class="muted">Prepared for {{ d.client_name }}{% if d.company %} · {{ d.company }}{% endif %}</p>
+  </header>
+
+  <pre class="doc-body">{{ d.body }}</pre>
+
+  {% if d.status == 'signed' %}
+  <p class="doc-accepted">✓ Signed by {{ d.signer_name }} on {{ d.signed_at }}</p>
+  <p class="muted">Document SHA-256: {{ d.body_sha256 }}</p>
+  <p class="no-print"><button onclick="window.print()" class="link">Print / save as PDF</button></p>
+  {% else %}
+  <form method="post" action="/c/{{ d.slug }}/sign" class="stack-form doc-sign no-print"
+        onsubmit="return confirm('Sign this agreement as ' + this.signer_name.value + '?')">
+    <label>Type your full legal name
+      <input type="text" name="signer_name" required autocomplete="name"></label>
+    <label class="row"><input type="checkbox" name="agree" value="yes" required>
+      I have read this agreement and intend my typed name to be my legal signature.</label>
+    <button type="submit">Sign agreement</button>
+  </form>
+  {% endif %}
+</main>
+{% endblock %}

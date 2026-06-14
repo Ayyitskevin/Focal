@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Preparing download · {{ g.title }}{% endblock %}
+{% block content %}
+<main class="center-card">
+  <h1>Packing your gallery&hellip;</h1>
+  <p class="muted">This can take a minute for large galleries. The download will start
+     automatically.</p>
+  <div class="spinner"></div>
+</main>
+<script>
+(function poll() {
+  fetch("/g/{{ g.slug }}/download/zip/status")
+    .then(r => r.json())
+    .then(d => { if (d.ready) { window.location = "/g/{{ g.slug }}/download/zip"; }
+                 else { setTimeout(poll, 3000); } })
+    .catch(() => setTimeout(poll, 5000));
+})();
+</script>
+{% endblock %}

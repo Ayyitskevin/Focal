@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Captured emails · Mise admin{% endblock %}
+{% block content %}
+<main class="admin-main">
+  <div class="admin-bar">
+    <h1><a href="/admin">&larr;</a> Captured emails</h1>
+    <nav>
+      <a href="/admin/sent">Sent log</a> ·
+      <span class="muted">{{ distinct }} unique</span> ·
+      <a href="/admin/emails.txt">Export .txt</a>
+    </nav>
+  </div>
+
+  {% if rows %}
+  <table class="list">
+    <tr><th>Email</th><th>Gallery</th><th>Captured</th></tr>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.email }}</td>
+      <td><a href="/admin/galleries/{{ r.gallery_id }}/activity">{{ r.title }}</a></td>
+      <td class="muted">{{ r.first_seen }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">No emails captured yet — the download gate collects them.</p>
+  {% endif %}
+</main>
+{% endblock %}

@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Admin · {{ site_name }}{% endblock %}
+{% block content %}
+<main class="center-card">
+  <h1>Mise admin</h1>
+  <form method="post" action="/admin/login" class="pin-form">
+    <input type="password" name="password" placeholder="Password" autofocus required>
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    <button type="submit">Sign in</button>
+  </form>
+</main>
+{% endblock %}

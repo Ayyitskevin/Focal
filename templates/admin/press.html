@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}Press · Studio · Mise{% endblock %}
+{% block content %}
+<main class="admin-main">
+  <div class="admin-bar">
+    <h1><a href="/admin/studio">&larr;</a> Press</h1>
+    <nav><a href="/admin">Galleries</a> · <a href="/admin/studio">Studio</a></nav>
+  </div>
+
+  <p class="muted">Where Kevin's F&amp;B work ran in the real world — the evidenced
+    record behind a license's "published" state. A <strong>publish date</strong>
+    marks it published; leave it blank for a piece that's expected but not out yet.
+    Link a client / project / gallery so the publication can back a usage license.</p>
+
+  <h2>Log a press hit</h2>
+  <form method="post" action="/admin/studio/press" class="stack-form">
+    <label>Outlet <input type="text" name="outlet" required
+           placeholder="Garden &amp; Gun"></label>
+    <label>Title (optional)
+      <input type="text" name="title" placeholder="The South's Best New Restaurants"></label>
+    <label>URL (optional) <input type="url" name="url" placeholder="https://…"></label>
+    <div class="form-row">
+      <label>Publish date (blank = pending)
+        <input type="date" name="publish_date"></label>
+      <label>Channel
+        <select name="channel">
+          <option value="">— none —</option>
+          {% for ch in channels_vocab %}
+          <option value="{{ ch }}">{{ ch }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <label>Client (optional)
+      <select name="client_id">
+        <option value="">— own brand / editorial —</option>
+        {% for c in clients %}
+        <option value="{{ c.id }}">{{ c.company or c.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <div class="form-row">
+      <label>Project (optional)
+        <select name="project_id">
+          <option value="">— none —</option>
+          {% for pr in projects %}
+          <option value="{{ pr.id }}">{{ pr.title }} · {{ pr.client_name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Gallery (optional)
+        <select name="gallery_id">
+          <option value="">— none —</option>
+          {% for g in galleries %}
+          <option value="{{ g.id }}">{{ g.title }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <label>Asset id (optional — which image ran)
+      <input type="number" name="asset_id" min="1"></label>
+    <label>Credit (optional — attribution as it appeared)
+      <input type="text" name="credit" placeholder="Photo: Kevin Lee"></label>
+    <label>Note (optional) <textarea name="note" rows="2"></textarea></label>
+    <label class="row"><input type="checkbox" name="show_on_site" value="1">
+      Feature on public site (only renders once a publish date is set, and it's past)</label>
+    <button type="submit">Log press hit</button>
+  </form>
+
+  <h2>Logged ({{ press|length }})</h2>
+  {% if not press %}<p class="muted">No press logged yet.</p>{% endif %}
+  {% for p in press %}
+  <details class="press-row">
+    <summary>
+      {% if p.publish_date %}<span class="ok">●</span>{% else %}<span class="muted">○</span>{% endif %}
+      <strong>{{ p.outlet }}</strong>{% if p.title %} · {{ p.title }}{% endif %}
+      {% if p.publish_date %}<span class="muted"> · {{ p.publish_date }}</span>
+      {% else %}<span class="warn"> · pending</span>{% endif %}
+      {% if p.channel %}<span class="muted"> · {{ p.channel }}</span>{% endif %}
+      {% if p.client_name %}<span class="muted"> · ↳ {{ p.company or p.client_name }}</span>{% endif %}
+    </summary>
+    <form method="post" action="/admin/studio/press/{{ p.id }}" class="stack-form">
+      <label>Outlet <input type="text" name="outlet" value="{{ p.outlet }}" required></label>
+      <label>Title <input type="text" name="title" value="{{ p.title or '' }}"></label>
+      <label>URL <input type="url" name="url" value="{{ p.url or '' }}"></label>
+      <div class="form-row">
+        <label>Publish date <input type="date" name="publish_date" value="{{ p.publish_date or '' }}"></label>
+        <label>Channel
+          <select name="channel">
+            <option value="">— none —</option>
+            {% for ch in channels_vocab %}
+            <option value="{{ ch }}" {% if p.channel == ch %}selected{% endif %}>{{ ch }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <label>Client
+        <select name="client_id">
+          <option value="">— own brand / editorial —</option>
+          {% for c in clients %}
+          <option value="{{ c.id }}" {% if p.client_id == c.id %}selected{% endif %}>{{ c.company or c.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="form-row">
+        <label>Project
+          <select name="project_id">
+            <option value="">— none —</option>
+            {% for pr in projects %}
+            <option value="{{ pr.id }}" {% if p.project_id == pr.id %}selected{% endif %}>{{ pr.title }} · {{ pr.client_name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Gallery
+          <select name="gallery_id">
+            <option value="">— none —</option>
+            {% for g in galleries %}
+            <option value="{{ g.id }}" {% if p.gallery_id == g.id %}selected{% endif %}>{{ g.title }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <label>Asset id <input type="number" name="asset_id" min="1" value="{{ p.asset_id or '' }}"></label>
+      <label>Credit <input type="text" name="credit" value="{{ p.credit or '' }}"></label>
+      <label>Note <textarea name="note" rows="2">{{ p.note or '' }}</textarea></label>
+      <label class="row"><input type="checkbox" name="show_on_site" value="1"
+             {% if p.show_on_site %}checked{% endif %}>
+        Feature on public site (only renders once a publish date is set, and it's past)</label>
+      <div class="inline-form" style="margin-top:0.4rem">
+        <button type="submit">Save</button>
+        <button type="submit" formaction="/admin/studio/press/{{ p.id }}/delete"
+                class="link danger"
+                onclick="return confirm('Delete this press record?')">Delete</button>
+      </div>
+    </form>
+  </details>
+  {% endfor %}
+</main>
+{% endblock %}

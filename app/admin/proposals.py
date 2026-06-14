@@ -1,0 +1,164 @@
+"""Proposals — composer with F&B package presets. Drafts are editable; send locks them."""
+
+import json
+import logging
+
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+
+from .. import config, db, security
+from ..render import templates
+from .studio import get_project
+
+log = logging.getLogger("mise.admin.proposals")
+router = APIRouter(prefix="/admin/studio", dependencies=[Depends(security.require_admin)])
+
+# Starting points only — Kevin edits line items per client. Three categories
+# (Photography / Videography / Brand Partner retainer) × three tiers (Starter /
+# Standard / Premium). Asheville/Western-NC-comp; retainer tiers stay ~35–40%
+# below the equivalent ad-hoc monthly bundle so the deal reads "deal."
+#
+# IMPORTANT: Odysseus Products catalog on mickey :7010 was backfilled at the
+# previous prices (half-day $1,000 floor, Brand Partner Monthly $2,200). Update
+# the catalog separately or proposal_engine will draft against stale numbers.
+PRESETS = {
+    "blank": {"title": "Proposal", "items": []},
+
+    # ── Photography ─────────────────────────────────────────────────────────
+    "photo_starter": {"title": "Photography — Starter", "items": [
+        {"label": "Half-day photography session (up to 4 hrs)", "qty": 1, "unit_cents": 90000},
+        {"label": "Up to 20 edited, web-ready images", "qty": 1, "unit_cents": 0},
+        {"label": "Online gallery delivery + standard usage rights", "qty": 1, "unit_cents": 0},
+    ]},
+    "photo_standard": {"title": "Photography — Standard", "items": [
+        {"label": "Full-day photography session (up to 8 hrs)", "qty": 1, "unit_cents": 180000},
+        {"label": "Up to 50 edited, web-ready images", "qty": 1, "unit_cents": 0},
+        {"label": "Social crops (1:1, 4:5, 9:16) for hero selects", "qty": 1, "unit_cents": 0},
+        {"label": "Online gallery delivery + standard usage rights", "qty": 1, "unit_cents": 0},
+    ]},
+    "photo_premium": {"title": "Photography — Premium", "items": [
+        {"label": "Extended-day photography session (up to 10 hrs)", "qty": 1, "unit_cents": 320000},
+        {"label": "Up to 75 edited, web-ready images", "qty": 1, "unit_cents": 0},
+        {"label": "Social crops (1:1, 4:5, 9:16) for every select", "qty": 1, "unit_cents": 0},
+        {"label": "Rush turnaround (5 business days)", "qty": 1, "unit_cents": 0},
+        {"label": "Online gallery delivery + extended usage rights", "qty": 1, "unit_cents": 0},
+    ]},
+
+    # ── Videography ─────────────────────────────────────────────────────────
+    "video_starter": {"title": "Videography — Starter", "items": [
+        {"label": "Half-day video shoot (up to 4 hrs)", "qty": 1, "unit_cents": 180000},
+        {"label": "3 short-form vertical reels (15–30s each, edited)", "qty": 1, "unit_cents": 0},
+        {"label": "Licensed music + color grade", "qty": 1, "unit_cents": 0},
+        {"label": "Delivery via gallery + standard usage rights", "qty": 1, "unit_cents": 0},
+    ]},
+    "video_standard": {"title": "Videography — Standard", "items": [
+        {"label": "Full-day video shoot (up to 8 hrs)", "qty": 1, "unit_cents": 320000},
+        {"label": "6 short-form vertical reels (15–60s each, edited)", "qty": 1, "unit_cents": 0},
+        {"label": "B-roll package + licensed music + color grade", "qty": 1, "unit_cents": 0},
+        {"label": "Delivery via gallery + standard usage rights", "qty": 1, "unit_cents": 0},
+    ]},
+    "video_premium": {"title": "Videography — Premium", "items": [
+        {"label": "Two video shoot days (up to 16 hrs total)", "qty": 1, "unit_cents": 580000},
+        {"label": "10 short-form reels + 1 hero brand video (60–90s)", "qty": 1, "unit_cents": 0},
+        {"label": "B-roll package, color grade, licensed music", "qty": 1, "unit_cents": 0},
+        {"label": "Rush turnaround available", "qty": 1, "unit_cents": 0},
+        {"label": "Delivery via gallery + extended usage rights", "qty": 1, "unit_cents": 0},
+    ]},
+
+    # ── Brand Partner (Monthly Retainer) ────────────────────────────────────
+    "retainer_starter": {"title": "Brand Partner — Starter (Monthly)", "items": [
+        {"label": "Monthly photo content day (~20 edited images)", "qty": 1, "unit_cents": 140000},
+        {"label": "Social crop pack (1:1, 4:5, 9:16) for hero selects", "qty": 1, "unit_cents": 0},
+        {"label": "Standing client portal", "qty": 1, "unit_cents": 0},
+        {"label": "Priority scheduling (24-hr response)", "qty": 1, "unit_cents": 0},
+    ]},
+    "retainer_standard": {"title": "Brand Partner — Standard (Monthly)", "items": [
+        {"label": "Monthly photo + short-form video content day", "qty": 1, "unit_cents": 220000},
+        {"label": "~30 edited images + 3 short-form reels", "qty": 1, "unit_cents": 0},
+        {"label": "Social crop pack (1:1, 4:5, 9:16) for every select", "qty": 1, "unit_cents": 0},
+        {"label": "Standing portal + priority scheduling", "qty": 1, "unit_cents": 0},
+    ]},
+    "retainer_premium": {"title": "Brand Partner — Premium (Monthly)", "items": [
+        {"label": "Two content days/month (photo + video)", "qty": 1, "unit_cents": 380000},
+        {"label": "~50 edited images + 6 short-form reels", "qty": 1, "unit_cents": 0},
+        {"label": "Quarterly hero brand video (60–90s)", "qty": 1, "unit_cents": 0},
+        {"label": "Full social crop pack + extended usage rights", "qty": 1, "unit_cents": 0},
+        {"label": "Standing portal + concierge scheduling", "qty": 1, "unit_cents": 0},
+    ]},
+}
+
+MAX_ITEM_ROWS = 12
+
+
+def get_proposal(proposal_id: int) -> "db.sqlite3.Row":
+    d = db.one("SELECT * FROM proposals WHERE id=?", (proposal_id,))
+    if not d:
+        raise HTTPException(status_code=404)
+    return d
+
+
+def parse_items(form) -> tuple[str, int]:
+    """Collect item_label_N / item_qty_N / item_price_N rows → (json, total_cents)."""
+    items, total = [], 0
+    for i in range(MAX_ITEM_ROWS):
+        label = (form.get(f"item_label_{i}") or "").strip()
+        if not label:
+            continue
+        try:
+            qty = max(1, int(form.get(f"item_qty_{i}") or "1"))
+            unit_cents = round(float(form.get(f"item_price_{i}") or "0") * 100)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"bad numbers on row {i + 1}")
+        items.append({"label": label, "qty": qty, "unit_cents": unit_cents})
+        total += qty * unit_cents
+    return json.dumps(items), total
+
+
+@router.post("/projects/{project_id}/proposals")
+async def create_proposal(project_id: int, preset: str = Form("blank")):
+    p = get_project(project_id)
+    tpl = PRESETS.get(preset, PRESETS["blank"])
+    did = db.run("""INSERT INTO proposals (project_id, slug, title, line_items, total_cents)
+                    VALUES (?,?,?,?,?)""",
+                 (project_id, security.new_slug(), f"{tpl['title']} — {p['title']}",
+                  json.dumps(tpl["items"]),
+                  sum(i["qty"] * i["unit_cents"] for i in tpl["items"])))
+    log.info("proposal %s created for project %s (preset=%s)", did, project_id, preset)
+    return RedirectResponse(f"/admin/studio/proposals/{did}", status_code=303)
+
+
+@router.get("/proposals/{proposal_id}", response_class=HTMLResponse)
+async def proposal_detail(request: Request, proposal_id: int):
+    d = get_proposal(proposal_id)
+    p = get_project(d["project_id"])
+    items = json.loads(d["line_items"])
+    rows = items + [{} for _ in range(max(0, MAX_ITEM_ROWS - len(items)))]
+    return templates.TemplateResponse(request, "admin/proposal.html",
+                                      {"d": d, "p": p, "rows": rows,
+                                       "base_url": config.BASE_URL})
+
+
+@router.post("/proposals/{proposal_id}")
+async def update_proposal(request: Request, proposal_id: int):
+    d = get_proposal(proposal_id)
+    if d["status"] != "draft":
+        raise HTTPException(status_code=400, detail="sent proposals are locked")
+    form = await request.form()
+    items_json, total = parse_items(form)
+    db.run("UPDATE proposals SET title=?, intro=?, line_items=?, total_cents=? WHERE id=?",
+           ((form.get("title") or "").strip() or d["title"],
+            (form.get("intro") or "").strip() or None, items_json, total, proposal_id))
+    return RedirectResponse(f"/admin/studio/proposals/{proposal_id}", status_code=303)
+
+
+@router.post("/proposals/{proposal_id}/send")
+async def mark_proposal_sent(proposal_id: int):
+    d = get_proposal(proposal_id)
+    if d["status"] != "draft":
+        raise HTTPException(status_code=400, detail="already sent")
+    db.run("UPDATE proposals SET status='sent', sent_at=datetime('now') WHERE id=?",
+           (proposal_id,))
+    db.run("UPDATE projects SET status='proposal' WHERE id=? AND status='lead'",
+           (d["project_id"],))
+    log.info("proposal %s marked sent", proposal_id)
+    return RedirectResponse(f"/admin/studio/proposals/{proposal_id}", status_code=303)

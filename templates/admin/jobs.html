@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Jobs · Mise admin{% endblock %}
+{% block content %}
+<main class="admin-main">
+  <div class="admin-bar">
+    <h1><a href="/admin">&larr;</a> Jobs</h1>
+    <span class="muted">{{ pending }} pending</span>
+  </div>
+
+  <h2>Failed</h2>
+  {% if failed %}
+  <table class="list">
+    <tr><th>#</th><th>Kind</th><th>Payload</th><th>Attempts</th><th>Error</th><th>Updated</th><th></th></tr>
+    {% for j in failed %}
+    <tr>
+      <td>{{ j.id }}</td>
+      <td>{{ j.kind }}</td>
+      <td><code>{{ j.payload }}</code></td>
+      <td>{{ j.attempts }}</td>
+      <td><span class="warn">{{ j.error }}</span></td>
+      <td>{{ j.updated_at }}</td>
+      <td><form method="post" action="/admin/jobs/{{ j.id }}/retry" class="inline">
+        <button class="link">retry</button></form></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">No failed jobs.</p>
+  {% endif %}
+
+  <h2>Recent</h2>
+  {% if recent %}
+  <table class="list">
+    <tr><th>#</th><th>Kind</th><th>Status</th><th>Attempts</th><th>Updated</th></tr>
+    {% for j in recent %}
+    <tr>
+      <td>{{ j.id }}</td>
+      <td>{{ j.kind }}</td>
+      <td>{{ j.status }}</td>
+      <td>{{ j.attempts }}</td>
+      <td>{{ j.updated_at }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">No jobs yet.</p>
+  {% endif %}
+</main>
+{% endblock %}

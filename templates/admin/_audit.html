@@ -1,0 +1,26 @@
+{# Presentation-only rendering of an already-parsed audit diff dict.
+   Values stored as JSON-array strings (territory, channels) are shown as
+   individual chips instead of raw ["..."] brackets. This never touches what
+   audit.log() writes — the stored shape is the load-bearing append-only record. #}
+{% macro _chips(value) -%}
+  {%- set toks = value|diff_tokens -%}
+  {%- if toks -%}
+    {%- for tok in toks %}<span class="diff-chip">{{ tok }}</span>{% endfor -%}
+  {%- else -%}
+    <span class="muted">—</span>
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro diff_chips(diff) %}
+<ul class="diff">
+  {% for k, v in diff.items() %}
+  <li><code>{{ k }}</code>:
+    {% if v is sequence and v|length == 2 and not v is string %}
+      {{ _chips(v[0]) }} <span class="diff-arrow">→</span> {{ _chips(v[1]) }}
+    {% else %}
+      {{ _chips(v) }}
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% endmacro %}

@@ -1,0 +1,21 @@
+# Secrets — NEVER commit
+.env
+*.env
+!.env.example
+
+# Runtime data: SQLite DBs, client media, zips, tmp, brand uploads (+ owned by mise user)
+data/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Editor / OS cruft
+*.bak
+*.bak.*
+*.swp
+.DS_Store

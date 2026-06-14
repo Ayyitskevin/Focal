@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{% block robots %}<meta name="robots" content="noindex, nofollow">{% endblock %}
+<title>{% block title %}{{ site_name }}{% endblock %}</title>
+<link rel="stylesheet" href="/static/mise.css?v={{ static_rev }}">
+<script src="/static/htmx.min.js?v={{ static_rev }}" defer></script>
+<script src="/static/copy_link.js?v={{ static_rev }}" defer></script>
+<script src="/static/details_persist.js?v={{ static_rev }}" defer></script>
+{% block head %}{% endblock %}
+</head>
+<body class="{% block bodyclass %}{% endblock %}">
+{% block content %}{% endblock %}
+</body>
+</html>

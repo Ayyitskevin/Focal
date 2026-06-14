@@ -1,0 +1,59 @@
+{% extends "site/base_site.html" %}
+{% block title %}{{ g.cs_tagline or g.title }} — {{ site_name }}{% endblock %}
+{% block head %}
+{% set hero = photos[0] if photos else None %}
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="{{ site_name }}">
+<meta property="og:title" content="{{ g.cs_tagline or g.title }} — {{ site_name }}">
+<meta property="og:description" content="{{ (g.cs_brief or '')[:200] }}">
+<meta property="og:url" content="{{ base_url }}/work/{{ g.slug }}">
+{% if hero %}<meta property="og:image" content="{{ base_url }}/site/img/{{ hero.id }}">{% endif %}
+<meta name="twitter:card" content="{{ 'summary_large_image' if hero else 'summary' }}">
+<meta name="description" content="{{ (g.cs_brief or g.cs_tagline or g.title)[:200] }}">
+{% endblock %}
+{% block site_content %}
+<main class="site-main">
+  <article class="work-detail">
+    <header class="work-head">
+      <p class="muted work-eyebrow">
+        {{ g.client_name or "Case study" }}{% if g.client_name and g.cs_location %} · {% endif %}{{ g.cs_location or "" }}
+      </p>
+      <h1>{{ g.cs_tagline or g.title }}</h1>
+      {% if g.cs_brief %}<div class="work-brief">{{ g.cs_brief }}</div>{% endif %}
+    </header>
+
+    {% set heading = "From " + (g.client_name or "this project") %}
+    {% include "site/_testimonials.html" %}
+
+    {% if photos %}
+    <div class="grid site-grid work-grid">
+      {% for a in photos %}
+      <figure class="tile" data-web="/site/img/{{ a.id }}">
+        <img src="/site/img/{{ a.id }}?variant=thumb" loading="lazy"
+             alt="{{ g.cs_tagline or g.title }}{% if g.client_name %} — {{ g.client_name }}{% endif %}">
+      </figure>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="muted">No photos starred for this case study yet.</p>
+    {% endif %}
+
+    {% if credits %}
+    <aside class="work-credits">
+      <h2>Credits</h2>
+      <ul>{% for c in credits %}<li>{{ c }}</li>{% endfor %}</ul>
+    </aside>
+    {% endif %}
+
+    <footer class="work-cta">
+      <p>Like the look?</p>
+      <a class="btn" href="/book">Book a shoot</a>
+      <a class="btn link" href="/work">More work →</a>
+    </footer>
+  </article>
+</main>
+
+{% if photos %}
+{% include "site/_lightbox.html" %}
+{% endif %}
+{% endblock %}

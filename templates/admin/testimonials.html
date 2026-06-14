@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Testimonials · Studio · Mise{% endblock %}
+{% block content %}
+<main class="admin-main">
+  <div class="admin-bar">
+    <h1><a href="/admin/studio">&larr;</a> Testimonials</h1>
+    <nav><a href="/admin">Galleries</a> · <a href="/admin/studio">Studio</a></nav>
+  </div>
+
+  <p class="muted">Published testimonials with no gallery render on the home page
+    and on <code>/services</code> (top 3 by position). Ones attached to a gallery
+    show on that case-study page (<code>/work/&lt;slug&gt;</code>) above the photo grid.</p>
+
+  <h2>Add a testimonial</h2>
+  <form method="post" action="/admin/studio/testimonials" class="stack-form">
+    <label>Quote
+      <textarea name="quote" rows="3" required
+                placeholder="They captured our hero dishes better than we imagined possible."></textarea></label>
+    <label>Attribution name
+      <input type="text" name="attribution_name" required
+             placeholder="Dani Smith"></label>
+    <label>Business (optional)
+      <input type="text" name="business" placeholder="Owner, Bistro Vert"></label>
+    <label>Attach to gallery (optional — for case-study display)
+      <select name="gallery_id">
+        <option value="">— general (home + /services) —</option>
+        {% for g in galleries %}
+        <option value="{{ g.id }}">{{ g.title }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Position (lower = first)
+      <input type="number" name="position" value="0"></label>
+    <label class="row"><input type="checkbox" name="published" value="true" checked> Published</label>
+    <button type="submit">Add testimonial</button>
+  </form>
+
+  <h2>Existing</h2>
+  {% if not testimonials %}<p class="muted">No testimonials yet.</p>{% endif %}
+  {% for t in testimonials %}
+  <details class="testimonial-row">
+    <summary>
+      {% if t.published %}<span class="ok">●</span>{% else %}<span class="muted">○</span>{% endif %}
+      <strong>{{ t.attribution_name }}</strong>{% if t.business %} · {{ t.business }}{% endif %}
+      {% if t.gallery_title %} · <span class="muted">↳ {{ t.gallery_title }}</span>{% endif %}
+      <span class="muted"> · pos {{ t.position }}</span>
+    </summary>
+    <form method="post" action="/admin/studio/testimonials/{{ t.id }}" class="stack-form">
+      <label>Quote <textarea name="quote" rows="3" required>{{ t.quote }}</textarea></label>
+      <label>Attribution name
+        <input type="text" name="attribution_name" value="{{ t.attribution_name }}" required></label>
+      <label>Business
+        <input type="text" name="business" value="{{ t.business or '' }}"></label>
+      <label>Gallery
+        <select name="gallery_id">
+          <option value="">— general —</option>
+          {% for g in galleries %}
+          <option value="{{ g.id }}" {% if t.gallery_id == g.id %}selected{% endif %}>{{ g.title }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Position <input type="number" name="position" value="{{ t.position }}"></label>
+      <label class="row"><input type="checkbox" name="published" value="true"
+             {% if t.published %}checked{% endif %}> Published</label>
+      <div class="inline-form" style="margin-top:0.4rem">
+        <button type="submit">Save</button>
+        <button type="submit" formaction="/admin/studio/testimonials/{{ t.id }}/delete"
+                class="link danger"
+                onclick="return confirm('Delete this testimonial?')">Delete</button>
+      </div>
+    </form>
+  </details>
+  {% endfor %}
+</main>
+{% endblock %}
