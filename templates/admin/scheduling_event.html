@@ -1,0 +1,62 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}{{ e.name }} · Scheduling · Mise{% endblock %}
+{% block admin_body %}
+<main class="admin-main">
+  <div class="admin-bar">
+    <div>
+      <h1>{{ e.name }}</h1>
+      <p class="muted">Public link:
+        <a href="/book/{{ e.slug }}">{{ base_url }}/book/{{ e.slug }}</a></p>
+    </div>
+    <nav><a href="/admin/scheduling">&larr; All events</a></nav>
+  </div>
+
+  <form method="post" action="/admin/scheduling/event/{{ e.id }}" class="sched-eventform">
+    <div class="sched-grid">
+      <label>Name <input name="name" value="{{ e.name }}" required></label>
+      <label>Length (min)
+        <input name="duration_min" type="number" min="5" max="1440" value="{{ e.duration_min }}"></label>
+      <label>Location / type
+        <input name="location" value="{{ e.location }}" placeholder="Google Meet · Phone · On-site"></label>
+      <label>Accent color
+        <input name="color" type="color" value="{{ e.color }}"></label>
+      <label>Buffer before (min)
+        <input name="buffer_before_min" type="number" min="0" max="480" value="{{ e.buffer_before_min }}"></label>
+      <label>Buffer after (min)
+        <input name="buffer_after_min" type="number" min="0" max="480" value="{{ e.buffer_after_min }}"></label>
+      <label>Minimum notice (hours)
+        <input name="min_notice_hours" type="number" min="0" max="8760" value="{{ e.min_notice_hours }}"></label>
+      <label>Max bookings / day <span class="muted">(0 = no limit)</span>
+        <input name="max_per_day" type="number" min="0" max="50" value="{{ e.max_per_day }}"></label>
+      <label>Booking window (days ahead)
+        <input name="booking_window_days" type="number" min="1" max="365" value="{{ e.booking_window_days }}"></label>
+      <label>Slot interval (min) <span class="muted">(0 = use length)</span>
+        <input name="slot_step_min" type="number" min="0" max="480" value="{{ e.slot_step_min }}"></label>
+      <label>Sort position
+        <input name="position" type="number" min="0" max="999" value="{{ e.position }}"></label>
+    </div>
+    <label class="sched-desc">Description
+      <textarea name="description" rows="3" placeholder="Shown on the booking page and in the invite.">{{ e.description }}</textarea></label>
+    <label class="sched-check">
+      <input type="checkbox" name="creates_notion_session" value="1"
+             {% if e.creates_notion_session %}checked{% endif %}>
+      <span>Create a Notion Session when booked
+        <span class="muted">— for real shoots, so the pipeline (preshoot pack, balance
+        chaser, digest) tracks it. Leave off for discovery/consult calls.</span></span>
+    </label>
+    <button type="submit">Save event type</button>
+  </form>
+
+  <div class="sched-eventfoot">
+    <form method="post" action="/admin/scheduling/event/{{ e.id }}/toggle">
+      <button class="linkbtn">{{ "Deactivate" if e.active else "Activate" }}</button>
+    </form>
+    <form method="post" action="/admin/scheduling/event/{{ e.id }}/delete"
+          onsubmit="return confirm('Delete this event type? Only allowed if it has no bookings.')">
+      <button class="linkbtn danger">Delete</button>
+    </form>
+  </div>
+  <p class="muted">This event uses your global weekly availability. Per-event custom
+    hours aren’t exposed here yet — use date overrides for one-off exceptions.</p>
+</main>
+{% endblock %}

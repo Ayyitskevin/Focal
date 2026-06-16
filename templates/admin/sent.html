@@ -1,9 +1,9 @@
-{% extends "base.html" %}
+{% extends "admin/base_admin.html" %}
 {% block title %}Sent emails · Mise admin{% endblock %}
-{% block content %}
+{% block admin_body %}
 <main class="admin-main">
   <div class="admin-bar">
-    <h1><a href="/admin">&larr;</a> Sent emails</h1>
+    <h1><a href="/admin/galleries">&larr;</a> Sent emails</h1>
     <nav>
       <a href="/admin/emails">Captured</a> ·
       <span class="muted">{{ total }} total send{{ "s" if total != 1 }}</span>
@@ -21,7 +21,7 @@
 
   {% if rows %}
   <table class="list">
-    <tr><th>Date</th><th>To</th><th>Kind</th><th>Subject</th><th>Project / Client</th></tr>
+    <tr><th>Date</th><th>To</th><th>Kind</th><th>Subject</th><th>Session / Client</th></tr>
     {% for r in rows %}
     <tr>
       <td class="muted">{{ r.created_at }}</td>

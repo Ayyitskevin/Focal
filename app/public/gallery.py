@@ -28,6 +28,8 @@ async def view(request: Request, slug: str):
     if is_expired(g):
         return templates.TemplateResponse(request, "public/expired.html", {"g": g},
                                           status_code=410)
+    if g["type"] == "drop":
+        return _view_drop(request, g)
     visitor = security.get_visitor(request, g["id"])
     if not visitor:
         return templates.TemplateResponse(request, "public/pin.html",
@@ -56,6 +58,29 @@ async def view(request: Request, slug: str):
                                        "assets": assets, "favs": favs,
                                        "section_picks": section_picks,
                                        "visitor": visitor})
+
+
+def _view_drop(request: Request, g):
+    """WeTransfer-style transfer page. When require_pin=0 (link-only) we mint a
+    visitor on first view so the existing email-free download + tracking still
+    work; when require_pin=1 the normal PIN gate applies."""
+    visitor = security.get_visitor(request, g["id"])
+    new_cookie = None
+    if not visitor:
+        if g["require_pin"]:
+            return templates.TemplateResponse(request, "public/pin.html",
+                                              {"g": g, "error": None})
+        vid, new_cookie = security.create_visitor(g["id"])
+        visitor = {"id": vid}
+    assets = db.all_("""SELECT * FROM assets WHERE gallery_id=? AND status='ready'
+                        ORDER BY position, id""", (g["id"],))
+    resp = templates.TemplateResponse(request, "public/drop.html",
+                                      {"g": g, "assets": assets, "visitor": visitor})
+    if new_cookie:
+        resp.set_cookie(security.visitor_cookie_name(g["id"]), new_cookie,
+                        max_age=config.SESSION_MAX_AGE, httponly=True,
+                        secure=config.COOKIE_SECURE, samesite="lax", path="/")
+    return resp
 
 
 @router.post("/{slug}/pin")

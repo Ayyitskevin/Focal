@@ -36,6 +36,19 @@ def admin(client):
     return client
 
 
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    # The middleware limiter (app.ratelimit._hits) is a module-global keyed by
+    # ip="testclient" for every TestClient, so request counts accrete across the
+    # whole file and later tests trip 429 on their first call. Clear it per test so
+    # each exercises the limiter from a clean window, exactly as in isolation. The
+    # inquiry/PIN throttles live in the DB (pin_attempts) and are reset by the tests
+    # that use them, so this only touches the in-process buckets.
+    from app import ratelimit
+    ratelimit._hits.clear()
+    yield
+
+
 def _jpeg_bytes(w=800, h=600) -> bytes:
     buf = io.BytesIO()
     Image.new("RGB", (w, h), (180, 90, 40)).save(buf, "JPEG")
@@ -681,7 +694,7 @@ def test_captured_emails(admin):
 
 def test_dashboard_storage(admin):
     # full-flow gallery above has uploaded media — its row shows a real size
-    page = admin.get("/admin").text
+    page = admin.get("/admin/galleries").text
     assert "<th>Size</th>" in page
     assert " MB" in page or " KB" in page or " GB</td>" in page
     # free-space line always renders; the test box is nowhere near the watermark
@@ -689,7 +702,7 @@ def test_dashboard_storage(admin):
     assert "uploads refused" not in page
     # an empty gallery shows the dash, not 0 — size cell is the muted td
     admin.post("/admin/galleries", data={"title": "Empty Storage"})
-    assert '<td class="muted">—</td>' in admin.get("/admin").text
+    assert '<td class="muted">—</td>' in admin.get("/admin/galleries").text
     # no snapshots in the fresh test data dir → loud "none found" (silence ≠ evidence)
     assert "none found" in page
     # a fresh snapshot flips the line to a quiet age
@@ -698,7 +711,7 @@ def test_dashboard_storage(admin):
     bdir.mkdir(exist_ok=True)
     snap = bdir / "mise-2026-06-12-0230.db.gz"
     snap.write_bytes(b"x")
-    fresh = admin.get("/admin").text
+    fresh = admin.get("/admin/galleries").text
     assert "under an hour ago" in fresh and "none found" not in fresh
     snap.unlink()
     g = db.one("SELECT id FROM galleries WHERE title='Empty Storage'")
@@ -724,13 +737,13 @@ def test_expired_gallery(admin):
         assert pub.get(f"/g/{g['slug']}").status_code == 410
 
     # dashboard surfaces expiry so Kevin sees lockouts before clients do
-    assert "expired 2000-01-01" in admin.get("/admin").text
+    assert "expired 2000-01-01" in admin.get("/admin/galleries").text
     near = (dt.date.today() + dt.timedelta(days=3)).isoformat()
     db.run("UPDATE galleries SET expires_at=? WHERE id=?", (near, g["id"]))
-    assert f"expires {near}" in admin.get("/admin").text
+    assert f"expires {near}" in admin.get("/admin/galleries").text
     far = (dt.date.today() + dt.timedelta(days=60)).isoformat()
     db.run("UPDATE galleries SET expires_at=? WHERE id=?", (far, g["id"]))
-    assert f"until {far}" in admin.get("/admin").text
+    assert f"until {far}" in admin.get("/admin/galleries").text
 
     # delivery email prefill carries the expiry note (form renders when published)
     db.run("UPDATE galleries SET published=1 WHERE id=?", (g["id"],))
@@ -754,15 +767,15 @@ def test_studio_clients_projects(admin):
                    data={"title": "Spring menu shoot"}, follow_redirects=False)
     assert r.status_code == 303
     p = db.one("SELECT * FROM projects ORDER BY id DESC LIMIT 1")
-    assert p["client_id"] == c["id"] and p["status"] == "lead"
+    assert p["client_id"] == c["id"] and p["status"] == "inquiry_received"
 
     # status advances and pages render
     r = admin.post(f"/admin/studio/projects/{p['id']}",
-                   data={"title": p["title"], "status": "proposal", "notes": "",
+                   data={"title": p["title"], "status": "proposal_sent", "notes": "",
                          "gallery_id": "", "notion_page_id": ""},
                    follow_redirects=False)
     assert r.status_code == 303
-    assert db.one("SELECT status FROM projects WHERE id=?", (p["id"],))["status"] == "proposal"
+    assert db.one("SELECT status FROM projects WHERE id=?", (p["id"],))["status"] == "proposal_sent"
     for url in ("/admin/studio", f"/admin/studio/clients/{c['id']}",
                 f"/admin/studio/projects/{p['id']}"):
         assert admin.get(url).status_code == 200
@@ -807,17 +820,19 @@ def test_proposal_lifecycle(admin):
     assert d["total_cents"] == 100000 + 15100
 
     # mark sent — locks editing, advances project
-    db.run("UPDATE projects SET status='lead' WHERE id=?", (p["id"],))
+    db.run("UPDATE projects SET status='inquiry_received' WHERE id=?", (p["id"],))
     r = admin.post(f"/admin/studio/proposals/{d['id']}/send", follow_redirects=False)
     assert r.status_code == 303
     d = db.one("SELECT * FROM proposals WHERE id=?", (d["id"],))
     assert d["status"] == "sent" and d["sent_at"]
-    assert db.one("SELECT status FROM projects WHERE id=?", (p["id"],))["status"] == "proposal"
+    assert db.one("SELECT status FROM projects WHERE id=?", (p["id"],))["status"] == "proposal_sent"
     r = admin.post(f"/admin/studio/proposals/{d['id']}",
                    data={"title": "nope"}, follow_redirects=False)
     assert r.status_code == 400
 
-    # public view flips sent → viewed, then accept advances project
+    # public view flips sent → viewed; accept records acceptance but does NOT
+    # advance the project (the pipeline advances on contract SIGN, not proposal
+    # accept — there is no proposal_accepted stage in the 8-stage funnel)
     with TestClient(app) as pub:
         assert pub.get(f"/p/{d['slug']}").status_code == 200
         d = db.one("SELECT * FROM proposals WHERE id=?", (d["id"],))
@@ -827,7 +842,7 @@ def test_proposal_lifecycle(admin):
         d = db.one("SELECT * FROM proposals WHERE id=?", (d["id"],))
         assert d["status"] == "accepted" and d["accepted_at"]
         assert db.one("SELECT status FROM projects WHERE id=?",
-                      (p["id"],))["status"] == "contract"
+                      (p["id"],))["status"] == "proposal_sent"
         # accepted proposals can't be re-actioned
         assert pub.post(f"/p/{d['slug']}/decline",
                         follow_redirects=False).status_code == 400
@@ -880,7 +895,7 @@ def test_contract_lifecycle(admin):
         assert r.status_code == 409
         db.run("UPDATE contracts SET body=rtrim(body,' ') WHERE id=?", (d["id"],))
 
-        # sign records name/ip/timestamp, advances project to invoice
+        # sign records name/ip/timestamp, advances project to contract_signed
         r = pub.post(f"/c/{d['slug']}/sign",
                      data={"signer_name": "Dana Chef", "agree": "yes"},
                      follow_redirects=False)
@@ -889,7 +904,7 @@ def test_contract_lifecycle(admin):
         assert (d["status"] == "signed" and d["signer_name"] == "Dana Chef"
                 and d["signed_at"] and d["signer_ip"])
         assert db.one("SELECT status FROM projects WHERE id=?",
-                      (p["id"],))["status"] == "invoice"
+                      (p["id"],))["status"] == "contract_signed"
         # signed contract renders the signature record, can't be re-signed
         assert "Signed by Dana Chef" in pub.get(f"/c/{d['slug']}").text
         assert pub.post(f"/c/{d['slug']}/sign",
@@ -1128,7 +1143,7 @@ def test_final_email_auto_advances_project(admin, monkeypatch):
     cid = db.run("INSERT INTO clients (name, email) VALUES (?,?)",
                  ("Mara Sun", "mara@cafe.com"))
     pid = db.run("INSERT INTO projects (client_id, title, status) VALUES (?,?,?)",
-                 (cid, "Spring shoot", "shooting"))
+                 (cid, "Spring shoot", "session_planning"))
     gid = db.run("INSERT INTO galleries (slug, title, pin, project_id, published) "
                  "VALUES (?,?,?,?,1)",
                  ("FinalEmail0001", "Spring shoot", "1234", pid))
@@ -1139,25 +1154,25 @@ def test_final_email_auto_advances_project(admin, monkeypatch):
                    data={**data, "email_kind": "delivery"},
                    follow_redirects=False)
     assert r.status_code == 303
-    assert db.one("SELECT status FROM projects WHERE id=?", (pid,))["status"] == "shooting"
+    assert db.one("SELECT status FROM projects WHERE id=?", (pid,))["status"] == "session_planning"
 
     # kind=proofing → status unchanged (proofing is a prompt, not a hand-off)
     admin.post(f"/admin/galleries/{gid}/email",
                data={**data, "email_kind": "proofing"},
                follow_redirects=False)
-    assert db.one("SELECT status FROM projects WHERE id=?", (pid,))["status"] == "shooting"
+    assert db.one("SELECT status FROM projects WHERE id=?", (pid,))["status"] == "session_planning"
 
-    # kind=final + project in pre-delivered state → auto-advance to 'delivered'
+    # kind=final + project in pre-delivered state → auto-advance to 'project_closed'
     admin.post(f"/admin/galleries/{gid}/email",
                data={**data, "email_kind": "final"},
                follow_redirects=False)
-    assert db.one("SELECT status FROM projects WHERE id=?", (pid,))["status"] == "delivered"
+    assert db.one("SELECT status FROM projects WHERE id=?", (pid,))["status"] == "project_closed"
 
-    # already-'delivered' → no churn (idempotent re-sends are fine)
+    # already-'project_closed' → no churn (idempotent re-sends are fine)
     admin.post(f"/admin/galleries/{gid}/email",
                data={**data, "email_kind": "final"},
                follow_redirects=False)
-    assert db.one("SELECT status FROM projects WHERE id=?", (pid,))["status"] == "delivered"
+    assert db.one("SELECT status FROM projects WHERE id=?", (pid,))["status"] == "project_closed"
 
     # 'archived' is NEVER auto-overwritten by a final-email — Kevin's archive
     # signal is intentional and should survive a re-fire of the hand-off email.
@@ -1502,7 +1517,7 @@ def test_contact_prefill():
 def test_pipeline_dashboard(admin):
     page = admin.get("/admin/studio")
     assert page.status_code == 200
-    assert "invoice <strong>1</strong>" in page.text  # Dana's project sits at invoice
+    assert "Retainer Paid <strong>1</strong>" in page.text  # Dana's project sits at retainer paid
     assert "nothing outstanding" in page.text         # her invoice is fully paid
     assert "overdue" not in page.text
 
@@ -1678,99 +1693,120 @@ def test_inquiries_admin_view(admin):
 
 
 def test_booking_flow(monkeypatch, admin):
+    # The public booking surface is the scheduler: GET /book lists event types,
+    # GET /book/{slug} renders a slot picker, POST /book/{slug} claims a slot.
+    # A confirmed real-shoot booking find-or-creates a Studio client + project and
+    # emails both sides. (The old free-text inquiry form at bare /book is gone.)
     import datetime as dt
-    from app import config, mailer
+    from app import config, mailer, scheduling as S
     monkeypatch.setattr(config, "GMAIL_USER", "kevin@example.com")
     monkeypatch.setattr(config, "GMAIL_APP_PASSWORD", "app-pw")
     sent = []
+    monkeypatch.setattr(mailer, "configured", lambda: True)
     monkeypatch.setattr(mailer, "send",
-                        lambda to, subject, body, reply_to="":
+                        lambda to, subject, body, reply_to="", ics=None:
                         sent.append((to, subject, body, reply_to)))
-    future = (dt.date.today() + dt.timedelta(days=21)).isoformat()
-    past = (dt.date.today() - dt.timedelta(days=1)).isoformat()
+
+    # Seed a real-shoot event type (creates_notion_session=1 → spawns a project)
+    # with Mon–Fri 9:00–17:00 availability and 1h notice so a near slot is open.
+    eid = db.run("""INSERT INTO event_types
+        (slug, name, duration_min, min_notice_hours, booking_window_days,
+         max_per_day, creates_notion_session, location, active)
+        VALUES (?,?,?,?,?,?,?,?,1)""",
+        ("fb-shoot", "Food Shoot", 60, 1, 60, 0, 1, "On-site"))
+    for wd in range(5):
+        db.run("INSERT INTO availability_rules (event_type_id, weekday, start_min, "
+               "end_min) VALUES (?,?,?,?)", (eid, wd, 540, 1020))
+
+    et = S.event_by_slug("fb-shoot")
+    day = dt.date.today() + dt.timedelta(days=3)   # ≥3d out so notice never clips
+    while day.weekday() >= 5:
+        day += dt.timedelta(days=1)
+    slots = S.slots_for_day(et, day)
+    assert slots, "seed produced no open slots"
+    start = slots[0]["utc"]
+
+    def n_bookings(status=None):
+        if status:
+            return db.one("SELECT COUNT(*) AS n FROM bookings WHERE event_type_id=? "
+                          "AND status=?", (eid, status))["n"]
+        return db.one("SELECT COUNT(*) AS n FROM bookings WHERE event_type_id=?",
+                      (eid,))["n"]
 
     with TestClient(app) as pub:
-        # nav lifts the form on every site page
+        # nav lifts the booking link on every site page
         for path in ("/", "/portfolio", "/about", "/contact", "/book"):
             assert 'href="/book"' in pub.get(path).text, path
 
-        # date in the past → 400, nothing stored
-        r = pub.post("/book", data={"name": "Mara", "email": "mara@cafe.com",
-                                    "shoot_date": past, "service": "Photography"})
-        assert r.status_code == 400 and "already passed" in r.text
-        assert db.one("SELECT COUNT(*) AS n FROM inquiries WHERE kind='booking'")["n"] == 0
+        # /book lists the active event; /book/{slug} renders its picker form
+        assert "Food Shoot" in pub.get("/book").text
+        r = pub.get("/book/fb-shoot")
+        # bare GET renders the slot-picker calendar (the POST confirm form only
+        # appears once a time is selected); its day links carry the slug
+        assert r.status_code == 200 and "Food Shoot" in r.text
+        assert 'href="/book/fb-shoot?' in r.text
+        # unknown slug → 404
+        assert pub.get("/book/nope").status_code == 404
 
-        # unknown service → 400 (closed enum, no free-text route in)
-        r = pub.post("/book", data={"name": "Mara", "email": "mara@cafe.com",
-                                    "shoot_date": future, "service": "Skywriting"})
+        # invalid email → 400, nothing stored
+        r = pub.post("/book/fb-shoot", data={"name": "Mara", "email": "not-email",
+                     "start": start, "tz": "America/New_York"})
         assert r.status_code == 400
+        assert n_bookings() == 0
 
-        # honeypot pretends success silently
-        r = pub.post("/book", data={"name": "Bot", "email": "b@spam.com",
-                                    "shoot_date": future, "service": "Photography",
-                                    "website": "spam.com"})
-        assert r.status_code == 200 and "Got it" in r.text
-        assert db.one("SELECT COUNT(*) AS n FROM inquiries WHERE kind='booking'")["n"] == 0
+        # honeypot pretends success silently (303 → /book), nothing stored
+        r = pub.post("/book/fb-shoot", data={"name": "Bot", "email": "b@spam.com",
+                     "start": start, "tz": "America/New_York", "website": "spam.com"},
+                     follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"] == "/book"
+        assert n_bookings() == 0
 
-        # happy path: stored as booking + emailed with date in the subject
-        r = pub.post("/book", data={
-            "name": "Mara Chef", "email": "mara@cafe.com", "business": "Café Lune",
-            "shoot_date": future, "service": "Videography",
-            "message": "Launching the spring menu."})
-        assert r.status_code == 200 and "Got it" in r.text
-        q = db.one("SELECT * FROM inquiries ORDER BY id DESC LIMIT 1")
-        assert q["kind"] == "booking" and q["shoot_date"] == future
-        assert q["service"] == "Videography" and q["emailed"] == 1
-        # the structured request is reproduced in the message body too, so the
-        # admin "view" details and Kevin's inbox both carry it.
-        assert future in q["message"] and "Videography" in q["message"]
-        to, subject, body, reply_to = sent[-1]
-        assert to == "kevin@example.com" and reply_to == "mara@cafe.com"
-        assert future in subject and "Café Lune" in body
+        # happy path: 303 → /booking/{token}; booking confirmed + F&B intake stored
+        r = pub.post("/book/fb-shoot", data={
+            "name": "Mara Chef", "email": "Booking-Flow@Test.cafe", "phone": "555-0100",
+            "start": start, "tz": "America/New_York", "notes": "Spring menu launch.",
+            "venue_address": "12 Vine St", "dish_count": "40",
+            "parking_notes": "Loading dock out back", "style_refs": "bright, airy",
+            "onsite_contact": "Lou 555-0199"}, follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"].startswith("/booking/")
+        token = r.headers["location"].rsplit("/", 1)[-1]
+        b = db.one("SELECT * FROM bookings WHERE token=?", (token,))
+        assert b and b["status"] == "confirmed" and b["start_utc"] == start
+        assert b["email"] == "booking-flow@test.cafe"   # normalized to lowercase
+        assert b["venue_address"] == "12 Vine St" and b["dish_count"] == "40"
+        # confirmation emails fired to both client and Kevin
+        assert any(to == "booking-flow@test.cafe" for to, *_ in sent)
+        assert any(to == "kevin@example.com" for to, *_ in sent)
 
-    # admin studio page tags it as a booking and offers → project
-    r = admin.get("/admin/studio")
-    assert "📅" in r.text and "Videography" in r.text and future in r.text
-    assert "→ project" in r.text
+        # double-book the same instant → 409 (slot taken), no second booking
+        r = pub.post("/book/fb-shoot", data={"name": "Dup", "email": "d@cafe.com",
+                     "start": start, "tz": "America/New_York"})
+        assert r.status_code == 409
+        assert n_bookings("confirmed") == 1
 
-    # one click spawns client + project carrying the shoot date, status='lead'
-    r = admin.post(f"/admin/studio/inquiries/{q['id']}/client", follow_redirects=False)
-    assert r.status_code == 303 and "/admin/studio/projects/" in r.headers["location"]
-    pid = int(r.headers["location"].rsplit("/", 1)[-1])
-    p = db.one("SELECT * FROM projects WHERE id=?", (pid,))
-    assert p["shoot_date"] == future and p["status"] == "lead"
-    assert "Videography" in p["title"] and future in p["title"]
-    c = db.one("SELECT * FROM clients WHERE id=?", (p["client_id"],))
-    assert c["email"] == "mara@cafe.com"
+    # the booking auto-linked a Studio client + project (real-shoot event type)
+    assert b["client_id"] and b["project_id"]
+    c = db.one("SELECT * FROM clients WHERE id=?", (b["client_id"],))
+    assert c["email"] == "booking-flow@test.cafe"
+    p = db.one("SELECT * FROM projects WHERE id=?", (b["project_id"],))
+    assert p["shoot_date"] == start[:10] and "Food Shoot" in p["title"]
+    assert p["status"] == "inquiry_received"
 
-    # the project page surfaces and lets Kevin edit shoot_date
-    r = admin.get(f"/admin/studio/projects/{pid}")
-    assert f'value="{future}"' in r.text and 'name="shoot_date"' in r.text
-    new_date = (dt.date.today() + dt.timedelta(days=28)).isoformat()
-    admin.post(f"/admin/studio/projects/{pid}",
-               data={"title": p["title"], "status": "proposal",
-                     "shoot_date": new_date, "notes": "", "notion_page_id": ""},
-               follow_redirects=False)
-    assert db.one("SELECT shoot_date, status FROM projects WHERE id=?",
-                  (pid,))["shoot_date"] == new_date
+    # admin studio surfaces the auto-created project on the pipeline board
+    assert p["title"] in admin.get("/admin/studio").text
 
-    # a contact-kind inquiry still lands on the client page (no project spawn)
-    cid_inq = db.run("INSERT INTO inquiries (name, email, business, message) "
-                     "VALUES (?,?,?,?)",
-                     ("Lou", "lou@diner.com", "Lou's Diner", "Just curious about rates."))
-    r = admin.post(f"/admin/studio/inquiries/{cid_inq}/client", follow_redirects=False)
-    assert r.status_code == 303 and "/admin/studio/clients/" in r.headers["location"]
-    # second booking for an existing client → no duplicate client, project still spawns
-    iid2 = db.run("""INSERT INTO inquiries (name, email, business, message, kind,
-                                            shoot_date, service)
-                     VALUES (?,?,?,?,?,?,?)""",
-                  ("Mara Chef", "mara@cafe.com", "Café Lune",
-                   f"Requested: Photography on {new_date}.",
-                   "booking", new_date, "Half-day shoot"))
-    n_before = db.one("SELECT COUNT(*) AS n FROM clients WHERE email='mara@cafe.com'")["n"]
-    r = admin.post(f"/admin/studio/inquiries/{iid2}/client", follow_redirects=False)
-    assert "/admin/studio/projects/" in r.headers["location"]
-    assert db.one("SELECT COUNT(*) AS n FROM clients WHERE email='mara@cafe.com'")["n"] == n_before
+    # Tear down everything this test seeded — the suite shares one module DB, and
+    # a left-behind confirmed booking (upcoming shoot_date) would pollute the
+    # empty-calendar baselines in the studio strip / conflict tests downstream.
+    # FK order: bookings + inquiries hold refs to client/project, so clear them
+    # before the rows they point at.
+    db.run("DELETE FROM bookings WHERE event_type_id=?", (eid,))
+    if b["inquiry_id"]:
+        db.run("DELETE FROM inquiries WHERE id=?", (b["inquiry_id"],))
+    db.run("DELETE FROM projects WHERE id=?", (b["project_id"],))
+    db.run("DELETE FROM clients WHERE id=?", (b["client_id"],))
+    db.run("DELETE FROM availability_rules WHERE event_type_id=?", (eid,))
+    db.run("DELETE FROM event_types WHERE id=?", (eid,))
 
 
 def test_details_persistence_wiring(admin):
@@ -1780,7 +1816,7 @@ def test_details_persistence_wiring(admin):
         js = pub.get("/static/details_persist.js").text
     assert "localStorage" in js and "details[id]" in js
     # base.html ships the script tag with the cache-buster query
-    page = admin.get("/admin").text
+    page = admin.get("/admin/galleries").text
     assert "details_persist.js?v=" in page
     # the dashboard's orphan-picker <details> has an id so its open state
     # persists across reloads (ship #55 wired the picker; this gives Kevin
@@ -1802,7 +1838,7 @@ def test_dashboard_unlinked_warning(admin):
     # the dashboard nav strip — robust against prior tests' fixture state.
     import re
     def n_warned():
-        m = re.search(r"(\d+) published galler", admin.get("/admin").text)
+        m = re.search(r"(\d+) published galler", admin.get("/admin/galleries").text)
         return int(m.group(1)) if m else 0
     baseline = n_warned()
 
@@ -1815,7 +1851,7 @@ def test_dashboard_unlinked_warning(admin):
     # publish it → count bumps by 1, inline picker now offers this gallery
     db.run("UPDATE galleries SET published=1 WHERE id=?", (gid_draft,))
     assert n_warned() == baseline + 1
-    page = admin.get("/admin").text
+    page = admin.get("/admin/galleries").text
     assert "unlinked-warn" in page  # strip is now visible regardless of baseline
     assert f"/admin/galleries/{gid_draft}/link-client" in page
     # per-row warning glyph in the main galleries table (the orphan picker
@@ -1832,7 +1868,7 @@ def test_dashboard_unlinked_warning(admin):
     assert db.one("SELECT client_id FROM galleries WHERE id=?",
                   (gid_draft,))["client_id"] == cid
     assert n_warned() == baseline
-    page = admin.get("/admin").text
+    page = admin.get("/admin/galleries").text
     row_start = page.rindex("Loose draft")
     row = page[row_start:page.index("</tr>", row_start)]
     assert "&#9888;" not in row
@@ -2215,7 +2251,7 @@ def test_jobs_admin_view(admin):
                  "('social_crops', '{\"asset_id\": 999999}', 'failed', 3, 'boom')")
 
     # dashboard badge + jobs page surface the failure (R14: no silent failures)
-    assert "failed)" in admin.get("/admin").text
+    assert "failed)" in admin.get("/admin/galleries").text
     page = admin.get("/admin/jobs")
     assert page.status_code == 200
     assert "social_crops" in page.text and "boom" in page.text
@@ -2327,7 +2363,7 @@ def test_share_debugger(admin):
     assert "https%3A" in r.text or "http%3A" in r.text
 
     # nav link from the dashboard
-    assert 'href="/admin/share"' in admin.get("/admin").text
+    assert 'href="/admin/share"' in admin.get("/admin/galleries").text
 
     # publish a case study and confirm it appears with its specific OG values
     g = db.one("SELECT * FROM galleries ORDER BY id LIMIT 1")
@@ -2728,17 +2764,14 @@ def test_inquiry_form_rate_limit(monkeypatch):
     monkeypatch.setattr(config, "GMAIL_APP_PASSWORD", "app-pw")
     monkeypatch.setattr(mailer, "configured", lambda: True)
     monkeypatch.setattr(mailer, "send",
-                        lambda to, subject, body, reply_to="": None)
+                        lambda to, subject, body, reply_to="", ics=None: None)
     # Wipe any prior pin_attempts so this test is isolated
     db.run("DELETE FROM pin_attempts WHERE gallery_id IN (?,?)",
            (security.INQUIRY_BUCKET_CONTACT, security.INQUIRY_BUCKET_BOOK))
 
     import datetime as dt
-    future = (dt.date.today() + dt.timedelta(days=14)).isoformat()
     contact_data = lambda i: {"name": f"User{i}", "email": f"u{i}@cafe.com",
                               "business": "Cafe", "message": "hello"}
-    book_data = lambda i: {"name": f"User{i}", "email": f"u{i}@cafe.com",
-                           "shoot_date": future, "service": "Photography"}
 
     with TestClient(app) as pub:
         # /contact: 3 succeed, 4th is throttled with 429
@@ -2752,13 +2785,35 @@ def test_inquiry_form_rate_limit(monkeypatch):
         assert db.one("SELECT COUNT(*) AS n FROM inquiries "
                       "WHERE email=?", ("u99@cafe.com",))["n"] == 0
 
-        # /book has its own bucket — 3 succeed even though /contact was throttled
+        # /book (the scheduler) has its OWN throttle bucket — bookings still go
+        # through even though /contact was throttled. Seed a bookable event +
+        # a day of open slots (idempotent: the suite shares one module DB).
+        from app import scheduling as S
+        if not S.event_by_slug("rl-book"):
+            _eid = db.run("INSERT INTO event_types (slug, name, duration_min, "
+                          "min_notice_hours, booking_window_days, active) "
+                          "VALUES ('rl-book','Rate Test',60,1,60,1)")
+            for _wd in range(5):
+                db.run("INSERT INTO availability_rules (event_type_id, weekday, "
+                       "start_min, end_min) VALUES (?,?,?,?)", (_eid, _wd, 540, 1020))
+        _et = S.event_by_slug("rl-book")
+        _day = dt.date.today() + dt.timedelta(days=3)
+        while _day.weekday() >= 5:
+            _day += dt.timedelta(days=1)
+        _slots = S.slots_for_day(_et, _day)
+        assert len(_slots) >= 4, "need >=4 open slots to prove the booking throttle"
+        # first 3 bookings (distinct slots) succeed; the 4th trips the BOOK bucket
         for i in range(3):
-            r = pub.post("/book", data=book_data(i))
-            assert r.status_code == 200 and "Got it" in r.text, i
-        r = pub.post("/book", data=book_data(99))
+            r = pub.post("/book/rl-book", data={
+                "name": f"User{i}", "email": f"u{i}@cafe.com",
+                "start": _slots[i]["utc"], "tz": "America/New_York"},
+                follow_redirects=False)
+            assert r.status_code == 303, (i, r.status_code)
+        r = pub.post("/book/rl-book", data={
+            "name": "User99", "email": "u99@cafe.com",
+            "start": _slots[3]["utc"], "tz": "America/New_York"})
         assert r.status_code == 429
-        assert "chance to reply" in r.text
+        assert "booked a few times" in r.text
 
         # honeypot still wins silently — doesn't decrement counter, doesn't 429
         # (we wipe and start fresh to confirm honeypot bypasses the throttle path)
@@ -2781,6 +2836,22 @@ def test_inquiry_form_rate_limit(monkeypatch):
         for i in range(3):
             r = pub.post("/contact", data=contact_data(100 + i))
             assert r.status_code == 200, i
+
+    # Tear down the rl-book bookings + auto-linked clients/inquiries so the
+    # leftover confirmed slots don't collide with downstream studio/conflict
+    # tests that share this module DB. FK order: drop the bookings (which point
+    # at clients + inquiries) before the rows they reference.
+    _cids = [r["client_id"] for r in db.all_(
+        "SELECT DISTINCT client_id FROM bookings WHERE event_type_id=? "
+        "AND client_id IS NOT NULL", (_et["id"],))]
+    _iids = [r["inquiry_id"] for r in db.all_(
+        "SELECT inquiry_id FROM bookings WHERE event_type_id=? "
+        "AND inquiry_id IS NOT NULL", (_et["id"],))]
+    db.run("DELETE FROM bookings WHERE event_type_id=?", (_et["id"],))
+    for _iid in _iids:
+        db.run("DELETE FROM inquiries WHERE id=?", (_iid,))
+    for _cid in _cids:
+        db.run("DELETE FROM clients WHERE id=?", (_cid,))
 
 
 def test_lightbox_doubletap_gesture():
@@ -2857,14 +2928,14 @@ def test_studio_portal_hint(admin):
 
 def test_dashboard_selects_in_badge(admin):
     # baseline: no gallery on the dashboard should carry the badge
-    r = admin.get("/admin")
+    r = admin.get("/admin/galleries")
     assert r.status_code == 200
     assert "selects in" not in r.text
 
     # gallery with no proofing sections at all → no badge
     gid = db.run("INSERT INTO galleries (slug, title, pin, published) "
                  "VALUES (?,?,?,1)", ("SelectsBadge001", "Loose pickin", "1234"))
-    assert "selects in" not in admin.get("/admin").text
+    assert "selects in" not in admin.get("/admin/galleries").text
 
     # add a section with a target → row appears, badge does NOT (no picks yet)
     sid = db.run("INSERT INTO sections (gallery_id, name, position, proof_target) "
@@ -2873,7 +2944,7 @@ def test_dashboard_selects_in_badge(admin):
                    "stored, status) VALUES (?,?,?,?,?,?)",
                    (gid, sid, "photo", f"p{i}.jpg",
                     f"selbadge0{i}.jpg", "ready")) for i in range(3)]
-    r = admin.get("/admin")
+    r = admin.get("/admin/galleries")
     assert "Loose pickin" in r.text
     # The orphan picker (ship #55) mentions the gallery title once before the
     # main galleries table, so anchor on the LAST occurrence for badge checks.
@@ -2887,14 +2958,14 @@ def test_dashboard_selects_in_badge(admin):
                  (gid, "vtok-badge"))
     db.run("INSERT INTO favorites (visitor_id, asset_id) VALUES (?,?)",
            (vid, aids[0]))
-    r = admin.get("/admin")
+    r = admin.get("/admin/galleries")
     row = r.text[r.text.rindex("Loose pickin"):r.text.index("</tr>", r.text.rindex("Loose pickin"))]
     assert "selects in" not in row
 
     # hit the target → badge appears
     db.run("INSERT INTO favorites (visitor_id, asset_id) VALUES (?,?)",
            (vid, aids[1]))
-    r = admin.get("/admin")
+    r = admin.get("/admin/galleries")
     row = r.text[r.text.rindex("Loose pickin"):r.text.index("</tr>", r.text.rindex("Loose pickin"))]
     assert "selects in" in row
     assert "&#10003;" in row  # ✓ check mark
@@ -2906,7 +2977,7 @@ def test_dashboard_selects_in_badge(admin):
     db.run("INSERT INTO assets (gallery_id, section_id, kind, filename, stored, "
            "status) VALUES (?,?,?,?,?,?)",
            (gid, sid2, "photo", "d.jpg", "selbadge99.jpg", "ready"))
-    r = admin.get("/admin")
+    r = admin.get("/admin/galleries")
     row = r.text[r.text.rindex("Loose pickin"):r.text.index("</tr>", r.text.rindex("Loose pickin"))]
     assert "selects in" not in row
 
@@ -2914,7 +2985,7 @@ def test_dashboard_selects_in_badge(admin):
     # admin.py treats as cleared; verify it doesn't trip the badge math)
     db.run("UPDATE sections SET proof_target=0 WHERE id=?", (sid2,))
     # but we left sid at target 2 with 2 picks → badge back
-    r = admin.get("/admin")
+    r = admin.get("/admin/galleries")
     row = r.text[r.text.rindex("Loose pickin"):r.text.index("</tr>", r.text.rindex("Loose pickin"))]
     assert "selects in" in row
 
@@ -3007,7 +3078,7 @@ def test_invoice_overdue_judged_on_local_wall_clock(admin, monkeypatch):
                follow_redirects=False)
     c = db.one("SELECT * FROM clients ORDER BY id DESC LIMIT 1")
     pid = db.run("INSERT INTO projects (client_id, title, status) VALUES (?,?,?)",
-                 (c["id"], "Overdue Boundary Project", "invoice"))
+                 (c["id"], "Overdue Boundary Project", "contract_signed"))
     iid = db.run("""INSERT INTO invoices (project_id, slug, title, total_cents,
                                           due_date, status)
                     VALUES (?,?,?,?,?,?)""",
@@ -3015,8 +3086,10 @@ def test_invoice_overdue_judged_on_local_wall_clock(admin, monkeypatch):
                   anchor.isoformat(), "sent"))
 
     def row(page):
+        # Projects render as kanban <article> cards; scope the overdue check to
+        # this project's card so a stray "overdue invoice" elsewhere can't fool it.
         i = page.index("Overdue Boundary Project")
-        return page[page.rindex("<tr", 0, i):page.index("</tr>", i)]
+        return page[page.rindex("<article", 0, i):page.index("</article>", i)]
 
     # due ON the wall-clock anchor -> still due today -> NOT overdue
     assert "overdue invoice" not in row(admin.get("/admin/studio").text)
@@ -3036,7 +3109,7 @@ def test_studio_proofing_waiting(admin):
     # section with 3 ready assets but only 1 fav (target 3, picks 1 → 2 remaining)
     cid = db.run("INSERT INTO clients (name) VALUES (?)", ("Mara Sun",))
     pid = db.run("INSERT INTO projects (client_id, title, status) VALUES (?,?,?)",
-                 (cid, "Spring shoot — proofing", "shooting"))
+                 (cid, "Spring shoot — proofing", "session_planning"))
     gid = db.run("INSERT INTO galleries (slug, title, pin, project_id, published) "
                  "VALUES (?,?,?,?,1)",
                  ("ProofWaiting001", "Spring shoot", "1234", pid))
@@ -3085,7 +3158,7 @@ def test_studio_proofing_waiting(admin):
     assert "Spring shoot — proofing" not in waiting_strip(admin.get("/admin/studio").text)
 
     # unpublished gallery → no nudge (client can't see it yet, nothing to proof)
-    db.run("UPDATE projects SET status='shooting' WHERE id=?", (pid,))
+    db.run("UPDATE projects SET status='session_planning' WHERE id=?", (pid,))
     db.run("UPDATE galleries SET published=0 WHERE id=?", (gid,))
     assert "Spring shoot — proofing" not in waiting_strip(admin.get("/admin/studio").text)
 
@@ -3103,13 +3176,13 @@ def test_studio_upcoming_strip(admin):
                  ("Mara Sun", "Café Lune", "mara@cafe.com"))
     # 4 projects spanning the upcoming window + a control out of range
     plans = [
-        ("Today launch",        today.isoformat(),                              "lead",       "today",         True),
-        ("Tomorrow shoot",      (today + dt.timedelta(days=1)).isoformat(),     "proposal",   "tomorrow",      True),
-        ("Next week shoot",     (today + dt.timedelta(days=8)).isoformat(),     "contract",   "in 8d",         True),
-        ("Overdue not shooting",(today - dt.timedelta(days=3)).isoformat(),     "proposal",   "3d ago",        True),
-        ("Way out — skip",      (today + dt.timedelta(days=30)).isoformat(),    "lead",       "in 30d",        False),
-        ("Long past — skip",    (today - dt.timedelta(days=30)).isoformat(),    "shooting",   "30d ago",       False),
-        ("No shoot date — skip", None,                                          "lead",       "—",             False),
+        ("Today launch",        today.isoformat(),                              "inquiry_received", "today",   True),
+        ("Tomorrow shoot",      (today + dt.timedelta(days=1)).isoformat(),     "proposal_sent",  "tomorrow",  True),
+        ("Next week shoot",     (today + dt.timedelta(days=8)).isoformat(),     "contract_signed","in 8d",     True),
+        ("Overdue not shooting",(today - dt.timedelta(days=3)).isoformat(),     "proposal_sent",  "3d ago",    True),
+        ("Way out — skip",      (today + dt.timedelta(days=30)).isoformat(),    "inquiry_received", "in 30d",  False),
+        ("Long past — skip",    (today - dt.timedelta(days=30)).isoformat(),    "session_planning","30d ago",  False),
+        ("No shoot date — skip", None,                                          "inquiry_received", "—",       False),
     ]
     for title, sdate, status, _label, _in_strip in plans:
         db.run("INSERT INTO projects (client_id, title, status, shoot_date) VALUES (?,?,?,?)",
@@ -3165,18 +3238,18 @@ def test_studio_booking_conflicts(admin):
 
     # two projects on the same upcoming date → conflict
     pid_a = db.run("INSERT INTO projects (client_id, title, status, shoot_date) "
-                   "VALUES (?,?,?,?)", (cid, "Salt Bar shoot", "contract", d_collide))
+                   "VALUES (?,?,?,?)", (cid, "Salt Bar shoot", "contract_signed", d_collide))
     pid_b = db.run("INSERT INTO projects (client_id, title, status, shoot_date) "
-                   "VALUES (?,?,?,?)", (cid, "Curate breakfast", "lead", d_collide))
+                   "VALUES (?,?,?,?)", (cid, "Curate breakfast", "inquiry_received", d_collide))
     # solo upcoming → no collision
     db.run("INSERT INTO projects (client_id, title, status, shoot_date) "
-           "VALUES (?,?,?,?)", (cid, "Solo gig", "lead", d_solo))
+           "VALUES (?,?,?,?)", (cid, "Solo gig", "inquiry_received", d_solo))
     # archived on a collision date → ignored
     db.run("INSERT INTO projects (client_id, title, status, shoot_date) "
            "VALUES (?,?,?,?)", (cid, "Archived ghost", "archived", d_collide))
     # far out → outside window, ignored
     db.run("INSERT INTO projects (client_id, title, status, shoot_date) "
-           "VALUES (?,?,?,?)", (cid, "Far future", "lead", d_far))
+           "VALUES (?,?,?,?)", (cid, "Far future", "inquiry_received", d_far))
 
     r = admin.get("/admin/studio")
     sec_start = r.text.index('aria-label="Booking conflicts"')
@@ -3195,7 +3268,7 @@ def test_studio_booking_conflicts(admin):
     # project + non-converted booking inquiry on the same date → also a conflict
     d_inq = (today + dt.timedelta(days=10)).isoformat()
     db.run("INSERT INTO projects (client_id, title, status, shoot_date) "
-           "VALUES (?,?,?,?)", (cid, "Tasting menu", "proposal", d_inq))
+           "VALUES (?,?,?,?)", (cid, "Tasting menu", "proposal_sent", d_inq))
     db.run("INSERT INTO inquiries (name, email, message, kind, shoot_date, service) "
            "VALUES (?,?,?,?,?,?)",
            ("Drop-in chef", "chef@x.com", "Need photos", "booking", d_inq, "Photography"))
@@ -3220,13 +3293,13 @@ def test_client_lifetime_rollup(admin):
     assert r.status_code == 200
     assert "lifetime-rollup" not in r.text
 
-    # one delivered project, one archived (both count as delivered), one lead (doesn't)
+    # one closed project, one archived (both count as delivered), one inquiry (doesn't)
     pid = db.run("INSERT INTO projects (client_id, title, status) VALUES (?,?,?)",
-                 (cid, "Spring menu", "delivered"))
+                 (cid, "Spring menu", "project_closed"))
     db.run("INSERT INTO projects (client_id, title, status) VALUES (?,?,?)",
            (cid, "Old gig", "archived"))
     db.run("INSERT INTO projects (client_id, title, status) VALUES (?,?,?)",
-           (cid, "Pitch", "lead"))
+           (cid, "Pitch", "inquiry_received"))
 
     # a draft invoice (excluded from invoiced) + a sent invoice (counted)
     db.run("""INSERT INTO invoices (project_id, slug, title, total_cents, status)
@@ -3351,11 +3424,16 @@ def test_services_page():
         assert r.text.count("svc-tier ") + r.text.count('svc-tier"') >= 9
         # middle tier flagged as "Most picked" (UX nudge), 3 times
         assert r.text.count("Most picked") == 3
-        # price-free per Kevin's call — no $ amounts anywhere on the page
-        assert "$" not in r.text
-        # CTAs all route to /book; secondary route to /work
-        assert r.text.count('href="/book"') >= 4   # 3 tier CTAs + foot CTA
-        assert 'href="/work"' in r.text
+        # Quoting-first: no flat prices on the page — tiers list inclusions only
+        # and every quote is tailored on /contact. (Prices live in SERVICES for
+        # the admin proposal presets, not the public page.)
+        for s in SERVICES:
+            for t in s["tiers"]:
+                assert f'${t["price_cents"] // 100:,}' not in r.text, (s["key"], t["name"])
+        # Quoting-first: tier + foot CTAs route to /contact ("Request a quote"),
+        # not a flat-rate /book. Secondary "See past work" routes to /portfolio.
+        assert r.text.count('href="/contact"') >= 4   # 9 tier CTAs + foot CTA + lede
+        assert 'href="/portfolio"' in r.text
         # nav from any other site page links to /services
         assert 'href="/services"' in pub.get("/").text
         # SEO bits

@@ -1,0 +1,21 @@
+{% set _p = request.url.path %}
+<aside class="admin-nav">
+  <a class="admin-brand" href="/admin/home" aria-label="Kevin Lee — admin home">
+    <span class="mark">Kevin <b>Lee</b></span>
+  </a>
+  <nav class="admin-nav-group" aria-label="Primary">
+    <span class="admin-nav-label">Workspace</span>
+    <a href="/admin/home"{% if _p.startswith('/admin/home') %} class="is-active"{% endif %}>Home</a>
+    <a href="/admin/galleries"{% if _p.startswith('/admin/galleries') %} class="is-active"{% endif %}>Galleries</a>
+    <a href="/admin/transfers"{% if _p.startswith('/admin/transfers') %} class="is-active"{% endif %}>Transfers</a>
+    <a href="/admin/studio"{% if _p.startswith('/admin/studio') and not _p.startswith('/admin/studio/email-templates') %} class="is-active"{% endif %}>Studio</a>
+    <a href="/admin/scheduling"{% if _p.startswith('/admin/scheduling') %} class="is-active"{% endif %}>Scheduling</a>
+    <a href="/admin/calendar"{% if _p.startswith('/admin/calendar') %} class="is-active"{% endif %}>Calendar</a>
+    <span class="admin-nav-label">Manage</span>
+    <a href="/admin/tasks"{% if _p.startswith('/admin/tasks') %} class="is-active"{% endif %}>Tasks</a>
+    <a href="/admin/forms"{% if _p.startswith('/admin/forms') %} class="is-active"{% endif %}>Forms</a>
+    <a href="/admin/studio/email-templates"{% if _p.startswith('/admin/studio/email-templates') %} class="is-active"{% endif %}>Email templates</a>
+    <a href="/admin/reports"{% if _p.startswith('/admin/reports') %} class="is-active"{% endif %}>Reports</a>
+  </nav>
+  <div class="admin-nav-foot"><span class="dot"></span> Self-hosted · synced</div>
+</aside>

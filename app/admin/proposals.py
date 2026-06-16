@@ -158,7 +158,9 @@ async def mark_proposal_sent(proposal_id: int):
         raise HTTPException(status_code=400, detail="already sent")
     db.run("UPDATE proposals SET status='sent', sent_at=datetime('now') WHERE id=?",
            (proposal_id,))
-    db.run("UPDATE projects SET status='proposal' WHERE id=? AND status='lead'",
+    db.run("UPDATE projects SET status='proposal_sent', "
+           "stage_changed_at=datetime('now') WHERE id=? "
+           "AND status IN ('inquiry_received','consultation_call')",
            (d["project_id"],))
     log.info("proposal %s marked sent", proposal_id)
     return RedirectResponse(f"/admin/studio/proposals/{proposal_id}", status_code=303)

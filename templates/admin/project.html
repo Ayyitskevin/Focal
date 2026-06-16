@@ -1,205 +1,325 @@
-{% extends "base.html" %}
+{% extends "admin/base_admin.html" %}
 {% block title %}{{ p.title }} · Studio · Mise{% endblock %}
-{% block content %}
+{% block admin_body %}
 <main class="admin-main">
-  <div class="admin-bar">
-    <h1>{{ p.title }}</h1>
-    <nav>
-      <a href="/admin/studio/clients/{{ p.client_id }}">{{ p.client_name }}</a> ·
-      <a href="/admin/studio">Studio</a>
-    </nav>
-  </div>
 
-  <form method="post" action="/admin/studio/projects/{{ p.id }}" class="stack-form">
-    <label>Title <input type="text" name="title" value="{{ p.title }}" required></label>
-    <label>Status
-      <select name="status">
+    <div class="admin-bar">
+      <div>
+        <span class="eyebrow">Project</span>
+        <h1>{{ p.title }}</h1>
+      </div>
+      <nav aria-label="Breadcrumb">
+        <a href="/admin/studio/clients/{{ p.client_id }}">{{ p.client_name }}</a> ·
+        <a href="/admin/studio">Studio</a>
+      </nav>
+    </div>
+
+    {% set _cur = statuses.index(p.status) if p.status in statuses else -1 %}
+    <header class="project-head">
+      <div class="ph-top">
+        <div>
+          <h1>{{ p.title }}</h1>
+          <div class="ph-client">
+            <a href="/admin/studio/clients/{{ p.client_id }}">{{ p.client_name }}</a>
+          </div>
+        </div>
+        <span class="badge is-{{ p.status }}">{{ p.status }}</span>
+      </div>
+
+      {% set _gal = (galleries | selectattr('id', 'equalto', p.gallery_id) | first) if p.gallery_id else none %}
+      <div class="ph-meta">
+        <div class="ph-fact"><span class="k">Client</span><span class="v">{{ p.client_name }}</span></div>
+        <div class="ph-fact"><span class="k">Shoot date</span><span class="v">{{ p.shoot_date or '—' }}</span></div>
+        <div class="ph-fact"><span class="k">Gallery</span><span class="v">{{ _gal.title if _gal else '—' }}</span></div>
+        <div class="ph-fact"><span class="k">Stage</span><span class="v">{{ p.status }}</span></div>
+      </div>
+
+      <div class="pipeline" aria-label="Project stage">
         {% for s in statuses %}
-        <option value="{{ s }}" {% if p.status == s %}selected{% endif %}>{{ s }}</option>
+        <div class="step {% if loop.index0 < _cur %}done{% elif loop.index0 == _cur %}current{% endif %}">
+          <span class="bar"></span><span class="lbl">{{ s }}</span>
+        </div>
         {% endfor %}
-      </select>
-    </label>
-    <label>Gallery
-      <select name="gallery_id">
-        <option value="">— none —</option>
-        {% for g in galleries %}
-        <option value="{{ g.id }}" {% if p.gallery_id == g.id %}selected{% endif %}>{{ g.title }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label>Shoot date <input type="date" name="shoot_date"
-           value="{{ p.shoot_date or '' }}"></label>
-    <label>Notion page ID <input type="text" name="notion_page_id"
-           value="{{ p.notion_page_id or '' }}" placeholder="for Sessions sync (optional)"></label>
-    <label>Notes <textarea name="notes" rows="3">{{ p.notes or '' }}</textarea></label>
-    <button type="submit">Save</button>
-  </form>
+      </div>
+    </header>
 
-  <h2>Proposals</h2>
-  <form method="post" action="/admin/studio/projects/{{ p.id }}/proposals" class="inline-form">
-    <select name="preset">
-      <option value="blank">Blank</option>
-      <optgroup label="Photography">
-        <option value="photo_starter">Starter — Half-day, ~20 images</option>
-        <option value="photo_standard">Standard — Full-day, ~50 images</option>
-        <option value="photo_premium">Premium — Extended day, ~75 images</option>
-      </optgroup>
-      <optgroup label="Videography">
-        <option value="video_starter">Starter — Half-day, 3 reels</option>
-        <option value="video_standard">Standard — Full-day, 6 reels</option>
-        <option value="video_premium">Premium — 2 days, 10 reels + hero</option>
-      </optgroup>
-      <optgroup label="Brand Partner (Monthly)">
-        <option value="retainer_starter">Starter — photo content day</option>
-        <option value="retainer_standard">Standard — photo + 3 reels/mo</option>
-        <option value="retainer_premium">Premium — 2 days/mo + hero quarterly</option>
-      </optgroup>
-    </select>
-    <button type="submit">New proposal</button>
-  </form>
-  <table class="list">
-    <tr><th>Title</th><th>Total</th><th>Status</th><th>Link</th></tr>
-    {% for d in proposals %}
-    <tr>
-      <td><a href="/admin/studio/proposals/{{ d.id }}">{{ d.title }}</a></td>
-      <td>${{ "%.2f" % (d.total_cents / 100) }}</td>
-      <td>{{ d.status }}</td>
-      <td><code class="slug">{{ base_url }}/p/{{ d.slug }}</code></td>
-    </tr>
-    {% endfor %}
-  </table>
-  {% if not proposals %}<p class="muted">No proposals yet.</p>{% endif %}
+    <div class="project-grid">
 
-  <h2>Contracts</h2>
-  <form method="post" action="/admin/studio/projects/{{ p.id }}/contracts" class="inline-form">
-    <button type="submit">New contract</button>
-    <span class="muted">starts from the standard agreement; merge fields fill from this project</span>
-  </form>
-  <table class="list">
-    <tr><th>Title</th><th>Status</th><th>Signed by</th><th>Link</th></tr>
-    {% for d in contracts %}
-    <tr>
-      <td><a href="/admin/studio/contracts/{{ d.id }}">{{ d.title }}</a></td>
-      <td>{{ d.status }}</td>
-      <td>{{ d.signer_name or "—" }}</td>
-      <td><code class="slug">{{ base_url }}/c/{{ d.slug }}</code></td>
-    </tr>
-    {% endfor %}
-  </table>
-  {% if not contracts %}<p class="muted">No contracts yet.</p>{% endif %}
+      <div class="project-main lead-stack">
 
-  <h2>Invoices</h2>
-  <form method="post" action="/admin/studio/projects/{{ p.id }}/invoices" class="inline-form">
-    <button type="submit">New invoice</button>
-    <span class="muted">seeds line items from the accepted proposal when there is one</span>
-  </form>
-  <table class="list">
-    <tr><th>Title</th><th>Total</th><th>Deposit</th><th>Status</th><th>Link</th></tr>
-    {% for d in invoices %}
-    <tr>
-      <td><a href="/admin/studio/invoices/{{ d.id }}">{{ d.title }}</a></td>
-      <td>${{ "%.2f" % (d.total_cents / 100) }}</td>
-      <td>{% if d.deposit_cents %}${{ "%.2f" % (d.deposit_cents / 100) }}{% else %}—{% endif %}</td>
-      <td>{{ d.status }}</td>
-      <td><code class="slug">{{ base_url }}/i/{{ d.slug }}</code></td>
-    </tr>
-    {% endfor %}
-  </table>
-  {% if not invoices %}<p class="muted">No invoices yet.</p>{% endif %}
+        <section class="panel">
+          <div class="panel-head"><h2>Project details</h2></div>
+          <form method="post" action="/admin/studio/projects/{{ p.id }}" class="stack-form">
+            <label>Title <input type="text" name="title" value="{{ p.title }}" required></label>
+            <label>Status
+              <select name="status">
+                {% for s in statuses %}
+                <option value="{{ s }}" {% if p.status == s %}selected{% endif %}>{{ s }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>Gallery
+              <select name="gallery_id">
+                <option value="">— none —</option>
+                {% for g in galleries %}
+                <option value="{{ g.id }}" {% if p.gallery_id == g.id %}selected{% endif %}>{{ g.title }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>Shoot date <input type="date" name="shoot_date" value="{{ p.shoot_date or '' }}"></label>
+            <label>Notion page ID <input type="text" name="notion_page_id"
+                   value="{{ p.notion_page_id or '' }}" placeholder="for Sessions sync (optional)"></label>
+            <label>Notes <textarea name="notes" rows="3">{{ p.notes or '' }}</textarea></label>
+            <div><button type="submit" class="primary">Save</button></div>
+          </form>
+        </section>
 
-  <h2>Recurring plans</h2>
-  <form method="post" action="/admin/studio/projects/{{ p.id }}/recurring" class="inline-form">
-    <input type="text" name="title" placeholder="Plan title (e.g. Monthly content retainer)" required>
-    <button type="submit">New recurring plan</button>
-    <span class="muted">generates a draft invoice each month — you still Send it</span>
-  </form>
-  {% if plans %}
-  <table class="list">
-    <tr><th>Plan</th><th>Monthly</th><th>Day</th><th>State</th><th>Last run</th></tr>
-    {% for r in plans %}
-    <tr>
-      <td><a href="/admin/studio/recurring/{{ r.id }}">{{ r.title }}</a></td>
-      <td>${{ "%.2f" % (r.total_cents / 100) }}</td>
-      <td>{{ r.anchor_day }}</td>
-      <td>{% if r.active %}<span class="status-active">active</span>
-          {% else %}<span class="muted">paused</span>{% endif %}</td>
-      <td class="muted">{{ r.last_run_period or "—" }}</td>
-    </tr>
-    {% endfor %}
-  </table>
-  {% else %}<p class="muted">No recurring plans — add one for a monthly retainer client.</p>{% endif %}
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Proposals</h2>
+            <form method="post" action="/admin/studio/projects/{{ p.id }}/proposals" class="inline-form">
+              <select name="preset">
+                <option value="blank">Blank</option>
+                <optgroup label="Photography">
+                  <option value="photo_starter">Starter — Half-day, ~20 images</option>
+                  <option value="photo_standard">Standard — Full-day, ~50 images</option>
+                  <option value="photo_premium">Premium — Extended day, ~75 images</option>
+                </optgroup>
+                <optgroup label="Videography">
+                  <option value="video_starter">Starter — Half-day, 3 reels</option>
+                  <option value="video_standard">Standard — Full-day, 6 reels</option>
+                  <option value="video_premium">Premium — 2 days, 10 reels + hero</option>
+                </optgroup>
+                <optgroup label="Brand Partner (Monthly)">
+                  <option value="retainer_starter">Starter — photo content day</option>
+                  <option value="retainer_standard">Standard — photo + 3 reels/mo</option>
+                  <option value="retainer_premium">Premium — 2 days/mo + hero quarterly</option>
+                </optgroup>
+              </select>
+              <button type="submit" class="ghost">New proposal</button>
+            </form>
+          </div>
+          <table class="list">
+            <tr><th>Title</th><th class="num">Total</th><th>Status</th><th>Link</th></tr>
+            {% for d in proposals %}
+            <tr>
+              <td><a href="/admin/studio/proposals/{{ d.id }}">{{ d.title }}</a></td>
+              <td class="num">${{ "%.2f" % (d.total_cents / 100) }}</td>
+              <td><span class="badge is-{{ d.status }}">{{ d.status }}</span></td>
+              <td><code class="slug">{{ base_url }}/p/{{ d.slug }}</code></td>
+            </tr>
+            {% endfor %}
+          </table>
+          {% if not proposals %}<p class="muted">No proposals yet.</p>{% endif %}
+        </section>
 
-  <h2>Shot list <span class="muted" style="font-size:0.7em;font-weight:400">
-      {{ shots|length }} shot{{ "s" if shots|length != 1 }}</span></h2>
-  <form method="post" action="/admin/studio/projects/{{ p.id }}/shots" class="inline-form">
-    <input type="text" name="title" placeholder="Shot (e.g. Plated hero, three-quarter)" required>
-    <select name="category">
-      <option value="">— category —</option>
-      {% for c in shot_categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
-    </select>
-    <select name="priority">
-      {% for pr in shot_priorities %}
-      <option value="{{ pr }}" {% if pr == "want" %}selected{% endif %}>{{ pr }}</option>
-      {% endfor %}
-    </select>
-    <input type="number" name="sort_order" value="0" style="width:4em" title="display order">
-    <button type="submit">Add shot</button>
-  </form>
-  {% if shots %}
-  {# Per-row forms live OUTSIDE the table (cells bind via the form="" attribute) so
-     the HTML parser never hoists a <form> out of <tr>/<td>. #}
-  {% for s in shots %}
-  <form method="post" action="/admin/studio/shots/{{ s.id }}" id="shot-{{ s.id }}"></form>
-  <form method="post" action="/admin/studio/shots/{{ s.id }}/delete" id="shot-del-{{ s.id }}"
-        onsubmit="return confirm('Remove this shot?')"></form>
-  {% endfor %}
-  <table class="list">
-    <tr><th>#</th><th>Shot</th><th>Category</th><th>Priority</th><th>Note</th><th></th></tr>
-    {% for s in shots %}
-    <tr>
-      <td><input type="number" form="shot-{{ s.id }}" name="sort_order"
-                 value="{{ s.sort_order }}" style="width:4em"></td>
-      <td><input type="text" form="shot-{{ s.id }}" name="title" value="{{ s.title }}" required></td>
-      <td><select form="shot-{{ s.id }}" name="category">
-        <option value="">—</option>
-        {% for c in shot_categories %}
-        <option value="{{ c }}" {% if s.category == c %}selected{% endif %}>{{ c }}</option>
-        {% endfor %}
-      </select></td>
-      <td><select form="shot-{{ s.id }}" name="priority">
-        {% for pr in shot_priorities %}
-        <option value="{{ pr }}" {% if s.priority == pr %}selected{% endif %}>{{ pr }}</option>
-        {% endfor %}
-      </select></td>
-      <td><input type="text" form="shot-{{ s.id }}" name="note"
-                 value="{{ s.note or '' }}" placeholder="—"></td>
-      <td><button type="submit" form="shot-{{ s.id }}">Save</button>
-          <button type="submit" form="shot-del-{{ s.id }}" class="danger">Delete</button></td>
-    </tr>
-    {% endfor %}
-  </table>
-  {% else %}<p class="muted">No shots yet — build the menu-driven shot list before the shoot.</p>{% endif %}
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Contracts</h2>
+            <form method="post" action="/admin/studio/projects/{{ p.id }}/contracts" class="inline-form">
+              <select name="template_key">
+                <option value="standard">Standard photography agreement</option>
+                <optgroup label="Drafts — attorney review required">
+                  <option value="photography_services">Photography Services Agreement</option>
+                  <option value="general_service">General Client Service Agreement</option>
+                  <option value="event">Event Contract</option>
+                  <option value="independent_contractor">Independent Contractor Agreement</option>
+                  <option value="nda">Unilateral NDA</option>
+                  <option value="model_release">Model Release</option>
+                </optgroup>
+              </select>
+              <button type="submit" class="ghost">New contract</button>
+              <span class="muted">merge fields fill from this project; drafts are unreviewed — have a lawyer check before sending</span>
+            </form>
+          </div>
+          <table class="list">
+            <tr><th>Title</th><th>Status</th><th>Signed by</th><th>Link</th></tr>
+            {% for d in contracts %}
+            <tr>
+              <td><a href="/admin/studio/contracts/{{ d.id }}">{{ d.title }}</a></td>
+              <td><span class="badge is-{{ d.status }}">{{ d.status }}</span></td>
+              <td>{{ d.signer_name or "—" }}</td>
+              <td><code class="slug">{{ base_url }}/c/{{ d.slug }}</code></td>
+            </tr>
+            {% endfor %}
+          </table>
+          {% if not contracts %}<p class="muted">No contracts yet.</p>{% endif %}
+        </section>
 
-  <h2>Email activity
-    <span class="muted" style="font-size:0.7em;font-weight:400">
-      {{ emails|length }} send{{ "s" if emails|length != 1 }}
-      · <a href="/admin/sent">View all in Sent log</a></span></h2>
-  {% if emails %}
-  <table class="list">
-    <tr><th>When</th><th>To</th><th>Kind</th><th>Subject</th><th>Doc</th></tr>
-    {% for e in emails %}
-    <tr>
-      <td class="muted">{{ e.created_at }}</td>
-      <td>{{ e.to_email }}</td>
-      <td><span class="kind-badge kind-{{ e.doc_kind }}">{{ e.doc_kind }}</span></td>
-      <td>{{ e.subject }}</td>
-      <td class="muted">{% if e.doc_id %}#{{ e.doc_id }}{% else %}—{% endif %}</td>
-    </tr>
-    {% endfor %}
-  </table>
-  {% else %}
-  <p class="muted">Nothing sent yet — proposals, contracts, invoices, and
-    gallery delivery emails land here once you click Send.</p>
-  {% endif %}
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Invoices</h2>
+            <form method="post" action="/admin/studio/projects/{{ p.id }}/invoices" class="inline-form">
+              <button type="submit" class="ghost">New invoice</button>
+              <span class="muted">seeds line items from the accepted proposal when there is one</span>
+            </form>
+          </div>
+          <table class="list">
+            <tr><th>Title</th><th class="num">Total</th><th class="num">Deposit</th><th>Status</th><th>Link</th></tr>
+            {% for d in invoices %}
+            <tr>
+              <td><a href="/admin/studio/invoices/{{ d.id }}">{{ d.title }}</a></td>
+              <td class="num">${{ "%.2f" % (d.total_cents / 100) }}</td>
+              <td class="num">{% if d.deposit_cents %}${{ "%.2f" % (d.deposit_cents / 100) }}{% else %}—{% endif %}</td>
+              <td><span class="badge is-{{ d.status }}">{{ d.status }}</span></td>
+              <td><code class="slug">{{ base_url }}/i/{{ d.slug }}</code></td>
+            </tr>
+            {% endfor %}
+          </table>
+          {% if not invoices %}<p class="muted">No invoices yet.</p>{% endif %}
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Recurring plans</h2>
+            <form method="post" action="/admin/studio/projects/{{ p.id }}/recurring" class="inline-form">
+              <input type="text" name="title" placeholder="Plan title (e.g. Monthly content retainer)" required>
+              <button type="submit" class="ghost">New recurring plan</button>
+              <span class="muted">generates a draft invoice each month — you still Send it</span>
+            </form>
+          </div>
+          {% if plans %}
+          <table class="list">
+            <tr><th>Plan</th><th class="num">Monthly</th><th class="num">Day</th><th>State</th><th>Last run</th></tr>
+            {% for r in plans %}
+            <tr>
+              <td><a href="/admin/studio/recurring/{{ r.id }}">{{ r.title }}</a></td>
+              <td class="num">${{ "%.2f" % (r.total_cents / 100) }}</td>
+              <td class="num">{{ r.anchor_day }}</td>
+              <td>{% if r.active %}<span class="badge is-active">active</span>
+                  {% else %}<span class="badge is-draft">paused</span>{% endif %}</td>
+              <td class="muted">{{ r.last_run_period or "—" }}</td>
+            </tr>
+            {% endfor %}
+          </table>
+          {% else %}<p class="muted">No recurring plans — add one for a monthly retainer client.</p>{% endif %}
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Shot list <span class="muted">{{ shots|length }} shot{{ "s" if shots|length != 1 }}</span></h2>
+            <form method="post" action="/admin/studio/projects/{{ p.id }}/shots" class="inline-form">
+              <input type="text" name="title" placeholder="Shot (e.g. Plated hero, three-quarter)" required>
+              <select name="category">
+                <option value="">— category —</option>
+                {% for c in shot_categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+              </select>
+              <select name="priority">
+                {% for pr in shot_priorities %}
+                <option value="{{ pr }}" {% if pr == "want" %}selected{% endif %}>{{ pr }}</option>
+                {% endfor %}
+              </select>
+              <input type="number" name="sort_order" value="0" style="width:4em" title="display order">
+              <button type="submit" class="ghost">Add shot</button>
+            </form>
+          </div>
+          {% if shots %}
+          {# Per-row forms live OUTSIDE the table (cells bind via the form="" attribute) so
+             the HTML parser never hoists a <form> out of <tr>/<td>. #}
+          {% for s in shots %}
+          <form method="post" action="/admin/studio/shots/{{ s.id }}" id="shot-{{ s.id }}"></form>
+          <form method="post" action="/admin/studio/shots/{{ s.id }}/delete" id="shot-del-{{ s.id }}"
+                onsubmit="return confirm('Remove this shot?')"></form>
+          {% endfor %}
+          <div class="table-scroll">
+          <table class="list">
+            <tr><th class="num">#</th><th>Shot</th><th>Category</th><th>Priority</th><th>Note</th><th></th></tr>
+            {% for s in shots %}
+            <tr>
+              <td><input type="number" form="shot-{{ s.id }}" name="sort_order"
+                         value="{{ s.sort_order }}" style="width:4em"></td>
+              <td><input type="text" form="shot-{{ s.id }}" name="title" value="{{ s.title }}" required></td>
+              <td><select form="shot-{{ s.id }}" name="category">
+                <option value="">—</option>
+                {% for c in shot_categories %}
+                <option value="{{ c }}" {% if s.category == c %}selected{% endif %}>{{ c }}</option>
+                {% endfor %}
+              </select></td>
+              <td><select form="shot-{{ s.id }}" name="priority">
+                {% for pr in shot_priorities %}
+                <option value="{{ pr }}" {% if s.priority == pr %}selected{% endif %}>{{ pr }}</option>
+                {% endfor %}
+              </select></td>
+              <td><input type="text" form="shot-{{ s.id }}" name="note"
+                         value="{{ s.note or '' }}" placeholder="—"></td>
+              <td><div class="row-actions">
+                  <button type="submit" form="shot-{{ s.id }}" class="tiny">Save</button>
+                  <button type="submit" form="shot-del-{{ s.id }}" class="danger tiny">Delete</button></div></td>
+            </tr>
+            {% endfor %}
+          </table>
+          </div>
+          {% else %}<p class="muted">No shots yet — build the menu-driven shot list before the shoot.</p>{% endif %}
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Email activity <span class="muted">{{ emails|length }} send{{ "s" if emails|length != 1 }}
+              · <a href="/admin/sent">View all in Sent log</a></span></h2>
+          </div>
+          {% if emails %}
+          <table class="list">
+            <tr><th>When</th><th>To</th><th>Kind</th><th>Subject</th><th>Doc</th></tr>
+            {% for e in emails %}
+            <tr>
+              <td class="muted">{{ e.created_at }}</td>
+              <td>{{ e.to_email }}</td>
+              <td><span class="kind-badge kind-{{ e.doc_kind }}">{{ e.doc_kind }}</span></td>
+              <td>{{ e.subject }}</td>
+              <td class="muted">{% if e.doc_id %}#{{ e.doc_id }}{% else %}—{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </table>
+          {% else %}
+          <p class="muted">Nothing sent yet — proposals, contracts, invoices, and
+            gallery delivery emails land here once you click Send.</p>
+          {% endif %}
+        </section>
+
+      </div>
+
+      <aside class="project-rail">
+
+        <div class="ws-admin">
+          {% if p.workspace_published %}
+          <strong>Client workspace is live</strong>
+          <a href="{{ base_url }}/w/{{ p.workspace_slug }}" target="_blank" rel="noopener">{{ base_url }}/w/{{ p.workspace_slug }}</a>
+          <div class="ws-pin">PIN <code>{{ p.workspace_pin }}</code></div>
+          <form method="post" action="/admin/studio/projects/{{ p.id }}/workspace/unpublish"
+                class="inline-form" style="margin-top:0.7rem">
+            <button type="submit" class="link">Close workspace</button>
+          </form>
+          {% else %}
+          <strong>Client workspace</strong>
+          <span class="muted">One PIN-gated page with this project's sent proposal,
+            agreement, invoice, and gallery.</span>
+          <form method="post" action="/admin/studio/projects/{{ p.id }}/workspace/publish"
+                class="inline-form" style="margin-top:0.7rem">
+            <button type="submit" class="primary">{% if p.workspace_slug %}Re-open{% else %}Publish{% endif %} workspace</button>
+          </form>
+          {% endif %}
+        </div>
+
+        <section class="panel panel--timeline">
+          <div class="panel-head"><h2>Activity</h2></div>
+          {% if timeline %}
+          <ul class="timeline">
+            {% for e in timeline %}
+            <li class="timeline-item timeline-{{ e.kind }}">
+              <span class="timeline-dot" aria-hidden="true"></span>
+              <span class="timeline-when">{{ e.ts[:16] }}</span>
+              <span class="timeline-kind"><span class="kind-badge kind-{{ e.kind }}">{{ e.kind }}</span></span>
+              <span class="timeline-text">{{ e.text }}</span>
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p class="muted">No activity yet — sends, views, signatures, and payments land here.</p>
+          {% endif %}
+        </section>
+
+      </aside>
+
+    </div>
 </main>
 {% endblock %}

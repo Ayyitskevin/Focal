@@ -1,0 +1,180 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Tasks · Mise{% endblock %}
+{% block admin_body %}
+<main class="admin-main">
+  <div class="admin-bar">
+    <div>
+      <h1>Tasks</h1>
+      <p class="muted">Studio to-do list. Pin a task to a project; due dates show on the calendar.</p>
+    </div>
+  </div>
+
+  <section class="task-new" aria-label="Add a task">
+    <form method="post" action="/admin/tasks" class="task-new-form">
+      <input type="text" name="title" placeholder="What needs doing?" required maxlength="200" autofocus>
+      <input type="date" name="due_date" aria-label="Due date">
+      <select name="project_id" aria-label="Session">
+        <option value="">No session</option>
+        {% for p in projects %}<option value="{{ p.id }}">{{ p.title }}</option>{% endfor %}
+      </select>
+      <button type="submit">Add task</button>
+    </form>
+  </section>
+
+  {% if open_tasks %}
+  <div class="stat-strip" aria-label="Task summary">
+    <span class="stat"><strong>{{ summary.open }}</strong> open</span>
+    <span class="stat{% if summary.overdue %} stat-warn{% endif %}"><strong>{{ summary.overdue }}</strong> overdue</span>
+    <span class="stat"><strong>{{ summary.week }}</strong> due this week</span>
+    <span class="stat"><strong>{{ summary.none }}</strong> no due date</span>
+  </div>
+  {% endif %}
+
+  <section aria-label="Open tasks">
+    <h2>Open <span class="muted">({{ open_tasks|length }})</span></h2>
+    {% if open_tasks %}
+    <div class="studio-toolbar" id="task-toolbar">
+      <input type="search" class="studio-search" id="task-search" placeholder="Search tasks…" aria-label="Search tasks">
+      <select class="studio-filter" id="task-project" aria-label="Filter by session">
+        <option value="">All sessions</option>
+        {% for p in projects %}<option value="{{ p.id }}">{{ p.title }}</option>{% endfor %}
+      </select>
+      <select class="studio-filter" id="task-due" aria-label="Filter by due date">
+        <option value="">Any due date</option>
+        <option value="overdue">Overdue</option>
+        <option value="today">Due today</option>
+        <option value="week">Due this week</option>
+        <option value="none">No due date</option>
+      </select>
+      <select class="studio-filter" id="task-sort" aria-label="Sort tasks">
+        <option value="due">Sort: due date</option>
+        <option value="created">Sort: newest</option>
+        <option value="project">Sort: session</option>
+      </select>
+      <div class="studio-view-toggle" role="group" aria-label="Grouping">
+        <button type="button" data-group="flat" class="is-active" aria-pressed="true">List</button>
+        <button type="button" data-group="project" aria-pressed="false">By session</button>
+      </div>
+    </div>
+    <ul class="task-list" id="task-list">
+      {% for t in open_tasks %}
+      <li class="task-row{% if t.overdue %} task-overdue{% endif %}" data-task
+          data-idx="{{ loop.index0 }}" data-id="{{ t.id }}"
+          data-search="{{ (t.title ~ ' ' ~ (t.project_title or ''))|lower }}"
+          data-project="{{ t.project_id or '' }}"
+          data-project-title="{{ t.project_title or 'No session' }}"
+          data-bucket="{{ t.bucket }}" data-due="{{ t.due_date or '' }}">
+        <form method="post" action="/admin/tasks/{{ t.id }}/toggle" class="task-check">
+          <button type="submit" title="Mark done">&#9744;</button></form>
+        <span class="task-title">{{ t.title }}</span>
+        {% if t.project_title %}
+        <a class="task-project" href="/admin/studio/projects/{{ t.project_id }}">{{ t.project_title }}</a>{% endif %}
+        {% if t.due_date %}<span class="task-due">due {{ t.due_date }}{% if t.overdue %} · overdue{% endif %}</span>{% endif %}
+        <form method="post" action="/admin/tasks/{{ t.id }}/delete" class="task-del"
+              onsubmit="return confirm('Delete this task?')">
+          <button type="submit" title="Delete" class="link">&times;</button></form>
+      </li>
+      {% endfor %}
+    </ul>
+    <p class="studio-empty" id="task-empty" hidden>No tasks match.</p>
+    {% else %}<p class="muted">All clear — nothing open.</p>{% endif %}
+  </section>
+
+  {% if done_tasks %}
+  <section aria-label="Completed tasks">
+    <h2 class="task-done-head">Recently completed</h2>
+    <ul class="task-list">
+      {% for t in done_tasks %}
+      <li class="task-row task-done">
+        <form method="post" action="/admin/tasks/{{ t.id }}/toggle" class="task-check">
+          <button type="submit" title="Reopen">&#9745;</button></form>
+        <span class="task-title">{{ t.title }}</span>
+        {% if t.project_title %}<span class="task-project">{{ t.project_title }}</span>{% endif %}
+        {% if t.done_at %}<span class="task-due">done {{ t.done_at[:10] }}</span>{% endif %}
+        <form method="post" action="/admin/tasks/{{ t.id }}/delete" class="task-del"
+              onsubmit="return confirm('Delete this task?')">
+          <button type="submit" title="Delete" class="link">&times;</button></form>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  <script>
+  (function () {
+    var list = document.getElementById('task-list');
+    if (!list) return;
+    var rows = Array.prototype.slice.call(list.querySelectorAll('[data-task]'));
+    var search = document.getElementById('task-search');
+    var fProject = document.getElementById('task-project');
+    var fDue = document.getElementById('task-due');
+    var fSort = document.getElementById('task-sort');
+    var empty = document.getElementById('task-empty');
+    var group = 'flat';
+
+    function visible(r) {
+      var q = (search.value || '').trim().toLowerCase();
+      if (q && r.dataset.search.indexOf(q) === -1) return false;
+      if (fProject.value && r.dataset.project !== fProject.value) return false;
+      var d = fDue.value, b = r.dataset.bucket;
+      if (d === 'overdue' && b !== 'overdue') return false;
+      if (d === 'today' && b !== 'today') return false;
+      if (d === 'week' && !(b === 'today' || b === 'week')) return false;
+      if (d === 'none' && b !== 'none') return false;
+      return true;
+    }
+    function ordered() {
+      var arr = rows.slice();
+      var key = group === 'project' ? 'project' : fSort.value;
+      arr.sort(function (a, b) {
+        if (key === 'created')
+          return (+b.dataset.id) - (+a.dataset.id);
+        if (key === 'project') {
+          var pa = a.dataset.projectTitle.toLowerCase(),
+              pb = b.dataset.projectTitle.toLowerCase();
+          if (pa !== pb) return pa < pb ? -1 : 1;
+        }
+        return (+a.dataset.idx) - (+b.dataset.idx);
+      });
+      return arr;
+    }
+    function render() {
+      list.querySelectorAll('.task-group-head').forEach(function (h) { h.remove(); });
+      var arr = ordered();
+      var vis = arr.filter(visible), hid = arr.filter(function (r) { return !visible(r); });
+      var last = null;
+      vis.forEach(function (r) {
+        if (group === 'project' && r.dataset.projectTitle !== last) {
+          last = r.dataset.projectTitle;
+          var h = document.createElement('li');
+          h.className = 'task-group-head';
+          h.textContent = last;
+          list.appendChild(h);
+        }
+        r.classList.remove('studio-hidden');
+        list.appendChild(r);
+      });
+      hid.forEach(function (r) { r.classList.add('studio-hidden'); list.appendChild(r); });
+      empty.hidden = vis.length !== 0;
+    }
+
+    [search, fProject, fDue, fSort].forEach(function (el) {
+      el.addEventListener('input', render);
+      el.addEventListener('change', render);
+    });
+    document.querySelectorAll('#task-toolbar [data-group]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        group = btn.dataset.group;
+        document.querySelectorAll('#task-toolbar [data-group]').forEach(function (b) {
+          var sel = b === btn;
+          b.classList.toggle('is-active', sel);
+          b.setAttribute('aria-pressed', sel ? 'true' : 'false');
+        });
+        render();
+      });
+    });
+    render();
+  })();
+  </script>
+</main>
+{% endblock %}

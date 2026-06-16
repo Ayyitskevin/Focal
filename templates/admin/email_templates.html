@@ -1,0 +1,90 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Email templates · Studio · Mise{% endblock %}
+{% block admin_body %}
+<main class="admin-main">
+  <div class="admin-bar">
+    <h1><a href="/admin/studio">&larr;</a> Email templates</h1>
+  </div>
+
+  <p class="muted">Reusable email snippets for client sends. Pick one on a
+    proposal, contract, or invoice and it fills the subject and message — you
+    still review and click Send. Nothing auto-sends.</p>
+  <p class="muted">Merge fields (resolve at send time):
+    {% for f in merge_fields %}<code>{{ "{" }}{{ f }}{{ "}" }}</code>{% if not loop.last %} {% endif %}{% endfor %}</p>
+
+  <h2>New template</h2>
+  <form method="post" action="/admin/studio/email-templates" class="stack-form" style="max-width:680px">
+    <label>Name <input type="text" name="name" required placeholder="Proposal ready"></label>
+    <label>Subject <input type="text" name="subject" required
+           placeholder="Your proposal from {site_name}"></label>
+    <label>Body <textarea name="body" rows="8" required
+             placeholder="Hi {first_name}, ..."></textarea></label>
+    <button type="submit">Add template</button>
+  </form>
+
+  <h2>Saved ({{ rows|length }})</h2>
+  {% if not rows %}<p class="muted">No templates yet.</p>{% endif %}
+  {% if rows %}
+  <div class="studio-toolbar" id="tpl-toolbar">
+    <input type="search" class="studio-search" id="tpl-search" placeholder="Search name, subject or body…" aria-label="Search templates">
+    <select class="studio-filter" id="tpl-sort" aria-label="Sort templates">
+      <option value="name">Sort: name</option>
+      <option value="recent">Sort: newest</option>
+    </select>
+  </div>
+  {% endif %}
+  <div id="tpl-list">
+  {% for t in rows %}
+  <details class="press-row" data-tpl data-id="{{ t.id }}"
+      data-name="{{ t.name|lower }}"
+      data-search="{{ (t.name ~ ' ' ~ t.subject ~ ' ' ~ t.body)|lower }}">
+    <summary><strong>{{ t.name }}</strong>
+      <span class="muted"> · {{ t.subject }}</span></summary>
+    <form method="post" action="/admin/studio/email-templates/{{ t.id }}"
+          class="stack-form" style="max-width:680px">
+      <label>Name <input type="text" name="name" value="{{ t.name }}" required></label>
+      <label>Subject <input type="text" name="subject" value="{{ t.subject }}" required></label>
+      <label>Body <textarea name="body" rows="8" required>{{ t.body }}</textarea></label>
+      <div class="inline-form" style="margin-top:0.4rem">
+        <button type="submit">Save</button>
+        <button type="submit" formaction="/admin/studio/email-templates/{{ t.id }}/delete"
+                class="link danger"
+                onclick="return confirm('Delete this template?')">Delete</button>
+      </div>
+    </form>
+  </details>
+  {% endfor %}
+  </div>
+  {% if rows %}
+  <p class="studio-empty" id="tpl-empty" hidden>No templates match.</p>
+  <script>
+  (function () {
+    var search = document.getElementById('tpl-search');
+    if (!search) return;
+    var fSort = document.getElementById('tpl-sort');
+    var list = document.getElementById('tpl-list');
+    var empty = document.getElementById('tpl-empty');
+    var rows = Array.prototype.slice.call(list.querySelectorAll('[data-tpl]'));
+    function render() {
+      var q = (search.value || '').trim().toLowerCase();
+      rows.slice().sort(function (a, b) {
+        if (fSort.value === 'recent') return (+b.dataset.id) - (+a.dataset.id);
+        var na = a.dataset.name, nb = b.dataset.name;
+        return na < nb ? -1 : (na > nb ? 1 : 0);
+      }).forEach(function (r) { list.appendChild(r); });
+      var n = 0;
+      rows.forEach(function (r) {
+        var v = !q || r.dataset.search.indexOf(q) !== -1;
+        r.classList.toggle('studio-hidden', !v);
+        if (v) n++;
+      });
+      empty.hidden = n !== 0;
+    }
+    search.addEventListener('input', render);
+    fSort.addEventListener('change', render);
+    render();
+  })();
+  </script>
+  {% endif %}
+</main>
+{% endblock %}

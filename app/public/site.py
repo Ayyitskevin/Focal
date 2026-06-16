@@ -15,19 +15,14 @@ log = logging.getLogger("mise.public.site")
 router = APIRouter()
 
 # Paths the noindex middleware leaves crawlable (matched by exact path or prefix "/").
-INDEXABLE = {"/", "/portfolio", "/about", "/contact", "/book", "/work",
+INDEXABLE = {"/", "/portfolio", "/work", "/about", "/contact", "/book", "/reels",
              "/services", "/press", "/robots.txt", "/sitemap.xml"}
 
-# Public-facing service labels for the booking form. Three top-level categories
-# (Photography / Videography / Brand Partner) mirror the proposal preset groups —
-# Kevin picks the specific tier (Starter/Standard/Premium) when composing.
-BOOK_SERVICES = ["Photography", "Videography",
-                 "Brand Partner (monthly retainer)", "Not sure yet"]
-
 # Public services + tier cards for /services. Mirrors the admin proposal PRESETS
-# in deliverables only (no prices — Kevin keeps the booking dropdown price-free
-# so quotes stay flexible). Order matters: the public page renders these in
-# nav order.
+# in both deliverables and price (price_cents = the shoot-day anchor from
+# app/admin/proposals.py PRESETS — the market-researched floor; final quotes are
+# still tailored on the booking form). The booking dropdown itself stays
+# price-free. Order matters: the public page renders these in nav order.
 SERVICES = [
     {
         "key": "photography",
@@ -36,19 +31,19 @@ SERVICES = [
                    "Natural light first; styled when the work needs it.",
         "monthly": False,
         "tiers": [
-            {"name": "Starter", "includes": [
+            {"name": "Starter", "price_cents": 90000, "includes": [
                 "Half-day shoot (up to 4 hours)",
                 "Up to 20 edited, web-ready images",
                 "Online gallery delivery",
                 "Standard usage rights",
             ]},
-            {"name": "Standard", "includes": [
+            {"name": "Standard", "price_cents": 180000, "includes": [
                 "Full-day shoot (up to 8 hours)",
                 "Up to 50 edited images",
                 "Social crops (1:1, 4:5, 9:16) for hero selects",
                 "Online gallery + standard usage rights",
             ]},
-            {"name": "Premium", "includes": [
+            {"name": "Premium", "price_cents": 320000, "includes": [
                 "Extended-day shoot (up to 10 hours)",
                 "Up to 75 edited images",
                 "Social crops for every select",
@@ -64,19 +59,19 @@ SERVICES = [
                    "hero brand films for the launches and campaigns.",
         "monthly": False,
         "tiers": [
-            {"name": "Starter", "includes": [
+            {"name": "Starter", "price_cents": 180000, "includes": [
                 "Half-day shoot (up to 4 hours)",
                 "3 short-form vertical reels (15–30s each)",
                 "Licensed music + color grade",
                 "Standard usage rights",
             ]},
-            {"name": "Standard", "includes": [
+            {"name": "Standard", "price_cents": 320000, "includes": [
                 "Full-day shoot (up to 8 hours)",
                 "6 short-form vertical reels (15–60s each)",
                 "B-roll package + color grade + licensed music",
                 "Standard usage rights",
             ]},
-            {"name": "Premium", "includes": [
+            {"name": "Premium", "price_cents": 580000, "includes": [
                 "Two shoot days (up to 16 hours total)",
                 "10 short-form reels + 1 hero brand video (60–90s)",
                 "B-roll package, color grade, rush available",
@@ -92,19 +87,19 @@ SERVICES = [
                    "discount vs ad-hoc. Three-month minimum, month-to-month after.",
         "monthly": True,
         "tiers": [
-            {"name": "Starter", "includes": [
+            {"name": "Starter", "price_cents": 140000, "includes": [
                 "1 photo content day per month",
                 "~20 edited images",
                 "Social crop pack (1:1, 4:5, 9:16) for hero selects",
                 "Standing client portal + priority scheduling",
             ]},
-            {"name": "Standard", "includes": [
+            {"name": "Standard", "price_cents": 220000, "includes": [
                 "1 photo + short-form video content day per month",
                 "~30 edited images + 3 short-form reels",
                 "Social crop pack for every select",
                 "Priority scheduling + standing client portal",
             ]},
-            {"name": "Premium", "includes": [
+            {"name": "Premium", "price_cents": 380000, "includes": [
                 "Two content days per month (photo + video)",
                 "~50 edited images + 6 short-form reels",
                 "Quarterly hero brand video (60–90s)",
@@ -172,6 +167,14 @@ def _portfolio_assets() -> list:
                       ORDER BY id DESC""")
 
 
+def _portfolio_reels() -> list:
+    """Portfolio-starred videos for the public /reels showcase — same explicit
+    portfolio=1 gate as photos, so nothing client-private is ever exposed."""
+    return db.all_("""SELECT * FROM assets
+                      WHERE portfolio=1 AND status='ready' AND kind='video'
+                      ORDER BY id DESC""")
+
+
 def _testimonials(gallery_id: int | None = None, limit: int | None = None) -> list:
     """Return published testimonials. gallery_id=None means 'general' (home + /services);
     pass an int for case-study-scoped quotes that ride along with that gallery."""
@@ -231,8 +234,11 @@ async def portfolio(request: Request):
     assets = _portfolio_assets()
     # distinct tags actually in use, alphabetical — the filter chips
     tags = sorted({a["portfolio_tag"] for a in assets if a["portfolio_tag"]})
+    # Case studies also surface here as a "Featured clients" band; the dedicated
+    # /work index + /work/{slug} detail pages are public + crawlable too.
     return templates.TemplateResponse(request, "site/portfolio.html",
-                                      {"assets": assets, "tags": tags})
+                                      {"assets": assets, "tags": tags,
+                                       "studies": _case_studies()})
 
 
 @router.get("/about", response_class=HTMLResponse)
@@ -276,7 +282,9 @@ async def contact(request: Request, prefill: str = "", business: str = "",
 @router.post("/contact", response_class=HTMLResponse)
 async def submit_inquiry(request: Request, name: str = Form(...), email: str = Form(...),
                          business: str = Form(""), message: str = Form(...),
-                         website: str = Form("")):
+                         website: str = Form(""), service: str = Form(""),
+                         shoot_date: str = Form(""), dish_count: str = Form(""),
+                         usage: str = Form(""), budget: str = Form("")):
     # Honeypot: real visitors never see the "website" field — bots fill it.
     if website.strip():
         return templates.TemplateResponse(request, "site/contact.html",
@@ -300,13 +308,28 @@ async def submit_inquiry(request: Request, name: str = Form(...), email: str = F
             {"sent": False, "error": "Please fill in your name, a valid email, "
                                      "and a message."},
             status_code=400)
+    # Optional scope fields from the quote-request form. service + target date
+    # get their own inquiry columns (so the inquiry→quote button can lift them
+    # into a project without re-typing); the rest fold into the message + email
+    # body so Odysseus inquiry_intake keeps parsing one plain-text block unchanged.
+    service, shoot_date = service.strip(), shoot_date.strip()
+    details = [(lbl, v.strip()) for lbl, v in (
+        ("Project type", service), ("Target date", shoot_date),
+        ("Dishes / setups", dish_count), ("Usage / licensing", usage),
+        ("Budget range", budget)) if v.strip()]
+    full_message = message
+    if details:
+        full_message += "\n\n— Project details —\n" + "\n".join(
+            f"{lbl}: {v}" for lbl, v in details)
     security.inquiry_record(ip, security.INQUIRY_BUCKET_CONTACT)
-    iid = db.run("INSERT INTO inquiries (name, email, business, message) VALUES (?,?,?,?)",
-                 (name, email, business.strip() or None, message))
+    iid = db.run("""INSERT INTO inquiries (name, email, business, message, service, shoot_date)
+                    VALUES (?,?,?,?,?,?)""",
+                 (name, email, business.strip() or None, full_message,
+                  service or None, shoot_date or None))
     if mailer.configured():
         body = (f"New inquiry via kleephotography.com\n\n"
                 f"Name: {name}\nEmail: {email}\n"
-                f"Business: {business.strip() or '—'}\n\n{message}\n")
+                f"Business: {business.strip() or '—'}\n\n{full_message}\n")
         try:
             mailer.send(config.GMAIL_USER, f"New inquiry — {name}", body, reply_to=email)
             db.run("UPDATE inquiries SET emailed=1 WHERE id=?", (iid,))
@@ -340,82 +363,10 @@ async def work_detail(request: Request, slug: str):
                                        "testimonials": _testimonials(gallery_id=g["id"])})
 
 
-@router.get("/book", response_class=HTMLResponse)
-async def book(request: Request):
-    return templates.TemplateResponse(request, "site/book.html",
-                                      {"sent": False, "error": None,
-                                       "services": BOOK_SERVICES,
-                                       "today": dt.date.today().isoformat()})
-
-
-@router.post("/book", response_class=HTMLResponse)
-async def submit_booking(request: Request, name: str = Form(...),
-                         email: str = Form(...), business: str = Form(""),
-                         shoot_date: str = Form(...), service: str = Form(...),
-                         message: str = Form(""), website: str = Form("")):
-    if website.strip():  # honeypot
-        return templates.TemplateResponse(request, "site/book.html",
-                                          {"sent": True, "error": None,
-                                           "services": BOOK_SERVICES,
-                                           "today": dt.date.today().isoformat()})
-    ip = security.client_ip(request)
-    if security.inquiry_throttled(ip, security.INQUIRY_BUCKET_BOOK):
-        log.warning("booking form throttled for ip=%s", ip)
-        return templates.TemplateResponse(
-            request, "site/book.html",
-            {"sent": False, "services": BOOK_SERVICES,
-             "today": dt.date.today().isoformat(),
-             "error": "You've sent a few booking requests recently — give me a "
-                      "chance to reply before sending another one."},
-            status_code=429)
-    name, email = name.strip(), email.strip().lower()
-    business, message = business.strip(), message.strip()
-    err = None
-    if not (name and "@" in email and "." in email.rsplit("@", 1)[-1]):
-        err = "Please fill in your name and a valid email."
-    elif service not in BOOK_SERVICES:
-        err = "Please pick a service."
-    else:
-        try:
-            d = dt.date.fromisoformat(shoot_date)
-            if d < dt.date.today():
-                err = "Please choose a date that hasn't already passed."
-        except ValueError:
-            err = "Please choose a valid date."
-    if err:
-        return templates.TemplateResponse(request, "site/book.html",
-                                          {"sent": False, "error": err,
-                                           "services": BOOK_SERVICES,
-                                           "today": dt.date.today().isoformat()},
-                                          status_code=400)
-    security.inquiry_record(ip, security.INQUIRY_BUCKET_BOOK)
-    full_msg = (f"Requested: {service} on {shoot_date}.\n\n"
-                f"{message}" if message else
-                f"Requested: {service} on {shoot_date}.")
-    iid = db.run(
-        """INSERT INTO inquiries (name, email, business, message, kind,
-                                  shoot_date, service)
-           VALUES (?,?,?,?,?,?,?)""",
-        (name, email, business or None, full_msg, "booking", shoot_date, service))
-    if mailer.configured():
-        body = (f"New booking request via kleephotography.com\n\n"
-                f"Name: {name}\nEmail: {email}\n"
-                f"Business: {business or '—'}\n"
-                f"Service: {service}\nRequested date: {shoot_date}\n\n"
-                f"{message or '(no extra note)'}\n")
-        try:
-            mailer.send(config.GMAIL_USER, f"Booking request — {name} · {shoot_date}",
-                        body, reply_to=email)
-            db.run("UPDATE inquiries SET emailed=1 WHERE id=?", (iid,))
-        except Exception as e:
-            log.error("booking %s stored but email failed: %s", iid, e)
-    else:
-        log.error("booking %s stored — mailer not configured, no email sent", iid)
-    log.info("booking %s received (%s on %s)", iid, service, shoot_date)
-    return templates.TemplateResponse(request, "site/book.html",
-                                      {"sent": True, "error": None,
-                                       "services": BOOK_SERVICES,
-                                       "today": dt.date.today().isoformat()})
+@router.get("/reels", response_class=HTMLResponse)
+async def reels(request: Request):
+    return templates.TemplateResponse(request, "site/reels.html",
+                                      {"reels": _portfolio_reels()})
 
 
 @router.get("/site/img/{asset_id}")
@@ -435,6 +386,37 @@ async def portfolio_image(asset_id: int, variant: str = "web"):
                         headers={"Cache-Control": "public, max-age=86400"})
 
 
+@router.get("/site/vid/{asset_id}")
+async def portfolio_video(asset_id: int):
+    """Unauthenticated — serves ONLY portfolio-flagged, ready videos (the /reels
+    showcase). FileResponse handles HTTP Range, so iOS scrubbing works."""
+    a = db.one("""SELECT * FROM assets WHERE id=? AND portfolio=1
+                  AND status='ready' AND kind='video'""", (asset_id,))
+    if not a:
+        raise HTTPException(status_code=404)
+    path = (config.MEDIA_DIR / str(a["gallery_id"]) / "web"
+            / f"{Path(a['stored']).stem}.mp4")
+    if not path.is_file():
+        raise HTTPException(status_code=404)
+    return FileResponse(path, media_type="video/mp4",
+                        headers={"Cache-Control": "public, max-age=86400"})
+
+
+@router.get("/site/poster/{asset_id}")
+async def portfolio_video_poster(asset_id: int):
+    """Poster frame for a portfolio video — same public portfolio gate."""
+    a = db.one("""SELECT * FROM assets WHERE id=? AND portfolio=1
+                  AND status='ready' AND kind='video'""", (asset_id,))
+    if not a:
+        raise HTTPException(status_code=404)
+    path = (config.MEDIA_DIR / str(a["gallery_id"]) / "web"
+            / f"{Path(a['stored']).stem}_poster.jpg")
+    if not path.is_file():
+        raise HTTPException(status_code=404)
+    return FileResponse(path, media_type="image/jpeg",
+                        headers={"Cache-Control": "public, max-age=86400"})
+
+
 @router.get("/robots.txt", response_class=PlainTextResponse)
 async def robots():
     return ("User-agent: *\n"
@@ -446,8 +428,10 @@ async def robots():
 
 @router.get("/sitemap.xml")
 async def sitemap():
-    paths = ["/", "/portfolio", "/services", "/about", "/contact",
-             "/book", "/work", "/press"]
+    paths = ["/", "/portfolio", "/work", "/services", "/about", "/contact",
+             "/book", "/reels", "/press"]
+    # Case-study detail pages are also surfaced on /portfolio (Featured clients)
+    # but get their own crawlable URLs here (/work index + /work/{slug} details).
     paths += [f"/work/{g['slug']}" for g in _case_studies()]
     urls = "".join(f"<url><loc>{config.BASE_URL}{p}</loc></url>" for p in paths)
     return Response(

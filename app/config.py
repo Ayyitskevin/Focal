@@ -45,12 +45,40 @@ ADMIN_PASSWORD = os.environ.get("MISE_ADMIN_PASSWORD", "")  # required in prod
 
 SITE_NAME = os.environ.get("MISE_SITE_NAME", "Kevin Lee Photography")
 
+# Business-local timezone for the scheduler. Availability is authored in this
+# zone; booking instants are stored UTC and converted per-day (DST-safe). Change
+# via env without a code edit if Kevin relocates the business.
+TIMEZONE = os.environ.get("MISE_TIMEZONE", "America/New_York")
+
 # Studio (Phase 4) — empty means the feature is off; routes degrade gracefully
 STRIPE_SECRET_KEY = os.environ.get("MISE_STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.environ.get("MISE_STRIPE_WEBHOOK_SECRET", "")
 GMAIL_USER = os.environ.get("MISE_GMAIL_USER", "")
 GMAIL_APP_PASSWORD = os.environ.get("MISE_GMAIL_APP_PASSWORD", "")
 NOTION_TOKEN = os.environ.get("MISE_NOTION_TOKEN", "")
+# One-way Notion "Bookings" calendar writeback (WINDOW doctrine). Empty = dormant:
+# the scheduler still works end-to-end, it just skips the Notion mirror. Arming
+# needs Kevin to create a Bookings database, share it with the Mise integration,
+# and drop its id here — same posture as Stripe/Telegram (off until provisioned).
+NOTION_BOOKINGS_DB = os.environ.get("MISE_NOTION_BOOKINGS_DB", "")
+# One-way booking→Notion Session spine. Empty = dormant: a flagged event type's
+# confirmed booking is a no-op until this holds the Sessions database id (Mise
+# integration must be shared on it). The per-event-type creates_notion_session
+# flag is the second gate. Sessions DB id: see the Notion "Sessions" database.
+NOTION_SESSIONS_DB = os.environ.get("MISE_NOTION_SESSIONS_DB", "")
+
+# Google Calendar (Phase B) — OAuth web-app creds for the single business account.
+# Empty client id/secret = dormant: the scheduler works without calendar sync and
+# the admin shows a "Connect" prompt. The id/secret come from Google Cloud Console
+# into .env; the per-install REFRESH TOKEN is obtained via the admin OAuth flow and
+# stored in the DB (google_oauth), never here. Redirect URI is derived from BASE_URL
+# and must match the one registered on the OAuth client exactly. GOOGLE_CALENDAR_ID
+# defaults to the account's primary calendar.
+GOOGLE_CLIENT_ID = os.environ.get("MISE_GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("MISE_GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_URI = os.environ.get(
+    "MISE_GOOGLE_REDIRECT_URI", f"{BASE_URL}/admin/scheduling/google/callback")
+GOOGLE_CALENDAR_ID = os.environ.get("MISE_GOOGLE_CALENDAR_ID", "primary")
 
 # Odysseus caption-drafting endpoint (Domain G slices 6b/6c). BOTH url+token must be
 # set to arm the "Draft with AI" button (see caption_ai.is_enabled); either unset =
@@ -95,8 +123,29 @@ RECURRING_TICK_SECONDS = int(os.environ.get("MISE_RECURRING_TICK_SECONDS", "3600
 PIN_MAX_FAILS = int(os.environ.get("MISE_PIN_MAX_FAILS", "5"))
 PIN_LOCKOUT_MIN = int(os.environ.get("MISE_PIN_LOCKOUT_MIN", "15"))
 
+# Per-IP request rate limits (max requests / window seconds). Deliberately generous
+# — real galleries never approach these; the media/thumbnail grid is exempt entirely
+# (see ratelimit._bucket_for) and logged-in admins are exempt so deploys/testing
+# never trip them. Tune via env without a code change if a bucket proves too tight.
+RATE_LIMIT_WINDOW = int(os.environ.get("MISE_RL_WINDOW", "60"))
+RATE_LIMITS = {
+    "download": (int(os.environ.get("MISE_RL_DOWNLOAD", "30")), RATE_LIMIT_WINDOW),
+    "public": (int(os.environ.get("MISE_RL_PUBLIC", "120")), RATE_LIMIT_WINDOW),
+    "admin": (int(os.environ.get("MISE_RL_ADMIN", "120")), RATE_LIMIT_WINDOW),
+}
+
+# Telegram security alerts (anomaly-only). Both unset -> dormant, no outbound call.
+# Sending is direct sendMessage (never getUpdates), so it does not conflict with the
+# single fleet polling consumer. A separate "alerts" bot token is fine here.
+TELEGRAM_TOKEN = os.environ.get("MISE_TELEGRAM_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("MISE_TELEGRAM_CHAT_ID", "")
+
 # Refuse uploads when free disk drops below this (GB) — fail loud, not full.
 MIN_FREE_GB = int(os.environ.get("MISE_MIN_FREE_GB", "10"))
+
+# Revenue snapshot monthly goal (display-only bar on Home). Dollars via env;
+# 0 = no goal line — the widget just shows collected vs outstanding.
+MONTHLY_GOAL_CENTS = int(os.environ.get("MISE_MONTHLY_GOAL", "0")) * 100
 
 SESSION_MAX_AGE = int(os.environ.get("MISE_SESSION_MAX_AGE", str(60 * 60 * 24 * 90)))
 

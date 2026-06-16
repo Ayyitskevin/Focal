@@ -1,8 +1,8 @@
-{% extends "base.html" %}
+{% extends "base_cream.html" %}
 {% block title %}Admin · {{ site_name }}{% endblock %}
 {% block content %}
 <main class="center-card">
-  <h1>Mise admin</h1>
+  <h1>Kevin Lee admin</h1>
   <form method="post" action="/admin/login" class="pin-form">
     <input type="password" name="password" placeholder="Password" autofocus required>
     {% if error %}<p class="error">{{ error }}</p>{% endif %}

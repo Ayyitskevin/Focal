@@ -1,6 +1,6 @@
-{% extends "base.html" %}
+{% extends "admin/base_admin.html" %}
 {% block title %}Activity · {{ g.title }}{% endblock %}
-{% block content %}
+{% block admin_body %}
 <main class="admin-main">
   <div class="admin-bar">
     <h1><a href="/admin/galleries/{{ g.id }}">&larr;</a> {{ g.title }} — activity</h1>

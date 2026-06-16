@@ -78,8 +78,6 @@ async def mark_invoice_sent(invoice_id: int):
         raise HTTPException(status_code=400, detail="invoice total must be above zero")
     db.run("UPDATE invoices SET status='sent', sent_at=datetime('now') WHERE id=?",
            (invoice_id,))
-    db.run("""UPDATE projects SET status='invoice' WHERE id=?
-              AND status IN ('lead','proposal','contract')""", (d["project_id"],))
     jobs.enqueue("notion_sync_invoice", {"invoice_id": invoice_id})
     log.info("invoice %s marked sent", invoice_id)
     return RedirectResponse(f"/admin/studio/invoices/{invoice_id}", status_code=303)

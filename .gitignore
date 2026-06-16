@@ -6,6 +6,11 @@
 # Runtime data: SQLite DBs, client media, zips, tmp, brand uploads (+ owned by mise user)
 data/
 
+# Local backup snapshots (may contain DB dumps / client PII — never commit)
+_bak/
+_backups/
+backups/
+
 # Python
 .venv/
 venv/

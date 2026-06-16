@@ -17,7 +17,7 @@ which is plenty for a monthly event.
 import logging
 import threading
 
-from . import config
+from . import booking_reminders, config
 from .admin import recurring
 
 log = logging.getLogger("mise.scheduler")
@@ -32,6 +32,10 @@ def _loop() -> None:
             recurring.run_due_plans()
         except Exception:
             log.exception("recurring sweep failed")
+        try:
+            booking_reminders.sweep()
+        except Exception:
+            log.exception("booking reminder sweep failed")
 
 
 def start() -> None:

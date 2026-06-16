@@ -13,11 +13,14 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.exception_handlers import http_exception_handler
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import config, db, jobs, scheduler, service_api
-from .admin import (activity, auth, contracts, emails, galleries, invoices,
-                    licenses, presets, press, proposals, recurring, share,
-                    shotlist, studio, uploads)
-from .public import docs, downloads, gallery, media, pay, portal, site
+from . import config, db, jobs, ratelimit, scheduler, service_api
+from .admin import (activity, auth, contracts, email_templates, emails, forms,
+                    galleries, invoices, licenses, presets, press, proposals,
+                    recurring, reports, share, shotlist, studio, uploads)
+from .admin import scheduling as admin_scheduling
+from .public import docs, downloads, gallery, media, pay, portal, site, workspace
+from .public import forms as public_forms
+from .public import scheduling as public_scheduling
 from .render import ROOT, templates
 
 logging.basicConfig(level=logging.INFO,
@@ -39,6 +42,14 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Mise", version="0.1.0", lifespan=lifespan, docs_url=None,
               redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
+
+
+@app.middleware("http")
+async def rate_limit(request: Request, call_next):
+    blocked = ratelimit.check(request, request.url.path)
+    if blocked is not None:
+        return blocked
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -80,8 +91,11 @@ async def healthz():
 for r in (auth.router, galleries.router, uploads.router, activity.router,
           studio.router, proposals.router, contracts.router, invoices.router,
           licenses.router, presets.router, press.router, recurring.router,
-          shotlist.router, emails.router, share.router,
+          reports.router, email_templates.router,
+          shotlist.router, emails.router, share.router, forms.router,
+          admin_scheduling.router,
           gallery.router, media.router,
-          downloads.router, docs.router, pay.router, portal.router, site.router,
+          downloads.router, docs.router, pay.router, portal.router, workspace.router,
+          public_forms.router, public_scheduling.router, site.router,
           service_api.router):
     app.include_router(r)

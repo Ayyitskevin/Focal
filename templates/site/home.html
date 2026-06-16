@@ -1,67 +1,201 @@
 {% extends "site/base_site.html" %}
 {% block title %}{{ site_name }} — Food &amp; Beverage Photography{% endblock %}
 {% block site_content %}
-<main class="site-main">
-  <section class="hero">
-    <h1>Photography that makes people hungry.</h1>
-    <p>Menus, dishes, drinks, and the rooms they live in — photographed for
-       restaurants, cafés, bars, and food brands that want their food to look
-       the way it tastes.</p>
-    <a class="btn" href="/book">Book a shoot</a>
-  </section>
 
-  {% if featured %}
-  <section>
-    <h2>Recent work</h2>
-    <div class="grid site-grid">
+{# HERO #}
+<section class="hero">
+  <div class="hero-inner">
+    <div data-reveal>
+      <p class="eyebrow">Asheville &amp; Western North Carolina</p>
+      <h1>Photography that<br>makes people <span class="it-accent">hungry.</span></h1>
+      <p class="lede">Food that looks the way it tastes — for restaurants,
+        cafés, bars, and food brands.</p>
+      <div class="hero-actions">
+        <a class="btn-pill" href="/contact">Request a quote <span>&rarr;</span></a>
+        <a class="btn-ghost" href="/portfolio">View the portfolio</a>
+      </div>
+    </div>
+    <figure class="hero-photo" style="margin:0;">
+      {% if featured %}
+      <img data-hero-img src="/site/img/{{ featured[0].id }}"
+           alt="Food &amp; beverage photography by {{ site_name }}">
+      {% if featured[0].portfolio_tag %}
+      <figcaption>{{ featured[0].portfolio_tag|capitalize }}</figcaption>
+      {% endif %}
+      {% endif %}
+    </figure>
+  </div>
+
+  <div class="hero-meta" data-reveal>
+    <div><b>120+</b><span>Menus shot</span></div>
+    <div><b>Same week</b><span>Gallery delivery</span></div>
+    <div><b>1:1 · 4:5 · 9:16</b><span>Social crops included</span></div>
+  </div>
+</section>
+
+{# PRESS MARQUEE — only when Kevin has featured press #}
+{% if press %}
+<section class="marquee" aria-label="As seen in">
+  <div class="marquee-track">
+    {% for p in press %}<span>{{ p.outlet }}</span>{% endfor %}
+    {% for p in press %}<span>{{ p.outlet }}</span>{% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{# SELECTED WORK — real portfolio assets, wired to the shared lightbox #}
+{% if featured %}
+<section class="sec" id="work">
+  <div class="sec-inner">
+    <div class="sec-head" data-reveal>
+      <div>
+        <p class="eyebrow">Selected work</p>
+        <h2>The thirty seconds before a dish stops looking alive.</h2>
+      </div>
+      <a class="btn-ghost" href="/portfolio">Full portfolio &rarr;</a>
+    </div>
+    <div class="work-grid" data-reveal>
       {% for a in featured %}
       <figure class="tile" data-web="/site/img/{{ a.id }}">
         <img src="/site/img/{{ a.id }}" loading="lazy"
-             alt="Food and beverage photography by {{ site_name }}"></figure>
+             alt="Food &amp; beverage photography by {{ site_name }}">
+        {% if a.portfolio_tag %}
+        <figcaption class="work-cap">{{ a.portfolio_tag|capitalize }}</figcaption>
+        {% endif %}
+      </figure>
       {% endfor %}
     </div>
-    <p class="center"><a href="/portfolio">See the full portfolio &rarr;</a></p>
-  </section>
-  {% endif %}
+  </div>
+</section>
+{% endif %}
 
-  {% if press %}
-  <section class="press-strip">
-    <h2>As seen in</h2>
-    <ul class="press-wall">
-      {% for p in press %}
-      <li>
-        {% if p.url %}<a href="{{ p.url }}" target="_blank" rel="noopener noreferrer">{{ p.outlet }}</a>
-        {% else %}<span>{{ p.outlet }}</span>{% endif %}
-      </li>
-      {% endfor %}
-    </ul>
-    <p class="center"><a href="/press">See all press &rarr;</a></p>
-  </section>
-  {% endif %}
-
-  <section class="services">
-    <h2>How we work</h2>
-    <div class="service-cards">
-      <div class="service-card">
+{# SERVICES PREVIEW #}
+<section class="services" id="services">
+  <div class="sec-inner">
+    <div data-reveal style="max-width:30em; margin-bottom:clamp(34px,5vw,56px);">
+      <p class="eyebrow">How we work</p>
+      <h2 style="margin:0;">Three ways to work together.</h2>
+    </div>
+    <div class="svc-cards">
+      <a class="svc-card" href="/services" data-reveal>
         <h3>Photography</h3>
-        <p>Menus, dishes, drinks, and the rooms they live in. Half-day to
-           extended-day tiers with social crops baked in.</p>
-      </div>
-      <div class="service-card">
+        <p>Dishes, drinks, and interiors. Half- to full-day, social crops included.</p>
+        <span class="svc-tiers">Starter · Standard · Premium</span>
+        <span class="svc-cta">Explore photography &rarr;</span>
+      </a>
+      <a class="svc-card" href="/services" data-reveal>
         <h3>Videography</h3>
-        <p>Short-form social motion that earns the scroll, plus hero brand
-           films for launches and campaigns.</p>
-      </div>
-      <div class="service-card">
+        <p>Short-form social motion, plus hero brand films.</p>
+        <span class="svc-tiers">Starter · Standard · Premium</span>
+        <span class="svc-cta">Explore videography &rarr;</span>
+      </a>
+      <a class="svc-card" href="/services" data-reveal>
         <h3>Brand Partner</h3>
-        <p>A monthly content rhythm — photo, photo + reels, or a two-day
-           schedule with quarterly hero video. Built-in discount vs ad-hoc.</p>
+        <p>Monthly content on a set rhythm. Built-in retainer discount.</p>
+        <span class="svc-tiers">Monthly retainer</span>
+        <span class="svc-cta">Explore retainers &rarr;</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+{# DELIVERY — dark interactive showcase of the gallery features #}
+<section class="delivery" id="delivery">
+  <div class="sec-inner">
+    <div class="delivery-intro" data-reveal>
+      <p class="eyebrow">After the shoot</p>
+      <h2>Delivery is the easy part.</h2>
+      <p>Private gallery. Proof favorites, download full-res, grab social
+         crops sized for every platform.</p>
+    </div>
+
+    <div class="delivery-grid">
+      {# interactive proofing demo #}
+      <div class="proof-panel" data-reveal data-proof>
+        <div class="proof-head">
+          <b>Proof &amp; favorite</b>
+          <span><b data-proof-count>0</b> of {{ featured|length if featured else 6 }} selected</span>
+        </div>
+        <div class="proof-bar"><div class="proof-fill" data-proof-fill></div></div>
+        <div class="proof-thumbs">
+          {% if featured %}
+          {% for a in featured %}
+          <button class="proof-thumb" data-proof-thumb type="button" aria-label="Favorite">
+            <img src="/site/img/{{ a.id }}" loading="lazy" alt="Proof thumbnail">
+            <span class="proof-heart">&hearts;</span>
+          </button>
+          {% endfor %}
+          {% else %}
+          {% for i in range(6) %}
+          <button class="proof-thumb" data-proof-thumb type="button" aria-label="Favorite">
+            <span class="proof-ph"></span>
+            <span class="proof-heart">&hearts;</span>
+          </button>
+          {% endfor %}
+          {% endif %}
+        </div>
+      </div>
+
+      {# interactive social-crop switcher #}
+      <div class="crop-demo" data-reveal data-crop>
+        <p class="eyebrow">Social crops, auto-made</p>
+        <h3>One favorite. Every format.</h3>
+        <div class="crop-btns">
+          <button class="crop-btn" data-crop-btn data-ratio="1 / 1" data-name="Square · 1:1"
+                  data-use="Instagram feed &amp; grid posts.">1:1</button>
+          <button class="crop-btn on" data-crop-btn data-ratio="4 / 5" data-name="Portrait · 4:5"
+                  data-use="Maximum feed real estate on mobile.">4:5</button>
+          <button class="crop-btn" data-crop-btn data-ratio="9 / 16" data-name="Story · 9:16"
+                  data-use="Reels, Stories, and TikTok.">9:16</button>
+        </div>
+        <div class="crop-stage">
+          <div class="crop-preview" data-crop-preview style="aspect-ratio: 4 / 5;">
+            {% if featured %}<img src="/site/img/{{ featured[0].id }}" alt="Crop preview">
+            {% else %}<span class="crop-ph"></span>{% endif %}
+          </div>
+          <div class="crop-meta">
+            <b data-crop-name>Portrait · 4:5</b>
+            <p data-crop-use>Maximum feed real estate on mobile.</p>
+          </div>
+        </div>
       </div>
     </div>
-    <p class="center"><a href="/services">See all tiers &rarr;</a></p>
-  </section>
+  </div>
+</section>
 
-  {% include "site/_testimonials.html" %}
-</main>
+{# TESTIMONIALS (shared partial, editorial restyle) #}
+{% include "site/_testimonials.html" %}
+
+{# ABOUT STRIP #}
+<section class="about" id="about">
+  <div class="about-grid">
+    {% if featured %}
+    <div class="about-photo" data-reveal>
+      <img src="/site/img/{{ (featured[1] if featured|length > 1 else featured[0]).id }}"
+           loading="lazy" alt="Food &amp; beverage work by {{ site_name }}">
+    </div>
+    {% endif %}
+    <div data-reveal>
+      <p class="eyebrow">About</p>
+      <h2>I'm Kevin Lee, and I only shoot food &amp; drink.</h2>
+      <p>We scout the menu together, build a shot list, and shoot fast —
+         planned around your service, not against it.</p>
+      <p style="margin-top:26px;"><a class="btn-ghost" href="/about">Read the full story &rarr;</a></p>
+    </div>
+  </div>
+</section>
+
+{# CLOSING CTA #}
+<section class="cta">
+  <div class="cta-inner" data-reveal>
+    <h2>Let's make your food look <span class="it-accent">the way it tastes.</span></h2>
+    <p>Send your menu and your goal. Tailored proposal back within a business day.</p>
+    <div class="cta-actions">
+      <a class="btn-pill" href="/contact">Request a quote &rarr;</a>
+      <a class="btn-ghost" href="/reels">Watch the reels</a>
+    </div>
+  </div>
+</section>
+
 {% if featured %}{% include "site/_lightbox.html" %}{% endif %}
 {% endblock %}

@@ -1,0 +1,14 @@
+{% extends "base_cream.html" %}
+{% block title %}{{ p.title }} · {{ site_name }}{% endblock %}
+{% block content %}
+<main class="center-card">
+  <h1>{{ p.company or p.client_name }}</h1>
+  <p class="muted">{{ p.title }}</p>
+  <form method="post" action="/w/{{ p.workspace_slug }}/pin" class="pin-form">
+    <input type="text" name="pin" inputmode="numeric" pattern="[0-9]{4}" maxlength="4"
+           placeholder="4-digit PIN" autofocus required>
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    <button type="submit">Open workspace</button>
+  </form>
+</main>
+{% endblock %}

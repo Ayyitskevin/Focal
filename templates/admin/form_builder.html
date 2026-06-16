@@ -1,0 +1,112 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}{{ f.title }} · Forms · Mise{% endblock %}
+{% block admin_body %}
+<main class="admin-main">
+  <div class="admin-bar">
+    <div>
+      <h1>{{ f.title }}</h1>
+      <p class="muted">{{ "Lead form" if f.kind == "lead" else "Questionnaire" }}
+        {% if not f.active %}· <span class="warn">turned off (public link 404s)</span>{% endif %}</p>
+    </div>
+    <nav><a href="/admin/forms">&larr; All forms</a> ·
+      <a href="/admin/forms/{{ f.id }}/submissions">Submissions ({{ n_subs }})</a></nav>
+  </div>
+
+  <section class="form-link" aria-label="Public link">
+    <span class="form-link-label">Public link</span>
+    <code>{{ base_url }}/forms/{{ f.slug }}</code>
+    <a href="/forms/{{ f.slug }}" target="_blank" rel="noopener">Open &nearr;</a>
+  </section>
+
+  <section class="form-settings" aria-label="Form settings">
+    <form method="post" action="/admin/forms/{{ f.id }}" class="stack-form">
+      <label>Title <input type="text" name="title" value="{{ f.title }}" required maxlength="120"></label>
+      <label>Intro <textarea name="intro" rows="3" placeholder="Shown above the form — set expectations, say what you'll do with the answers.">{{ f.intro or "" }}</textarea></label>
+      <label class="row"><input type="checkbox" name="active" value="true" {% if f.active %}checked{% endif %}> Active (accepting submissions)</label>
+      <button type="submit">Save settings</button>
+    </form>
+  </section>
+
+  <section aria-label="Fields">
+    <h2>Fields</h2>
+    <p class="muted">Every form already collects <strong>Name</strong> and <strong>Email</strong>. Add your own questions below.</p>
+    {% if fields %}
+    <ul class="field-list">
+      {% for fld in fields %}
+      <li class="field-row">
+        <div class="field-main">
+          <span class="field-label">{{ fld.label }}</span>
+          <span class="chip">{{ ftype_labels[fld.ftype] }}</span>
+          {% if fld.required %}<span class="chip chip-req">required</span>{% endif %}
+          {% if fld.opts %}<span class="muted">{{ fld.opts | join(", ") }}</span>{% endif %}
+        </div>
+        <div class="field-actions">
+          <form method="post" action="/admin/forms/fields/{{ fld.id }}/move" class="inline-form">
+            <input type="hidden" name="dir" value="up"><button type="submit" title="Move up">&uarr;</button></form>
+          <form method="post" action="/admin/forms/fields/{{ fld.id }}/move" class="inline-form">
+            <input type="hidden" name="dir" value="down"><button type="submit" title="Move down">&darr;</button></form>
+          <form method="post" action="/admin/forms/fields/{{ fld.id }}/delete" class="inline-form"
+                onsubmit="return confirm('Delete field &quot;{{ fld.label }}&quot;?')">
+            <button type="submit" title="Delete" class="link">&times;</button></form>
+        </div>
+        <details class="field-edit">
+          <summary>Edit</summary>
+          <form method="post" action="/admin/forms/fields/{{ fld.id }}" class="stack-form field-form">
+            <label>Label <input type="text" name="label" value="{{ fld.label }}" required maxlength="120"></label>
+            <label>Type
+              <select name="ftype">
+                {% for t in ftypes %}<option value="{{ t }}" {% if fld.ftype == t %}selected{% endif %}>{{ ftype_labels[t] }}</option>{% endfor %}
+              </select>
+            </label>
+            <label class="row"><input type="checkbox" name="required" value="true" {% if fld.required %}checked{% endif %}> Required</label>
+            <label>Dropdown choices (one per line, dropdown only)
+              <textarea name="options" rows="3">{{ fld.opts | join("\n") }}</textarea></label>
+            <button type="submit">Save field</button>
+          </form>
+        </details>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="muted">No custom fields yet.</p>{% endif %}
+
+    <details class="field-add" open>
+      <summary>+ Add a field</summary>
+      <form method="post" action="/admin/forms/{{ f.id }}/fields" class="stack-form field-form">
+        <label>Label <input type="text" name="label" placeholder="e.g. How many dishes?" required maxlength="120"></label>
+        <label>Type
+          <select name="ftype">
+            {% for t in ftypes %}<option value="{{ t }}">{{ ftype_labels[t] }}</option>{% endfor %}
+          </select>
+        </label>
+        <label class="row"><input type="checkbox" name="required" value="true"> Required</label>
+        <label>Dropdown choices (one per line, dropdown only)
+          <textarea name="options" rows="3" placeholder="Plated&#10;Family-style&#10;Flat-lay"></textarea></label>
+        <button type="submit">Add field</button>
+      </form>
+    </details>
+  </section>
+
+  <section aria-label="Recent submissions">
+    <h2>Recent submissions</h2>
+    {% if subs %}
+    <ul class="home-list">
+      {% for s in subs %}
+      <li>
+        <strong>{{ s.name or "—" }}</strong>
+        <span class="muted">{{ s.email or "" }}</span>
+        <span class="home-when">{{ s.created_at[:16].replace("T", " ") }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    <p><a href="/admin/forms/{{ f.id }}/submissions">See all {{ n_subs }} &rarr;</a></p>
+    {% else %}<p class="muted">No submissions yet.</p>{% endif %}
+  </section>
+
+  <section class="danger-zone" aria-label="Delete form">
+    <form method="post" action="/admin/forms/{{ f.id }}/delete"
+          onsubmit="return confirm('Delete this form and all its fields and submissions? This cannot be undone.')">
+      <button type="submit" class="link danger">Delete this form</button>
+    </form>
+  </section>
+</main>
+{% endblock %}

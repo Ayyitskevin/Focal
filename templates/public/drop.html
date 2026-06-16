@@ -1,0 +1,44 @@
+{% extends "base_cream.html" %}
+{% block title %}{{ g.title }} · {{ site_name }}{% endblock %}
+{% block bodyclass %}gallery-body cream-theme{% endblock %}
+{% block content %}
+<header class="gallery-header">
+  <div class="gallery-header-inner">
+    <p class="muted" style="margin:0 0 0.3rem">Files from {{ site_name }}</p>
+    <h1>{{ g.title }}</h1>
+    {% if g.captions %}<p>{{ g.captions }}</p>{% endif %}
+    <a class="btn" href="/g/{{ g.slug }}/download/zip">&#8595; Download all{% if assets %} ({{ assets|length }}){% endif %}</a>
+    {% if g.expires_at %}
+    <p class="muted" style="margin:0.8rem 0 0">Link available until {{ g.expires_at }}</p>
+    {% endif %}
+  </div>
+</header>
+
+{% if assets %}
+<div class="grid" style="padding:1.2rem">
+  {% for a in assets %}
+  <figure class="tile" data-id="{{ a.id }}" data-kind="{{ a.kind }}">
+    {% if a.kind == 'video' %}
+    <video controls playsinline preload="none" style="width:100%;display:block"
+           poster="/media/{{ g.slug }}/poster/{{ a.id }}">
+      <source src="/media/{{ g.slug }}/web/{{ a.id }}" type="video/mp4">
+    </video>
+    {% else %}
+    <img src="/media/{{ g.slug }}/thumb/{{ a.id }}" loading="lazy" alt="{{ a.filename }}">
+    {% endif %}
+    <div class="tile-actions">
+      <a class="icon-btn" href="/g/{{ g.slug }}/download/asset/{{ a.id }}"
+         title="Download {{ a.filename }}">&#8595;</a>
+    </div>
+  </figure>
+  {% endfor %}
+</div>
+{% else %}
+<p class="muted" style="text-align:center;padding:3rem 1rem">
+  No files here yet — check back shortly.</p>
+{% endif %}
+
+<footer style="text-align:center;padding:2rem 1rem">
+  <p class="muted">Sent with {{ site_name }}{% if g.expires_at %} · link expires {{ g.expires_at }}{% endif %}</p>
+</footer>
+{% endblock %}

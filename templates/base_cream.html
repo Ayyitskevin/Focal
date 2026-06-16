@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{# Back-end (admin) + client money-docs wear the candlelit cream palette to
+   match the marketing front-end. The darkreader-lock metas stop the Dark
+   Reader extension repainting the cream pages espresso-brown. #}
+{% block head %}
+<meta name="darkreader-lock">
+<meta name="color-scheme" content="light only">
+{% block cream_head %}{% endblock %}
+{% endblock %}
+{% block bodyclass %}cream-theme{% endblock %}

@@ -18,8 +18,13 @@ from ..render import templates
 log = logging.getLogger("mise.admin.studio")
 router = APIRouter(prefix="/admin/studio", dependencies=[Depends(security.require_admin)])
 
-PROJECT_STATUSES = ["lead", "proposal", "contract", "invoice",
-                    "shooting", "delivered", "archived"]
+PROJECT_STATUSES = ["inquiry_received", "consultation_call", "proposal_sent",
+                    "contract_signed", "retainer_paid", "session_planning",
+                    "project_closed", "archived"]
+
+# A project sitting this many days in its current stage is flagged "stalled" on
+# the kanban (terminal stages — project_closed/archived — are never flagged).
+STALE_DAYS = 14
 
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._ -]")
 BRAND_EXTS = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".eps", ".ai", ".zip"}
@@ -86,13 +91,32 @@ async def studio_home(request: Request):
     # passed as a bound param so SQLite never derives its own UTC 'now' here.
     today_iso = _today().isoformat()
     projects = db.all_("""SELECT p.*, c.name AS client_name, c.company,
+                          CAST(julianday('now')
+                               - julianday(COALESCE(p.stage_changed_at, p.created_at))
+                               AS INTEGER) AS days_in_stage,
                           (SELECT COUNT(*) FROM invoices i WHERE i.project_id=p.id
                              AND i.status IN ('sent','viewed','deposit_paid')
                              AND i.due_date IS NOT NULL
-                             AND i.due_date < ?) AS n_overdue
+                             AND i.due_date < ?) AS n_overdue,
+                          COALESCE(
+                            (SELECT SUM(total_cents) FROM invoices i WHERE i.project_id=p.id),
+                            (SELECT pr.total_cents FROM proposals pr WHERE pr.project_id=p.id
+                               ORDER BY (pr.status='accepted') DESC, pr.created_at DESC LIMIT 1),
+                            0) AS value_cents
                           FROM projects p JOIN clients c ON c.id=p.client_id
                           WHERE p.status != 'archived'
                           ORDER BY p.created_at DESC""", (today_iso,))
+    # Pipeline value: a project's worth = its invoiced total (the contracted
+    # number), falling back to its accepted/latest proposal when nothing's
+    # invoiced yet. Rolled up per stage for the strip, plus a grand total and a
+    # "booked" cut (retainer paid onward = money that's effectively committed).
+    # Display-only — no money moves here.
+    stage_value: dict = {}
+    for p in projects:
+        stage_value[p["status"]] = stage_value.get(p["status"], 0) + (p["value_cents"] or 0)
+    pipeline_value_total = sum(stage_value.values())
+    booked_value = sum(v for s, v in stage_value.items()
+                       if s in ("retainer_paid", "session_planning", "project_closed"))
     clients = db.all_("""SELECT c.*,
                          (SELECT COUNT(*) FROM projects p WHERE p.client_id=c.id) AS n_projects,
                          (SELECT po.published FROM portals po WHERE po.client_id=c.id) AS portal_published,
@@ -372,6 +396,7 @@ async def studio_home(request: Request):
     return templates.TemplateResponse(request, "admin/studio.html",
                                       {"projects": projects, "clients": clients,
                                        "statuses": PROJECT_STATUSES, "counts": counts,
+                                       "stale_days": STALE_DAYS,
                                        "outstanding": outstanding,
                                        "inquiries": inquiries,
                                        "licenses_expiring": licenses_expiring,
@@ -386,7 +411,10 @@ async def studio_home(request: Request):
                                        "overdue_by_stage": overdue_by_stage,
                                        "sparklines": sparklines,
                                        "spark_days": day_strs,
-                                       "spark_window": spark_days_window})
+                                       "spark_window": spark_days_window,
+                                       "stage_value": stage_value,
+                                       "pipeline_value_total": pipeline_value_total,
+                                       "booked_value": booked_value})
 
 
 @router.post("/clients")
@@ -416,6 +444,37 @@ async def inquiry_unconvert(inquiry_id: int):
     return RedirectResponse("/admin/studio", status_code=303)
 
 
+@router.post("/inquiries/{inquiry_id}/dismiss")
+async def inquiry_dismiss(inquiry_id: int):
+    """Archive an unconverted inquiry — spam, test, or dead leads. Reversible:
+    the row is kept and stamped dismissed_at, so it drops out of the active
+    leads list and the home 'new inquiries' count but stays in the Inquiries
+    table with an undo. Refuses once converted (that anchors a real
+    client/project history)."""
+    inq = db.one("SELECT id, converted_at FROM inquiries WHERE id=?", (inquiry_id,))
+    if not inq:
+        raise HTTPException(status_code=404)
+    if inq["converted_at"]:
+        raise HTTPException(status_code=400,
+                            detail="converted inquiries cannot be dismissed")
+    db.run("UPDATE inquiries SET dismissed_at=datetime('now') WHERE id=?",
+           (inquiry_id,))
+    log.info("inquiry %s dismissed (archived)", inquiry_id)
+    return RedirectResponse("/admin/studio", status_code=303)
+
+
+@router.post("/inquiries/{inquiry_id}/undismiss")
+async def inquiry_undismiss(inquiry_id: int):
+    """Undo a dismiss — clears dismissed_at so the lead returns to the active
+    pipeline."""
+    inq = db.one("SELECT id FROM inquiries WHERE id=?", (inquiry_id,))
+    if not inq:
+        raise HTTPException(status_code=404)
+    db.run("UPDATE inquiries SET dismissed_at=NULL WHERE id=?", (inquiry_id,))
+    log.info("inquiry %s undismissed (restored)", inquiry_id)
+    return RedirectResponse("/admin/studio", status_code=303)
+
+
 @router.post("/inquiries/{inquiry_id}/client")
 async def inquiry_to_client(inquiry_id: int):
     inq = db.one("SELECT * FROM inquiries WHERE id=?", (inquiry_id,))
@@ -429,7 +488,7 @@ async def inquiry_to_client(inquiry_id: int):
     if not existing:
         log.info("client %s created from inquiry %s", cid, inquiry_id)
     pid = None
-    # Bookings carry a date + service → lift straight into a 'lead' project so
+    # Bookings carry a date + service → lift straight into an 'inquiry_received' project so
     # Kevin can spawn a proposal without re-typing the date.
     if inq["kind"] == "booking" and inq["shoot_date"]:
         title = f"{inq['service'] or 'Shoot'} — {inq['shoot_date']}"
@@ -443,6 +502,40 @@ async def inquiry_to_client(inquiry_id: int):
     if pid:
         return RedirectResponse(f"/admin/studio/projects/{pid}", status_code=303)
     return RedirectResponse(f"/admin/studio/clients/{cid}", status_code=303)
+
+
+@router.post("/inquiries/{inquiry_id}/quote")
+async def inquiry_to_quote(inquiry_id: int):
+    """One click from a lead to an editable draft quote: find/create the client,
+    spawn an 'inquiry_received' project, and open a blank draft proposal seeded
+    with the inquiry brief as the intro. Quoting-first flow — Kevin fills the
+    line items (no auto-pricing; the catalog floor numbers live in proposals
+    PRESETS and are applied by hand per client)."""
+    inq = db.one("SELECT * FROM inquiries WHERE id=?", (inquiry_id,))
+    if not inq:
+        raise HTTPException(status_code=404)
+    existing = db.one("SELECT id FROM clients WHERE email=?", (inq["email"],))
+    cid = existing["id"] if existing else db.run(
+        "INSERT INTO clients (name, company, email, notes) VALUES (?,?,?,?)",
+        (inq["name"], inq["business"], inq["email"],
+         f"From inquiry {inq['created_at'][:10]}:\n{inq['message']}"))
+    if not existing:
+        log.info("client %s created from inquiry %s (quote)", cid, inquiry_id)
+    title = f"{inq['service'] or 'Shoot'}"
+    if inq["shoot_date"]:
+        title += f" — {inq['shoot_date']}"
+    pid = db.run("INSERT INTO projects (client_id, title, shoot_date) VALUES (?,?,?)",
+                 (cid, title, inq["shoot_date"]))
+    intro = (f"Quote prepared from inquiry received {inq['created_at'][:10]}.\n\n"
+             f"{inq['message']}")
+    prop_id = db.run("""INSERT INTO proposals (project_id, slug, title, intro)
+                        VALUES (?,?,?,?)""",
+                     (pid, security.new_slug(), f"Quote — {title}", intro))
+    db.run("""UPDATE inquiries SET converted_at=datetime('now'),
+              converted_client_id=?, converted_project_id=? WHERE id=?""",
+           (cid, pid, inquiry_id))
+    log.info("inquiry %s → project %s + draft proposal %s", inquiry_id, pid, prop_id)
+    return RedirectResponse(f"/admin/studio/proposals/{prop_id}", status_code=303)
 
 
 @router.get("/clients/{client_id}", response_class=HTMLResponse)
@@ -527,7 +620,7 @@ async def client_detail(request: Request, client_id: int):
         (client_id,))
     n_delivered = db.one(
         """SELECT COUNT(*) AS n FROM projects
-           WHERE client_id=? AND status IN ('delivered','archived')""",
+           WHERE client_id=? AND status IN ('project_closed','archived')""",
         (client_id,))["n"]
     money = {
         "invoiced_cents": inv["invoiced_cents"],
@@ -854,15 +947,78 @@ async def project_detail(request: Request, project_id: int):
     # free of the shotlist->studio dependency direction).
     shots = db.all_("SELECT * FROM shot_list WHERE project_id=? AND deleted_at IS NULL "
                     "ORDER BY sort_order, id", (project_id,))
+    payments = db.all_("""SELECT pm.* FROM payments pm
+                          JOIN invoices i ON i.id=pm.invoice_id
+                          WHERE i.project_id=? ORDER BY pm.created_at DESC""",
+                       (project_id,))
+    timeline = _build_timeline(proposals, contracts, invoices, payments, emails)
     return templates.TemplateResponse(request, "admin/project.html",
                                       {"p": p, "proposals": proposals,
                                        "contracts": contracts, "invoices": invoices,
                                        "emails": emails, "galleries": galleries,
                                        "plans": plans, "shots": shots,
+                                       "timeline": timeline,
                                        "shot_categories": usage_vocab.SHOT_CATEGORIES,
                                        "shot_priorities": usage_vocab.SHOT_PRIORITIES,
                                        "statuses": PROJECT_STATUSES,
                                        "base_url": config.BASE_URL})
+
+
+def _build_timeline(proposals, contracts, invoices, payments, emails):
+    """Aggregate doc-status timestamps + payments + email sends into one
+    reverse-chronological feed. Read-only narration of state already stored on
+    the rows — no new state, no automation."""
+    ev = []
+
+    def add(ts, kind, text):
+        if ts:
+            ev.append({"ts": ts, "kind": kind, "text": text})
+
+    for d in proposals:
+        add(d["created_at"], "proposal", f"Proposal “{d['title']}” drafted")
+        add(d["sent_at"], "proposal", f"Proposal “{d['title']}” sent")
+        add(d["viewed_at"], "proposal", f"Proposal “{d['title']}” viewed by client")
+        add(d["accepted_at"], "proposal", f"Proposal “{d['title']}” accepted")
+    for d in contracts:
+        add(d["created_at"], "contract", f"Contract “{d['title']}” drafted")
+        add(d["sent_at"], "contract", f"Contract “{d['title']}” sent")
+        add(d["viewed_at"], "contract", f"Contract “{d['title']}” viewed by client")
+        add(d["signed_at"], "contract",
+            f"Contract “{d['title']}” signed by {d['signer_name'] or 'client'}")
+    for d in invoices:
+        add(d["created_at"], "invoice", f"Invoice “{d['title']}” drafted")
+        add(d["sent_at"], "invoice", f"Invoice “{d['title']}” sent")
+        add(d["viewed_at"], "invoice", f"Invoice “{d['title']}” viewed by client")
+        add(d["paid_at"], "invoice", f"Invoice “{d['title']}” paid in full")
+    for d in payments:
+        add(d["created_at"], "payment",
+            f"Payment received · ${d['amount_cents'] / 100:.2f} ({d['kind']})")
+    for d in emails:
+        add(d["created_at"], "email",
+            f"Email sent · {d['doc_kind']} “{d['subject']}” to {d['to_email']}")
+
+    ev.sort(key=lambda e: e["ts"], reverse=True)
+    return ev
+
+
+@router.post("/projects/{project_id}/workspace/publish")
+async def publish_workspace(project_id: int):
+    p = get_project(project_id)
+    slug = p["workspace_slug"] or security.new_slug()
+    pin = p["workspace_pin"] or security.new_pin()
+    db.run("""UPDATE projects SET workspace_slug=?, workspace_pin=?,
+              workspace_published=1 WHERE id=?""", (slug, pin, project_id))
+    log.info("workspace published for project %s", project_id)
+    return RedirectResponse(f"/admin/studio/projects/{project_id}", status_code=303)
+
+
+@router.post("/projects/{project_id}/workspace/unpublish")
+async def unpublish_workspace(project_id: int):
+    get_project(project_id)
+    # Keep the slug/PIN so re-publishing reuses the same link; just close it.
+    db.run("UPDATE projects SET workspace_published=0 WHERE id=?", (project_id,))
+    log.info("workspace unpublished for project %s", project_id)
+    return RedirectResponse(f"/admin/studio/projects/{project_id}", status_code=303)
 
 
 # ── Testimonials ──────────────────────────────────────────────────────────
@@ -930,8 +1086,27 @@ async def update_project(project_id: int, title: str = Form(...),
     if status not in PROJECT_STATUSES:
         raise HTTPException(status_code=400, detail="bad status")
     db.run("""UPDATE projects SET title=?, status=?, notes=?, gallery_id=?,
-              notion_page_id=?, shoot_date=? WHERE id=?""",
+              notion_page_id=?, shoot_date=?,
+              stage_changed_at=CASE WHEN status=? THEN stage_changed_at
+                                    ELSE datetime('now') END
+              WHERE id=?""",
            (title.strip(), status, notes.strip() or None, gallery_id,
             notion_page_id.strip() or None, shoot_date.strip() or None,
-            project_id))
+            status, project_id))
     return RedirectResponse(f"/admin/studio/projects/{project_id}", status_code=303)
+
+
+@router.post("/projects/{project_id}/status")
+async def move_project_status(project_id: int, status: str = Form(...)):
+    """Kanban quick-move: change only a project's pipeline stage. The full project
+    form (update_project) still owns title/notes/gallery edits; this is the
+    board's drag-to-column equivalent — one field, one write, back to the board."""
+    get_project(project_id)
+    if status not in PROJECT_STATUSES:
+        raise HTTPException(status_code=400, detail="bad status")
+    db.run("""UPDATE projects SET status=?,
+              stage_changed_at=CASE WHEN status=? THEN stage_changed_at
+                                    ELSE datetime('now') END
+              WHERE id=?""", (status, status, project_id))
+    log.info("project %s moved to status %s", project_id, status)
+    return RedirectResponse("/admin/studio#projects", status_code=303)

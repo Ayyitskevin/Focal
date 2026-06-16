@@ -1,0 +1,69 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}{{ f.title }} · Submissions · Mise{% endblock %}
+{% block admin_body %}
+<main class="admin-main">
+  <div class="admin-bar">
+    <div>
+      <h1>{{ f.title }} — submissions</h1>
+      <p class="muted">{{ subs | length }} total · {{ "lead form" if f.kind == "lead" else "questionnaire" }}</p>
+    </div>
+    <nav><a href="/admin/forms/{{ f.id }}">&larr; Builder</a> ·
+      <a href="/admin/forms">All forms</a></nav>
+  </div>
+
+  {% if subs %}
+  <div class="studio-toolbar" id="sub-toolbar">
+    <input type="search" class="studio-search" id="sub-search" placeholder="Search name or email…" aria-label="Search submissions">
+    <select class="studio-filter" id="sub-email" aria-label="Filter by email">
+      <option value="">All submissions</option>
+      <option value="1">Has email</option>
+      <option value="0">No email</option>
+    </select>
+  </div>
+  <div class="sub-cards" id="sub-cards">
+    {% for s in subs %}
+    <article class="sub-card" data-sub
+        data-search="{{ ((s.name or '') ~ ' ' ~ (s.email or ''))|lower }}"
+        data-email="{{ 1 if s.email else 0 }}">
+      <header class="sub-head">
+        <strong>{{ s.name or "—" }}</strong>
+        {% if s.email %}<a href="mailto:{{ s.email }}" class="muted">{{ s.email }}</a>{% endif %}
+        <span class="sub-when">{{ s.created_at[:16].replace("T", " ") }}</span>
+      </header>
+      <dl class="sub-answers">
+        {% for fld in fields %}
+        <dt>{{ fld.label }}</dt>
+        <dd>{{ s.answers.get(fld.id | string) or "—" }}</dd>
+        {% endfor %}
+      </dl>
+      {% if s.inquiry_id %}<p class="muted sub-foot">&rarr; landed in Leads (inquiry #{{ s.inquiry_id }})</p>{% endif %}
+    </article>
+    {% endfor %}
+  </div>
+  <p class="studio-empty" id="sub-empty" hidden>No submissions match.</p>
+  <script>
+  (function () {
+    var search = document.getElementById('sub-search');
+    if (!search) return;
+    var fEmail = document.getElementById('sub-email');
+    var empty = document.getElementById('sub-empty');
+    var cards = Array.prototype.slice.call(document.querySelectorAll('[data-sub]'));
+    function render() {
+      var q = (search.value || '').trim().toLowerCase();
+      var n = 0;
+      cards.forEach(function (c) {
+        var v = (!q || c.dataset.search.indexOf(q) !== -1) &&
+                (!fEmail.value || c.dataset.email === fEmail.value);
+        c.classList.toggle('studio-hidden', !v);
+        if (v) n++;
+      });
+      empty.hidden = n !== 0;
+    }
+    search.addEventListener('input', render);
+    fEmail.addEventListener('change', render);
+    render();
+  })();
+  </script>
+  {% else %}<p class="muted">No submissions yet. Share the public link to start collecting.</p>{% endif %}
+</main>
+{% endblock %}

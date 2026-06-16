@@ -27,6 +27,12 @@ def _gate(request: Request, slug: str):
     return g, visitor
 
 
+def _email_required(g) -> bool:
+    """Galleries email-gate downloads; transfers (drops) don't — a transfer is a
+    WeTransfer-style send, so the file grabs straight through."""
+    return g["type"] != "drop"
+
+
 def _store_zip(gallery_id: int, assets, out: Path) -> None:
     src_dir = config.MEDIA_DIR / str(gallery_id) / "original"
     tmp = out.with_suffix(".part")
@@ -56,7 +62,7 @@ def _target(slug: str, asset_id: int | None, fav: int | None,
 async def download_page(request: Request, slug: str, asset_id: int | None = None,
                         fav: int | None = None, section: int | None = None):
     g, visitor = _gate(request, slug)
-    if not visitor["email"]:
+    if _email_required(g) and not visitor["email"]:
         return templates.TemplateResponse(request, "public/email_gate.html",
                                           {"g": g, "asset_id": asset_id, "fav": fav,
                                            "section": section, "error": None})
@@ -84,7 +90,7 @@ async def capture_email(request: Request, slug: str, email: str = Form(...),
 @router.get("/{slug}/download/asset/{asset_id}")
 async def download_asset(request: Request, slug: str, asset_id: int):
     g, visitor = _gate(request, slug)
-    if not visitor["email"]:
+    if _email_required(g) and not visitor["email"]:
         return RedirectResponse(f"/g/{slug}/download?asset_id={asset_id}", status_code=303)
     a = db.one("SELECT * FROM assets WHERE id=? AND gallery_id=? AND status='ready'",
                (asset_id, g["id"]))
@@ -155,7 +161,7 @@ async def download_section(request: Request, slug: str, section_id: int):
 @router.get("/{slug}/download/zip")
 async def download_zip(request: Request, slug: str):
     g, visitor = _gate(request, slug)
-    if not visitor["email"]:
+    if _email_required(g) and not visitor["email"]:
         return RedirectResponse(f"/g/{slug}/download", status_code=303)
     path = jobs.zip_path(g["id"], g["content_rev"])
     if path.is_file():

@@ -1,0 +1,30 @@
+{% extends "site/base_site.html" %}
+{% block title %}Book a time — {{ site_name }}{% endblock %}
+{% block site_content %}
+<main class="site-main site-narrow">
+  <h1>Book a time</h1>
+  {% if events %}
+  <p>Pick what you'd like to set up and choose a time that works for you.
+     You'll get an instant confirmation with a calendar invite.</p>
+  <ul class="book-events">
+    {% for e in events %}
+    <li class="book-event-card">
+      <a href="/book/{{ e.slug }}">
+        <span class="book-event-dot" style="background:{{ e.color }}"></span>
+        <span class="book-event-body">
+          <strong>{{ e.name }}</strong>
+          <span class="book-event-meta">{{ e.duration_min }} min{% if e.location %} · {{ e.location }}{% endif %}</span>
+          {% if e.description %}<span class="book-event-desc">{{ e.description }}</span>{% endif %}
+        </span>
+        <span class="book-event-go" aria-hidden="true">&rarr;</span>
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>Online booking isn't open just now — please
+     <a href="/contact">send an inquiry</a> and I'll get back to you within a business day.</p>
+  {% endif %}
+  {% include "site/_faq.html" %}
+</main>
+{% endblock %}

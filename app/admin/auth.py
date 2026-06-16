@@ -27,7 +27,7 @@ async def login(request: Request, password: str = Form(...)):
         return templates.TemplateResponse(request, "admin/login.html",
                                           {"error": "Wrong password."}, status_code=401)
     security.pin_clear(ip, 0)
-    resp = RedirectResponse("/admin", status_code=303)
+    resp = RedirectResponse("/admin/home", status_code=303)
     resp.set_cookie(security.ADMIN_COOKIE, security.sign("admin"),
                     max_age=config.SESSION_MAX_AGE, httponly=True,
                     secure=config.COOKIE_SECURE, samesite="lax", path="/")

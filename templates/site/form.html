@@ -1,0 +1,47 @@
+{% extends "site/base_site.html" %}
+{% block robots %}<meta name="robots" content="noindex, nofollow">{% endblock %}
+{% block title %}{{ f.title }} — {{ site_name }}{% endblock %}
+{% block site_content %}
+<main class="site-main site-narrow">
+  <h1>{{ f.title }}</h1>
+  {% if sent %}
+  <p class="sent-note">Thanks{% if f.kind == "lead" %} — your message is in. I read every
+     one and I'll get back to you within a business day.{% else %} — your answers are in.
+     I'll be in touch about your shoot.{% endif %}</p>
+  {% else %}
+  {% if f.intro %}<p>{{ f.intro }}</p>{% endif %}
+  <form method="post" action="/forms/{{ f.slug }}" class="stack-form">
+    <label>Name <input type="text" name="name" required value="{{ values.get('name', '') }}"></label>
+    <label>Email <input type="email" name="email" required value="{{ values.get('email', '') }}"></label>
+    {% for fld in fields %}
+    {% set val = values.get(fld.id | string, "") %}
+    <label>{{ fld.label }}{% if fld.required %} <span class="req">*</span>{% endif %}
+      {% if fld.ftype == "long_text" %}
+        <textarea name="field_{{ fld.id }}" rows="4" {% if fld.required %}required{% endif %}>{{ val }}</textarea>
+      {% elif fld.ftype == "dropdown" %}
+        <select name="field_{{ fld.id }}" {% if fld.required %}required{% endif %}>
+          <option value="">— choose —</option>
+          {% for o in fld.opts %}<option value="{{ o }}" {% if val == o %}selected{% endif %}>{{ o }}</option>{% endfor %}
+        </select>
+      {% elif fld.ftype == "yesno" %}
+        <select name="field_{{ fld.id }}" {% if fld.required %}required{% endif %}>
+          <option value="">— choose —</option>
+          <option value="Yes" {% if val == "Yes" %}selected{% endif %}>Yes</option>
+          <option value="No" {% if val == "No" %}selected{% endif %}>No</option>
+        </select>
+      {% elif fld.ftype == "date" %}
+        <input type="date" name="field_{{ fld.id }}" value="{{ val }}" {% if fld.required %}required{% endif %}>
+      {% elif fld.ftype == "email" %}
+        <input type="email" name="field_{{ fld.id }}" value="{{ val }}" {% if fld.required %}required{% endif %}>
+      {% else %}
+        <input type="text" name="field_{{ fld.id }}" value="{{ val }}" {% if fld.required %}required{% endif %}>
+      {% endif %}
+    </label>
+    {% endfor %}
+    <input type="text" name="website" class="hp-field" tabindex="-1" autocomplete="off" aria-hidden="true">
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    <button type="submit">Submit</button>
+  </form>
+  {% endif %}
+</main>
+{% endblock %}

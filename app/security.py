@@ -8,7 +8,7 @@ import time
 from fastapi import HTTPException, Request
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
-from . import config, db
+from . import alerts, config, db
 
 log = logging.getLogger("mise.security")
 
@@ -62,6 +62,16 @@ def pin_fail(ip: str, gallery_id: int) -> None:
            (ip, gallery_id, time.time()))
     db.run("DELETE FROM pin_attempts WHERE ts < ?", (time.time() - 86400,))
     log.warning("bad PIN for gallery %s from %s", gallery_id, ip)
+    # Anomaly-only alert: fire the instant the lockout threshold is crossed (not on
+    # every typo, not on Kevin's normal login). gallery_id 0 = admin login bucket.
+    cutoff = time.time() - config.PIN_LOCKOUT_MIN * 60
+    n = db.one("SELECT COUNT(*) AS n FROM pin_attempts WHERE ip=? AND gallery_id=? AND ts>?",
+               (ip, gallery_id, cutoff))["n"]
+    if n == config.PIN_MAX_FAILS:
+        what = "admin login" if gallery_id == 0 else f"gallery {gallery_id}"
+        alerts.security_alert(
+            f"{config.PIN_MAX_FAILS} failed {what} attempts from {ip} — "
+            f"locked out {config.PIN_LOCKOUT_MIN}m")
 
 
 def pin_clear(ip: str, gallery_id: int) -> None:
@@ -75,6 +85,7 @@ def pin_clear(ip: str, gallery_id: int) -> None:
 # rows for portals already use negative ids — different magnitude range.)
 INQUIRY_BUCKET_CONTACT = -2
 INQUIRY_BUCKET_BOOK = -3
+INQUIRY_BUCKET_FORM = -4  # public custom forms (/forms/{slug})
 INQUIRY_WINDOW_SEC = 3600
 INQUIRY_MAX_PER_WINDOW = 3
 

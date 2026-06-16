@@ -3,6 +3,7 @@
 import hashlib
 import logging
 from datetime import date
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -13,6 +14,42 @@ from .studio import get_project
 
 log = logging.getLogger("mise.admin.contracts")
 router = APIRouter(prefix="/admin/studio", dependencies=[Depends(security.require_admin)])
+
+# Imported standard-form contracts kept as files (app/contract_templates/*.md) rather
+# than inline strings — they are long legal boilerplate that should stay verbatim and
+# diff cleanly. These are DRAFTS pending attorney review; the manual "Send" button is
+# the human gate (R16). Merge fields resolve at creation into a self-contained body
+# snapshot, so later file edits never alter an already-created contract.
+CONTRACT_TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "contract_templates"
+CONTRACT_LIBRARY = {
+    "nda": "Unilateral NDA",
+    "photography_services": "Photography Services Agreement",
+    "general_service": "General Client Service Agreement",
+    "model_release": "Model Release",
+    "independent_contractor": "Independent Contractor Agreement",
+    "event": "Event Contract",
+}
+
+
+def load_library_template(key: str) -> str:
+    path = CONTRACT_TEMPLATES_DIR / f"{key}.md"
+    return path.read_text(encoding="utf-8")
+
+
+def resolve_merge(body: str, p: "db.sqlite3.Row") -> str:
+    """Fill {field} placeholders from the project/client. Unknown braces and blank
+    fill-in lines pass through untouched — same simple-replace convention as render.py,
+    never str.format (the legal text contains bare brackets/braces that would break it)."""
+    phone = db.one("SELECT phone FROM clients WHERE id=?", (p["client_id"],))
+    ctx = {
+        "site_name": config.SITE_NAME,
+        "client_name": p["client_name"] or "",
+        "client_email": p["client_email"] or "",
+        "client_phone": (phone["phone"] if phone and phone["phone"] else ""),
+    }
+    for k, v in ctx.items():
+        body = body.replace("{" + k + "}", str(v))
+    return body
 
 # Merge fields resolve at creation — the stored body is a self-contained snapshot,
 # so later edits to this template never change an existing contract.
@@ -58,13 +95,19 @@ def render_template(p: "db.sqlite3.Row") -> str:
 
 
 @router.post("/projects/{project_id}/contracts")
-async def create_contract(project_id: int):
+async def create_contract(project_id: int, template_key: str = Form("standard")):
     p = get_project(project_id)
+    if template_key in CONTRACT_LIBRARY:
+        body = resolve_merge(load_library_template(template_key), p)
+        title = f"{CONTRACT_LIBRARY[template_key]} — {p['title']}"
+    else:
+        body = render_template(p)
+        title = f"Services Agreement — {p['title']}"
     did = db.run("""INSERT INTO contracts (project_id, slug, title, body)
                     VALUES (?,?,?,?)""",
-                 (project_id, security.new_slug(),
-                  f"Services Agreement — {p['title']}", render_template(p)))
-    log.info("contract %s created for project %s", did, project_id)
+                 (project_id, security.new_slug(), title, body))
+    log.info("contract %s created for project %s (template=%s)",
+             did, project_id, template_key)
     return RedirectResponse(f"/admin/studio/contracts/{did}", status_code=303)
 
 
@@ -96,7 +139,5 @@ async def mark_contract_sent(contract_id: int):
     sha = hashlib.sha256(d["body"].encode()).hexdigest()
     db.run("""UPDATE contracts SET status='sent', body_sha256=?, sent_at=datetime('now')
               WHERE id=?""", (sha, contract_id))
-    db.run("""UPDATE projects SET status='contract' WHERE id=?
-              AND status IN ('lead','proposal')""", (d["project_id"],))
     log.info("contract %s marked sent (sha256=%s)", contract_id, sha[:12])
     return RedirectResponse(f"/admin/studio/contracts/{contract_id}", status_code=303)

@@ -1,10 +1,11 @@
-{% extends "base.html" %}
+{% extends "admin/base_admin.html" %}
 {% block title %}Studio · Mise{% endblock %}
-{% block content %}
+{% macro usd(cents) %}${{ "{:,.0f}".format((cents or 0) / 100) }}{% endmacro %}
+{% block admin_body %}
 <main class="admin-main">
   <div class="admin-bar">
     <h1>Studio</h1>
-    <nav><a href="/admin">Galleries</a> · <a href="/admin/studio/licenses">Licenses</a> · <a href="/admin/studio/press">Press</a> · <a href="/admin/studio/presets">Crop presets</a> · <a href="/admin/studio/testimonials">Testimonials</a></nav>
+    <nav><a href="/admin/home">Home</a> · <a href="/admin/galleries">Galleries</a> · <a href="/admin/scheduling">Scheduling</a> · <a href="/admin/studio/licenses">Licenses</a> · <a href="/admin/studio/press">Press</a> · <a href="/admin/studio/presets">Crop presets</a> · <a href="/admin/studio/testimonials">Testimonials</a></nav>
   </div>
 
   {% if licenses_expiring %}
@@ -193,7 +194,7 @@
           <span class="upcoming-date">{{ u.shoot_date }}</span>
           <strong>{{ u.title }}</strong>
           <span class="muted">{{ u.client_name }}{% if u.company %} · {{ u.company }}{% endif %}</span>
-          {% if u.days_out < 0 and u.status in ("lead", "proposal", "contract", "invoice") %}
+          {% if u.days_out < 0 and u.status in ("inquiry_received", "consultation_call", "proposal_sent", "contract_signed", "retainer_paid") %}
           <span class="warn">· not yet shooting</span>
           {% endif %}
         </a>
@@ -206,11 +207,17 @@
     {% endif %}
   </section>
 
+  {% set stage_label = {"inquiry_received": "Inquiry Received",
+      "consultation_call": "Consultation Call", "proposal_sent": "Proposal Sent",
+      "contract_signed": "Contract Signed", "retainer_paid": "Retainer Paid",
+      "session_planning": "Session Planning", "project_closed": "Project Closed",
+      "archived": "Archived"} %}
   <div class="pipeline">
     {% for s in statuses if s != 'archived' %}
     <span class="pipeline-step{% if counts.get(s) %} active{% endif %}">
-      {{ s }} <strong>{{ counts.get(s, 0) }}</strong>{% if overdue_by_stage.get(s) %}
-      <span class="warn pipeline-overdue">({{ overdue_by_stage[s] }} overdue)</span>{% endif %}</span>
+      {{ stage_label.get(s, s) }} <strong>{{ counts.get(s, 0) }}</strong>{% if overdue_by_stage.get(s) %}
+      <span class="warn pipeline-overdue">({{ overdue_by_stage[s] }} overdue)</span>{% endif %}{% if stage_value.get(s) %}
+      <span class="pipeline-step-val">{{ usd(stage_value[s]) }}</span>{% endif %}</span>
     {% if not loop.last %}<span class="muted">→</span>{% endif %}
     {% endfor %}
     <span class="pipeline-money">
@@ -221,21 +228,252 @@
       {% if n_overdue %}<span class="warn">· {{ n_overdue }} overdue</span>{% endif %}</span>
   </div>
 
-  <h2>Projects</h2>
-  <table class="list">
-    <tr><th>Project</th><th>Client</th><th>Status</th><th>Shoot date</th><th>Created</th></tr>
-    {% for p in projects %}
-    <tr>
-      <td><a href="/admin/studio/projects/{{ p.id }}">{{ p.title }}</a></td>
-      <td>{{ p.client_name }}{% if p.company %} <span class="muted">({{ p.company }})</span>{% endif %}</td>
-      <td><span class="status-{{ p.status }}">{{ p.status }}</span>
-        {% if p.n_overdue %}<span class="warn">overdue invoice{{ "s" if p.n_overdue != 1 }}</span>{% endif %}</td>
-      <td class="muted">{{ p.shoot_date or "—" }}</td>
-      <td class="muted">{{ p.created_at[:10] }}</td>
-    </tr>
-    {% endfor %}
-  </table>
-  {% if not projects %}<p class="muted">No active projects.</p>{% endif %}
+  {% if pipeline_value_total %}
+  <p class="pipeline-value" aria-label="Pipeline value summary">
+    <span><strong>{{ usd(pipeline_value_total) }}</strong> in pipeline</span>
+    <span class="muted">·</span>
+    <span><strong class="pipeline-value-booked">{{ usd(booked_value) }}</strong> booked
+      <span class="muted">(retainer paid &amp; on)</span></span>
+    <span class="muted pipeline-value-note">contracted invoice totals, or accepted/latest proposal where uninvoiced</span>
+  </p>
+  {% endif %}
+
+
+  <section id="projects" aria-label="Sessions pipeline" data-studio-view="board">
+    <div class="admin-bar">
+      <h2>Sessions</h2>
+      <span class="muted">Drag a card between columns — or change its stage — to move it along the pipeline.</span>
+    </div>
+    {% if projects %}
+    <div class="studio-toolbar" role="search">
+      <input type="search" id="studio-search" class="studio-search"
+             placeholder="Search sessions — title, client, company…"
+             aria-label="Search sessions" autocomplete="off">
+      <select id="studio-stage" class="studio-filter" aria-label="Filter by stage">
+        <option value="">All stages</option>
+        {% for s in statuses if s != 'archived' %}
+        <option value="{{ s }}">{{ stage_label.get(s, s) }}</option>
+        {% endfor %}
+      </select>
+      <select id="studio-sort" class="studio-filter" aria-label="Sort sessions">
+        <option value="created">Sort: Newest</option>
+        <option value="shoot">Sort: Shoot date</option>
+        <option value="age">Sort: Days in stage</option>
+        <option value="value">Sort: Value (high&rarr;low)</option>
+        <option value="name">Sort: Name (A&rarr;Z)</option>
+      </select>
+      <div class="studio-view-toggle" role="group" aria-label="View">
+        <button type="button" data-view="board" class="is-active" aria-pressed="true">Board</button>
+        <button type="button" data-view="list" aria-pressed="false">List</button>
+      </div>
+      <span class="studio-match muted" id="studio-match" aria-live="polite"></span>
+    </div>
+
+    <div class="kanban" id="studio-board">
+      {% for s in statuses if s != 'archived' %}
+      <div class="kanban-col status-col-{{ s }}" data-stage="{{ s }}">
+        <header class="kanban-col-head">
+          <span class="kanban-col-name">{{ stage_label.get(s, s) }}</span>
+          <span class="kanban-col-count">{{ counts.get(s, 0) }}</span>
+          {% if overdue_by_stage.get(s) %}<span class="warn pipeline-overdue">{{ overdue_by_stage[s] }} overdue</span>{% endif %}
+        </header>
+        <div class="kanban-col-body" data-stage="{{ s }}">
+        {% for p in projects if p.status == s %}
+        {% set is_stale = p.status != 'project_closed' and p.days_in_stage >= stale_days %}
+        <article class="kanban-card studio-row{% if p.n_overdue %} kanban-card-overdue{% endif %}{% if is_stale %} kanban-card-stale{% endif %}"
+                 draggable="true" data-pid="{{ p.id }}" data-stage="{{ p.status }}"
+                 data-search="{{ (p.title ~ ' ' ~ p.client_name ~ ' ' ~ (p.company or '')) | lower }}"
+                 data-name="{{ p.title | lower }}" data-shoot="{{ p.shoot_date or '' }}"
+                 data-age="{{ p.days_in_stage or 0 }}" data-value="{{ p.value_cents or 0 }}"
+                 data-created="{{ p.created_at or '' }}">
+          <a class="kanban-card-title" href="/admin/studio/projects/{{ p.id }}">{{ p.title }}</a>
+          <p class="kanban-card-client">{{ p.client_name }}{% if p.company %}<span class="muted"> · {{ p.company }}</span>{% endif %}</p>
+          {% if p.value_cents %}<p class="kanban-card-meta kanban-card-val">&#128176; {{ usd(p.value_cents) }}</p>{% endif %}
+          {% if p.shoot_date %}<p class="kanban-card-meta">&#128247; {{ p.shoot_date }}</p>{% endif %}
+          {% if p.status != 'project_closed' %}<p class="kanban-card-meta kanban-card-age{% if is_stale %} warn{% endif %}">&#9203; {{ p.days_in_stage }}d in stage{% if is_stale %} · stalled{% endif %}</p>{% endif %}
+          {% if p.n_overdue %}<p class="kanban-card-meta warn">&#9888; {{ p.n_overdue }} overdue invoice{{ "s" if p.n_overdue != 1 }}</p>{% endif %}
+          <form method="post" action="/admin/studio/projects/{{ p.id }}/status" class="kanban-move">
+            <label class="kanban-move-label" for="move-{{ p.id }}">stage</label>
+            <select id="move-{{ p.id }}" name="status" onchange="this.form.submit()">
+              {% for opt in statuses %}
+              <option value="{{ opt }}" {% if p.status == opt %}selected{% endif %}>{{ stage_label.get(opt, opt) }}</option>
+              {% endfor %}
+            </select>
+          </form>
+        </article>
+        {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <table class="list studio-list" id="studio-list" hidden>
+      <thead>
+        <tr><th>Session</th><th>Client</th><th>Stage</th><th>Shoot</th><th>In stage</th><th>Value</th></tr>
+      </thead>
+      <tbody>
+      {% for p in projects %}
+      {% set is_stale = p.status != 'project_closed' and p.days_in_stage >= stale_days %}
+      <tr class="studio-row{% if p.n_overdue %} studio-row-overdue{% endif %}"
+          data-pid="{{ p.id }}" data-stage="{{ p.status }}"
+          data-search="{{ (p.title ~ ' ' ~ p.client_name ~ ' ' ~ (p.company or '')) | lower }}"
+          data-name="{{ p.title | lower }}" data-shoot="{{ p.shoot_date or '' }}"
+          data-age="{{ p.days_in_stage or 0 }}" data-value="{{ p.value_cents or 0 }}"
+          data-created="{{ p.created_at or '' }}">
+        <td><a href="/admin/studio/projects/{{ p.id }}">{{ p.title }}</a>
+          {% if p.n_overdue %}<span class="warn" title="{{ p.n_overdue }} overdue invoice(s)">&#9888;</span>{% endif %}</td>
+        <td>{{ p.client_name }}{% if p.company %}<span class="muted"> · {{ p.company }}</span>{% endif %}</td>
+        <td><span class="studio-list-stage">{{ stage_label.get(p.status, p.status) }}</span></td>
+        <td>{{ p.shoot_date or "—" }}</td>
+        <td class="{% if is_stale %}warn{% endif %}">{% if p.status != 'project_closed' %}{{ p.days_in_stage }}d{% if is_stale %} · stalled{% endif %}{% else %}—{% endif %}</td>
+        <td>{% if p.value_cents %}{{ usd(p.value_cents) }}{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="studio-empty muted" id="studio-empty" hidden>No sessions match — clear the search or stage filter.</p>
+    {% else %}
+    <p class="muted">No active sessions. Convert an inquiry below or add a session from a client.</p>
+    {% endif %}
+  </section>
+
+  <script>
+  (function () {
+    var sec = document.querySelector('[data-studio-view]');
+    if (!sec) return;
+    var search = document.getElementById('studio-search');
+    var stageSel = document.getElementById('studio-stage');
+    var sortSel = document.getElementById('studio-sort');
+    var board = document.getElementById('studio-board');
+    var listBody = document.querySelector('#studio-list tbody');
+    var emptyMsg = document.getElementById('studio-empty');
+    var matchEl = document.getElementById('studio-match');
+    var listTable = document.getElementById('studio-list');
+
+    function applyFilter() {
+      var q = (search.value || '').trim().toLowerCase();
+      var stage = stageSel.value;
+      var shown = 0;
+      document.querySelectorAll('.studio-row').forEach(function (el) {
+        var ok = (!q || el.dataset.search.indexOf(q) !== -1) &&
+                 (!stage || el.dataset.stage === stage);
+        el.classList.toggle('studio-hidden', !ok);
+        // count once per project (rows appear in both board + list)
+      });
+      // count distinct visible projects using the list rows (one per project)
+      document.querySelectorAll('#studio-list tbody .studio-row').forEach(function (el) {
+        if (!el.classList.contains('studio-hidden')) shown++;
+      });
+      // board columns: dim those with no visible cards when a stage filter is on
+      board.querySelectorAll('.kanban-col').forEach(function (col) {
+        var hasVisible = col.querySelector('.studio-row:not(.studio-hidden)');
+        col.classList.toggle('kanban-col-dim', stage ? col.dataset.stage !== stage : false);
+        col.classList.toggle('kanban-col-empty', !hasVisible);
+      });
+      if (matchEl) matchEl.textContent = (q || stage) ? (shown + ' match' + (shown === 1 ? '' : 'es')) : '';
+      if (emptyMsg) emptyMsg.hidden = shown !== 0;
+    }
+
+    function sortKey(el, mode) {
+      if (mode === 'value') return -(parseInt(el.dataset.value, 10) || 0);
+      if (mode === 'age') return -(parseInt(el.dataset.age, 10) || 0);
+      if (mode === 'name') return el.dataset.name || '';
+      if (mode === 'shoot') return el.dataset.shoot || '9999';
+      return -(el.dataset.created || '');  // created: newest first
+    }
+    function cmp(a, b, mode) {
+      var ka = sortKey(a, mode), kb = sortKey(b, mode);
+      if (mode === 'name') return ka < kb ? -1 : ka > kb ? 1 : 0;
+      if (mode === 'shoot') return (a.dataset.shoot || '9999') < (b.dataset.shoot || '9999') ? -1 : 1;
+      if (mode === 'created') return (a.dataset.created || '') > (b.dataset.created || '') ? -1 : 1;
+      return ka - kb;
+    }
+    function applySort() {
+      var mode = sortSel.value;
+      // list rows
+      var rows = Array.prototype.slice.call(listBody.querySelectorAll('.studio-row'));
+      rows.sort(function (a, b) { return cmp(a, b, mode); });
+      rows.forEach(function (r) { listBody.appendChild(r); });
+      // board cards within each column
+      board.querySelectorAll('.kanban-col-body').forEach(function (body) {
+        var cards = Array.prototype.slice.call(body.querySelectorAll('.studio-row'));
+        cards.sort(function (a, b) { return cmp(a, b, mode); });
+        cards.forEach(function (c) { body.appendChild(c); });
+      });
+    }
+
+    search.addEventListener('input', applyFilter);
+    stageSel.addEventListener('change', applyFilter);
+    sortSel.addEventListener('change', applySort);
+
+    document.querySelectorAll('.studio-view-toggle button').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var view = btn.dataset.view;
+        sec.setAttribute('data-studio-view', view);
+        board.hidden = view !== 'board';
+        listTable.hidden = view !== 'list';
+        document.querySelectorAll('.studio-view-toggle button').forEach(function (b) {
+          var on = b === btn;
+          b.classList.toggle('is-active', on);
+          b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+      });
+    });
+
+    // Drag-and-drop stage moves (board view). POSTs to the same endpoint the
+    // <select> uses; the select stays as a keyboard/fallback path.
+    var dragEl = null;
+    document.querySelectorAll('#studio-board .studio-row').forEach(function (card) {
+      card.addEventListener('dragstart', function (e) {
+        dragEl = card;
+        card.classList.add('kanban-card-dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        try { e.dataTransfer.setData('text/plain', card.dataset.pid); } catch (_) {}
+      });
+      card.addEventListener('dragend', function () {
+        card.classList.remove('kanban-card-dragging');
+        document.querySelectorAll('.kanban-col-over').forEach(function (c) { c.classList.remove('kanban-col-over'); });
+        dragEl = null;
+      });
+    });
+    board.querySelectorAll('.kanban-col-body').forEach(function (body) {
+      var col = body.closest('.kanban-col');
+      body.addEventListener('dragover', function (e) { e.preventDefault(); col.classList.add('kanban-col-over'); });
+      body.addEventListener('dragleave', function (e) {
+        if (!body.contains(e.relatedTarget)) col.classList.remove('kanban-col-over');
+      });
+      body.addEventListener('drop', function (e) {
+        e.preventDefault();
+        col.classList.remove('kanban-col-over');
+        if (!dragEl) return;
+        var newStage = body.dataset.stage;
+        var pid = dragEl.dataset.pid;
+        if (dragEl.dataset.stage === newStage) return;
+        var moved = dragEl;
+        body.appendChild(moved);          // optimistic
+        moved.dataset.stage = newStage;
+        var sel = moved.querySelector('select[name="status"]');
+        if (sel) sel.value = newStage;
+        var fd = new FormData(); fd.append('status', newStage);
+        fetch('/admin/studio/projects/' + pid + '/status', {
+          method: 'POST', body: fd, credentials: 'same-origin'
+        }).then(function (r) {
+          if (!r.ok) throw new Error('status ' + r.status);
+          // mirror into the list row so the two views stay consistent
+          var lr = listBody.querySelector('.studio-row[data-pid="' + pid + '"]');
+          if (lr) { lr.dataset.stage = newStage;
+            var lc = lr.querySelector('.studio-list-stage');
+            if (lc) lc.textContent = (sel ? sel.options[sel.selectedIndex].text : newStage); }
+          applyFilter();
+        }).catch(function () {
+          moved.classList.add('kanban-card-saveerr');
+          alert('Could not move the session — reloading to re-sync.');
+          location.reload();
+        });
+      });
+    });
+  })();
+  </script>
 
   <h2>Clients</h2>
   <form method="post" action="/admin/studio/clients" class="inline-form">
@@ -246,7 +484,7 @@
     <button type="submit">Add client</button>
   </form>
   <table class="list">
-    <tr><th>Name</th><th>Company</th><th>Email</th><th>Projects</th><th>Portal</th></tr>
+    <tr><th>Name</th><th>Company</th><th>Email</th><th>Sessions</th><th>Portal</th></tr>
     {% for c in clients %}
     {% set portal = client_portal_hints.get(c.id, ("muted", "—")) %}
     <tr>
@@ -264,7 +502,7 @@
   <table class="list">
     <tr><th>Date</th><th>From</th><th>Business</th><th>Request</th><th>Message</th><th></th></tr>
     {% for i in inquiries %}
-    <tr class="{% if i.converted_at %}inquiry-converted{% endif %}">
+    <tr class="{% if i.converted_at %}inquiry-converted{% elif i.dismissed_at %}inquiry-dismissed{% endif %}">
       <td class="muted">{{ i.created_at[:10] }}
         {% if not i.emailed %}<span class="warn" title="Email send failed — only stored here">⚠</span>{% endif %}</td>
       <td>{{ i.name }} <span class="muted">&lt;{{ i.email }}&gt;</span></td>
@@ -276,7 +514,7 @@
       <td>
         {% if i.converted_at %}
           {% if i.converted_project_id %}
-          <a href="/admin/studio/projects/{{ i.converted_project_id }}" class="muted" title="Converted {{ i.converted_at[:10] }}">&#10003; project</a>
+          <a href="/admin/studio/projects/{{ i.converted_project_id }}" class="muted" title="Converted {{ i.converted_at[:10] }}">&#10003; session</a>
           {% elif i.converted_client_id %}
           <a href="/admin/studio/clients/{{ i.converted_client_id }}" class="muted" title="Converted {{ i.converted_at[:10] }}">&#10003; client</a>
           {% else %}<span class="muted">&#10003; converted</span>{% endif %}
@@ -285,9 +523,18 @@
                 onsubmit="return confirm('Clear the conversion stamp on this inquiry? The spawned client/project will be left intact.');">
             <button class="link inquiry-undo" title="Misclick? Clear the conversion stamp">undo</button>
           </form>
+        {% elif i.dismissed_at %}
+          <span class="muted" title="Archived {{ i.dismissed_at[:10] }}">archived</span>
+          <form method="post" action="/admin/studio/inquiries/{{ i.id }}/undismiss" class="inline">
+            <button class="link inquiry-undo" title="Restore this lead to the pipeline">undo</button></form>
         {% else %}
+        <form method="post" action="/admin/studio/inquiries/{{ i.id }}/quote" class="inline">
+          <button class="link" title="Spawn a client, project, and draft quote">&rarr; quote</button></form>
         <form method="post" action="/admin/studio/inquiries/{{ i.id }}/client" class="inline">
           <button class="link">{% if i.kind == "booking" %}→ project{% else %}add as client{% endif %}</button></form>
+        <form method="post" action="/admin/studio/inquiries/{{ i.id }}/dismiss" class="inline"
+              onsubmit="return confirm('Archive this lead? You can undo it from the Inquiries list.');">
+          <button class="link inquiry-dismiss" title="Archive this lead">dismiss</button></form>
         {% endif %}
       </td>
     </tr>

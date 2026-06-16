@@ -1,0 +1,20 @@
+{% extends "base_cream.html" %}
+{# Shared admin shell: candlelit-editorial sidebar + main column. Every admin
+   page (except the pre-auth login) extends this and fills {% block admin_body %}.
+   The redesign CSS is scoped under .admin-shell, so only pages wearing this
+   shell pick it up — the client-facing money docs never do. #}
+{% block cream_head %}
+{# Self-hosted typefaces — no Google Fonts CDN (no third-party request, no
+   layout-shift wait on a remote stylesheet). Preload the two latin files the
+   admin paints with first; fonts.css declares the full set. #}
+<link rel="preload" href="/static/fonts/hanken-grotesk-latin.woff2?v={{ static_rev }}" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/static/fonts/newsreader-latin.woff2?v={{ static_rev }}" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/fonts.css?v={{ static_rev }}">
+{% block admin_head %}{% endblock %}
+{% endblock %}
+{% block content %}
+<div class="admin-shell">
+  {% include "admin/_nav.html" %}
+  {% block admin_body %}{% endblock %}
+</div>
+{% endblock %}

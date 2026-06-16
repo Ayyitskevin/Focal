@@ -1,6 +1,6 @@
-{% extends "base.html" %}
+{% extends "base_cream.html" %}
 {% block title %}{{ g.title }} · {{ site_name }}{% endblock %}
-{% block bodyclass %}gallery-body{% endblock %}
+{% block bodyclass %}gallery-body cream-theme{% endblock %}
 {% block content %}
 <header class="gallery-header"
         {% if g.cover_asset_id %}style="background-image:url('/media/{{ g.slug }}/web/{{ g.cover_asset_id }}')"{% endif %}>

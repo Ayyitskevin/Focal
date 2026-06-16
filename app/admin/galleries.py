@@ -47,12 +47,23 @@ def get_gallery(gallery_id: int) -> "db.sqlite3.Row":
     return g
 
 
-@router.get("", response_class=HTMLResponse)
+@router.get("")
+async def admin_root():
+    # Home is the studio landing now; the bare /admin keeps working for old
+    # bookmarks and redirects there. Galleries moved to /admin/galleries.
+    return RedirectResponse("/admin/home", status_code=307)
+
+
+@router.get("/galleries", response_class=HTMLResponse)
 async def dashboard(request: Request):
     gs = db.all_("""SELECT g.*,
                     (SELECT COUNT(*) FROM assets a WHERE a.gallery_id=g.id) AS n_assets,
                     (SELECT COUNT(*) FROM assets a WHERE a.gallery_id=g.id
                       AND a.status='pending') AS n_pending,
+                    (SELECT COUNT(*) FROM favorites f JOIN assets a ON a.id=f.asset_id
+                      WHERE a.gallery_id=g.id) AS n_fav,
+                    (SELECT COUNT(*) FROM downloads d WHERE d.gallery_id=g.id) AS n_dl,
+                    (SELECT COUNT(*) FROM visitors v WHERE v.gallery_id=g.id) AS n_visitors,
                     (SELECT COUNT(*) FROM sections s
                       WHERE s.gallery_id=g.id AND s.proof_target IS NOT NULL
                         AND s.proof_target > 0) AS n_proof,
@@ -63,7 +74,8 @@ async def dashboard(request: Request):
                              JOIN assets a ON a.id=f.asset_id
                              WHERE a.section_id=s.id) < s.proof_target)
                       AS n_proof_pending
-                    FROM galleries g ORDER BY g.created_at DESC""")
+                    FROM galleries g WHERE g.type='gallery'
+                    ORDER BY g.created_at DESC""")
     today = dt.date.today()
     failed_jobs = db.one("SELECT COUNT(*) AS n FROM jobs WHERE status='failed'")["n"]
     # Unlinked-but-published galleries — usually orphans from a client force-
@@ -77,7 +89,23 @@ async def dashboard(request: Request):
     orphans = [g for g in gs if g["client_id"] is None and g["published"]]
     link_clients = db.all_("SELECT id, name, company FROM clients ORDER BY name") \
                    if orphans else []
-    sizes = {g["id"]: _fmt_size(_dir_size(config.MEDIA_DIR / str(g["id"]))) for g in gs}
+    sizes_b = {g["id"]: _dir_size(config.MEDIA_DIR / str(g["id"])) for g in gs}
+    sizes = {gid: _fmt_size(b) for gid, b in sizes_b.items()}
+    today_iso = today.isoformat()
+    # Library roll-up for the summary strip (display-only).
+    totals = {
+        "n": len(gs),
+        "published": sum(1 for g in gs if g["published"]),
+        "draft": sum(1 for g in gs if not g["published"]),
+        "expired": sum(1 for g in gs if g["expires_at"] and g["expires_at"] < today_iso),
+        "assets": sum(g["n_assets"] for g in gs),
+        "fav": sum(g["n_fav"] for g in gs),
+        "dl": sum(g["n_dl"] for g in gs),
+        "size": _fmt_size(sum(sizes_b.values())),
+    }
+    # Distinct client names present, for the client filter dropdown.
+    client_names = sorted({g["client_name"] for g in gs if g["client_name"]},
+                          key=str.lower)
     free_gb = shutil.disk_usage(config.DATA_DIR).free / 1e9
     backup_dir = config.DATA_DIR / "backups"
     snaps = sorted(backup_dir.glob("*.db.gz")) if backup_dir.exists() else []
@@ -93,7 +121,10 @@ async def dashboard(request: Request):
                                        "backup_age_h": backup_age_h,
                                        "n_unlinked_pub": n_unlinked_pub,
                                        "orphans": orphans,
-                                       "link_clients": link_clients})
+                                       "link_clients": link_clients,
+                                       "sizes_b": sizes_b,
+                                       "totals": totals,
+                                       "client_names": client_names})
 
 
 @router.post("/galleries")
@@ -105,6 +136,47 @@ async def create_gallery(title: str = Form(...), client_name: str = Form("")):
         db.run("INSERT INTO sections (gallery_id, name, position) VALUES (?,?,?)",
                (gid, name, i))
     log.info("gallery %s created", gid)
+    return RedirectResponse(f"/admin/galleries/{gid}", status_code=303)
+
+
+# ── Transfers ──────────────────────────────────────────────────────────────
+# WeTransfer-style sends: galleries WHERE type='drop'. They reuse the gallery
+# manage page (gallery.html, which hides its gallery-only chrome for drops) and
+# the whole upload/derivative/ZIP/download stack; only the list + create live
+# here. Created published=1 so the link works the moment files finish, with a
+# PIN stored but enforced only when require_pin=1.
+@router.get("/transfers", response_class=HTMLResponse)
+async def transfers(request: Request):
+    ds = db.all_("""SELECT g.*,
+                    (SELECT COUNT(*) FROM assets a WHERE a.gallery_id=g.id) AS n_assets,
+                    (SELECT COUNT(*) FROM assets a WHERE a.gallery_id=g.id
+                      AND a.status='pending') AS n_pending,
+                    (SELECT COUNT(*) FROM downloads d WHERE d.gallery_id=g.id) AS n_dl
+                    FROM galleries g WHERE g.type='drop'
+                    ORDER BY g.created_at DESC""")
+    today_iso = dt.date.today().isoformat()
+    sizes = {g["id"]: _fmt_size(_dir_size(config.MEDIA_DIR / str(g["id"]))) for g in ds}
+    totals = {
+        "n": len(ds),
+        "live": sum(1 for g in ds
+                    if not (g["expires_at"] and g["expires_at"] < today_iso)),
+        "expired": sum(1 for g in ds if g["expires_at"] and g["expires_at"] < today_iso),
+        "dl": sum(g["n_dl"] for g in ds),
+    }
+    return templates.TemplateResponse(request, "admin/transfers.html",
+                                      {"transfers": ds, "base_url": config.BASE_URL,
+                                       "today": today_iso, "sizes": sizes,
+                                       "totals": totals})
+
+
+@router.post("/transfers")
+async def create_transfer(title: str = Form(...), expires_at: str = Form(""),
+                          require_pin: bool = Form(False)):
+    gid = db.run("""INSERT INTO galleries (slug, title, pin, type, require_pin,
+                    published, expires_at) VALUES (?,?,?,'drop',?,1,?)""",
+                 (security.new_slug(), title.strip(), security.new_pin(),
+                  1 if require_pin else 0, expires_at.strip() or None))
+    log.info("transfer %s created", gid)
     return RedirectResponse(f"/admin/galleries/{gid}", status_code=303)
 
 
@@ -189,9 +261,10 @@ async def update_gallery(gallery_id: int, title: str = Form(...),
 
 
 # Project statuses that pre-date 'delivered' on the studio pipeline. Sending
-# the "Final edits delivered" email auto-advances any of these → 'delivered';
-# already-'delivered' or 'archived' states are left alone (idempotent).
-_PRE_DELIVERED_STATUSES = ("lead", "proposal", "contract", "invoice", "shooting")
+# the "Final edits delivered" email auto-advances any of these → 'project_closed';
+# already-'project_closed' or 'archived' states are left alone (idempotent).
+_PRE_DELIVERED_STATUSES = ("inquiry_received", "consultation_call", "proposal_sent",
+                           "contract_signed", "retainer_paid", "session_planning")
 
 
 @router.post("/galleries/{gallery_id}/email")
@@ -220,9 +293,10 @@ async def email_gallery(gallery_id: int, to: str = Form(...),
     if email_kind == "final" and g["project_id"]:
         p = db.one("SELECT status FROM projects WHERE id=?", (g["project_id"],))
         if p and p["status"] in _PRE_DELIVERED_STATUSES:
-            db.run("UPDATE projects SET status='delivered' WHERE id=?",
+            db.run("UPDATE projects SET status='project_closed', "
+                   "stage_changed_at=datetime('now') WHERE id=?",
                    (g["project_id"],))
-            log.info("project %s auto-advanced to 'delivered' via final email "
+            log.info("project %s auto-advanced to 'project_closed' via final email "
                      "(was %s)", g["project_id"], p["status"])
     return RedirectResponse(f"/admin/galleries/{gallery_id}", status_code=303)
 
@@ -404,7 +478,7 @@ def _portal_fav_count(gallery_id: int, client_id: int | None) -> int:
 @router.post("/galleries/{gallery_id}/delete")
 async def delete_gallery(gallery_id: int, force: bool = Form(False)):
     g = get_gallery(gallery_id)
-    if g["published"]:
+    if g["published"] and g["type"] != "drop":
         raise HTTPException(status_code=400,
                             detail="unpublish first — deleting a live client link "
                                    "is a two-step on purpose")
@@ -429,7 +503,8 @@ async def delete_gallery(gallery_id: int, force: bool = Form(False)):
     for z in config.ZIP_DIR.glob(f"g{gallery_id}-s*.zip"):
         z.unlink(missing_ok=True)
     log.info("gallery %s deleted", gallery_id)
-    return RedirectResponse("/admin", status_code=303)
+    dest = "/admin/transfers" if g["type"] == "drop" else "/admin"
+    return RedirectResponse(dest, status_code=303)
 
 
 @router.post("/galleries/{gallery_id}/assets/{asset_id}/delete")

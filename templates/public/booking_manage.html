@@ -1,0 +1,46 @@
+{% extends "site/base_site.html" %}
+{% block title %}Your booking — {{ site_name }}{% endblock %}
+{% block site_content %}
+<main class="site-main site-narrow book-manage">
+  {% if b.status == 'confirmed' %}
+    <div class="book-manage-badge book-ok">Confirmed</div>
+    <h1>You're booked</h1>
+    <p class="muted">A calendar invite is on its way to {{ b.email }}.</p>
+  {% else %}
+    <div class="book-manage-badge book-off">Cancelled</div>
+    <h1>Booking cancelled</h1>
+    <p class="muted">This time has been released.{% if b.cancel_reason %}
+      Reason: {{ b.cancel_reason }}{% endif %}</p>
+  {% endif %}
+
+  <dl class="book-manage-detail">
+    <dt>What</dt><dd>{{ b.event_name }}{% if b.duration_min %}
+      <span class="muted">· {{ b.duration_min }} min</span>{% endif %}</dd>
+    <dt>When</dt><dd>{{ b.start_utc | localtime }}
+      <span class="muted">({{ tz_name }})</span></dd>
+    {% if b.location %}<dt>Where</dt><dd>{{ b.location }}</dd>{% endif %}
+    <dt>Who</dt><dd>{{ b.name }}</dd>
+    {% if b.notes %}<dt>Notes</dt><dd>{{ b.notes }}</dd>{% endif %}
+  </dl>
+
+  {% if b.status == 'confirmed' %}
+    <div class="book-manage-actions">
+      {% if gcal %}<a class="btn" href="{{ gcal }}" target="_blank"
+                      rel="noopener">Add to Google Calendar</a>{% endif %}
+      <a class="btn btn-ghost" href="/booking/{{ b.token }}/invite.ics">Download invite (.ics)</a>
+    </div>
+
+    <div class="book-manage-change">
+      <a href="/booking/{{ b.token }}/reschedule">Need a different time? Reschedule</a>
+      <form method="post" action="/booking/{{ b.token }}/cancel"
+            onsubmit="return confirm('Cancel this booking?')">
+        <label class="muted">Cancelling? Let me know why <span class="muted">(optional)</span>
+          <input type="text" name="reason" maxlength="500"></label>
+        <button type="submit" class="linkbtn danger">Cancel booking</button>
+      </form>
+    </div>
+  {% else %}
+    <p><a class="btn" href="/book">Book another time</a></p>
+  {% endif %}
+</main>
+{% endblock %}

@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block robots %}<meta name="robots" content="index, follow">{% endblock %}
 {% block head %}
+<meta name="darkreader-lock">
+<meta name="color-scheme" content="light only">
 {% set og_img = og_image_id() %}
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="{{ site_name }}">
@@ -9,24 +11,72 @@
 <meta property="og:url" content="{{ base_url }}{{ request.url.path }}">
 {% if og_img %}<meta property="og:image" content="{{ base_url }}/site/img/{{ og_img }}">{% endif %}
 <meta name="twitter:card" content="{{ 'summary_large_image' if og_img else 'summary' }}">
+{# Self-hosted typefaces — no Google Fonts CDN; see static/fonts.css (shared
+   with the admin shell). Preload the two latin files the site paints first. #}
+<link rel="preload" href="/static/fonts/newsreader-latin.woff2?v={{ static_rev }}" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/static/fonts/archivo-latin.woff2?v={{ static_rev }}" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/fonts.css?v={{ static_rev }}">
+<script src="/static/site.js?v={{ static_rev }}" defer></script>
+{% block site_head %}{% endblock %}
 {% endblock %}
 {% block bodyclass %}site-body{% endblock %}
 {% block content %}
-<header class="site-nav">
-  <a href="/" class="site-brand">{{ site_name }}</a>
+<header class="site-nav" data-nav>
+  <a href="/" class="site-brand">
+    <b>Kevin&nbsp;Lee</b>
+    <small>Food&nbsp;&amp;&nbsp;Beverage</small>
+  </a>
   <nav>
     <a href="/portfolio">Portfolio</a>
-    <a href="/work">Work</a>
-    <a href="/press">Press</a>
+    <a href="/reels">Reels</a>
     <a href="/services">Services</a>
     <a href="/about">About</a>
-    <a href="/book">Book</a>
-    <a href="/contact">Contact</a>
+    <a href="/book">Book a call</a>
+    <a href="/contact" class="nav-cta">Request a quote</a>
   </nav>
+  <button class="nav-menu-btn" data-menu-btn aria-label="Menu"><span></span><span></span></button>
 </header>
+
+<div class="nav-mobile" data-mobile-menu>
+  <a href="/portfolio">Portfolio</a>
+  <a href="/reels">Reels</a>
+  <a href="/services">Services</a>
+  <a href="/about">About</a>
+  <a href="/book">Book a call</a>
+  <a href="/contact" class="nav-cta">Request a quote</a>
+</div>
+
 {% block site_content %}{% endblock %}
+
 <footer class="site-footer">
-  <p>{{ site_name }} — food &amp; beverage photography</p>
-  <p class="muted">&copy; {{ site_name }} · <a href="/contact">Work with me</a></p>
+  <div class="footer-grid">
+    <div class="footer-brand">
+      <b>{{ site_name }}</b>
+      <p>Food &amp; beverage photography and videography. Asheville &amp; Western
+         North Carolina — Charlotte, Raleigh, and Wilmington on regular rotation.</p>
+    </div>
+    <div class="footer-col">
+      <b>Explore</b>
+      <a href="/portfolio">Portfolio</a>
+      <a href="/reels">Reels</a>
+      <a href="/services">Services</a>
+      <a href="/about">About</a>
+    </div>
+    <div class="footer-col">
+      <b>Start</b>
+      <a href="/contact">Request a quote</a>
+      <a href="/book">Book a call</a>
+      <a href="/services">Brand Partner</a>
+    </div>
+    <div class="footer-col">
+      <b>Follow</b>
+      <a href="/press">Press</a>
+      <a href="/contact">Get in touch</a>
+    </div>
+  </div>
+  <div class="footer-base">
+    <span>&copy; 2026 {{ site_name }} · Kleephotography.com</span>
+    <span>Photography that makes people hungry.</span>
+  </div>
 </footer>
 {% endblock %}

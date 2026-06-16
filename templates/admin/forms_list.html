@@ -1,0 +1,129 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Forms · Mise{% endblock %}
+{% block admin_body %}
+<main class="admin-main">
+  <div class="admin-bar">
+    <div>
+      <h1>Forms</h1>
+      <p class="muted">Build lead-capture forms and client questionnaires. Each gets a shareable public link.</p>
+    </div>
+  </div>
+
+  <section class="task-new" aria-label="New form">
+    <form method="post" action="/admin/forms" class="task-new-form">
+      <input type="text" name="title" placeholder="Form name (e.g. Restaurant Shoot Brief)" required maxlength="120" autofocus>
+      <select name="kind" aria-label="Form kind">
+        <option value="lead">Lead form</option>
+        <option value="questionnaire">Questionnaire</option>
+      </select>
+      <button type="submit">Create &amp; add fields</button>
+    </form>
+  </section>
+
+  {% if summary.total %}
+  <div class="stat-strip" aria-label="Forms summary">
+    <span class="stat"><strong>{{ summary.total }}</strong> form{{ "s" if summary.total != 1 }}</span>
+    <span class="stat"><strong>{{ summary.active }}</strong> active</span>
+    <span class="stat"><strong>{{ summary.subs }}</strong> submission{{ "s" if summary.subs != 1 }}</span>
+    <span class="stat">{% if summary.last_sub %}last {{ summary.last_sub[:10] }}{% else %}no submissions yet{% endif %}</span>
+  </div>
+
+  <div class="studio-toolbar" id="form-toolbar">
+    <input type="search" class="studio-search" id="form-search" placeholder="Search forms…" aria-label="Search forms">
+    <select class="studio-filter" id="form-kind" aria-label="Filter by kind">
+      <option value="">All kinds</option>
+      <option value="lead">Lead forms</option>
+      <option value="questionnaire">Questionnaires</option>
+    </select>
+    <select class="studio-filter" id="form-active" aria-label="Filter by status">
+      <option value="">Active &amp; draft</option>
+      <option value="1">Active only</option>
+      <option value="0">Drafts only</option>
+    </select>
+    <select class="studio-filter" id="form-sort" aria-label="Sort forms">
+      <option value="recent">Sort: newest</option>
+      <option value="subs">Sort: most submissions</option>
+      <option value="name">Sort: name</option>
+    </select>
+  </div>
+  {% endif %}
+
+  {% macro form_table(rows, empty, section) %}
+    {% if rows %}
+    <ul class="form-list" data-form-list>
+      {% for r in rows %}
+      <li class="form-row" data-form data-idx="{{ loop.index0 }}"
+          data-search="{{ r.title|lower }}" data-kind="{{ r.kind }}"
+          data-active="{{ 1 if r.active else 0 }}" data-subs="{{ r.n_subs }}">
+        <a class="form-row-title" href="/admin/forms/{{ r.id }}">{{ r.title }}</a>
+        {% if not r.active %}<span class="chip">draft (off)</span>{% endif %}
+        <span class="muted">{{ r.n_fields }} field{{ "s" if r.n_fields != 1 }}</span>
+        <a class="form-row-subs" href="/admin/forms/{{ r.id }}/submissions">{{ r.n_subs }} submission{{ "s" if r.n_subs != 1 }}</a>
+        <span class="form-when">{% if r.last_sub %}last {{ r.last_sub[:10] }}{% else %}none yet{% endif %}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    <p class="studio-empty" data-empty hidden>No {{ section }} match.</p>
+    {% else %}<p class="muted">{{ empty }}</p>{% endif %}
+  {% endmacro %}
+
+  <section aria-label="Lead forms" data-section="lead">
+    <h2>Lead forms</h2>
+    {{ form_table(leads, "No lead forms yet — create one above to capture inquiries beyond the built-in contact and booking pages.", "lead forms") }}
+  </section>
+
+  <section aria-label="Questionnaires" data-section="questionnaire">
+    <h2>Questionnaires</h2>
+    {{ form_table(quests, "No questionnaires yet — build one to gather shoot briefs from booked clients.", "questionnaires") }}
+  </section>
+
+  <script>
+  (function () {
+    var search = document.getElementById('form-search');
+    if (!search) return;
+    var fKind = document.getElementById('form-kind');
+    var fActive = document.getElementById('form-active');
+    var fSort = document.getElementById('form-sort');
+    var sections = Array.prototype.slice.call(document.querySelectorAll('[data-section]'));
+
+    function visible(r) {
+      var q = (search.value || '').trim().toLowerCase();
+      if (q && r.dataset.search.indexOf(q) === -1) return false;
+      if (fActive.value && r.dataset.active !== fActive.value) return false;
+      return true;
+    }
+    function render() {
+      sections.forEach(function (sec) {
+        var kindHidden = fKind.value && sec.dataset.section !== fKind.value;
+        sec.hidden = !!kindHidden;
+        var list = sec.querySelector('[data-form-list]');
+        if (!list) return;
+        var rows = Array.prototype.slice.call(list.querySelectorAll('[data-form]'));
+        rows.sort(function (a, b) {
+          if (fSort.value === 'subs') return (+b.dataset.subs) - (+a.dataset.subs);
+          if (fSort.value === 'name') {
+            var na = a.dataset.search, nb = b.dataset.search;
+            if (na !== nb) return na < nb ? -1 : 1;
+          }
+          return (+a.dataset.idx) - (+b.dataset.idx);
+        });
+        var nVis = 0;
+        rows.forEach(function (r) {
+          var v = visible(r);
+          r.classList.toggle('studio-hidden', !v);
+          if (v) nVis++;
+          list.appendChild(r);
+        });
+        var emptyNote = sec.querySelector('[data-empty]');
+        if (emptyNote) emptyNote.hidden = nVis !== 0;
+      });
+    }
+    [search, fKind, fActive, fSort].forEach(function (el) {
+      el.addEventListener('input', render);
+      el.addEventListener('change', render);
+    });
+    render();
+  })();
+  </script>
+</main>
+{% endblock %}

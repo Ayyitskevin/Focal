@@ -1,0 +1,63 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Bookings · Mise{% endblock %}
+{% block admin_body %}
+<main class="admin-main">
+  <div class="admin-bar">
+    <div>
+      <h1>Bookings</h1>
+      <p class="muted">Confirmed appointments from your booking page. Times in {{ tz }}.</p>
+    </div>
+    <nav>
+      <a href="/admin/scheduling/bookings">Bookings</a></nav>
+  </div>
+
+  <section class="sched-block">
+    <h2>Upcoming</h2>
+    {% if upcoming %}
+    <table class="sched-table">
+      <thead><tr><th>When</th><th>Event</th><th>Who</th><th>Contact</th><th></th></tr></thead>
+      <tbody>
+      {% for b in upcoming %}
+        <tr>
+          <td>{{ b.start_utc | localtime }}</td>
+          <td>{{ b.event_name }}</td>
+          <td>{{ b.name }}</td>
+          <td><a href="mailto:{{ b.email }}">{{ b.email }}</a>{% if b.phone %}<br>{{ b.phone }}{% endif %}</td>
+          <td>
+            <form method="post" action="/admin/scheduling/booking/{{ b.id }}/cancel"
+                  onsubmit="return confirm('Cancel this booking and email the client?')">
+              <button class="linkbtn danger">Cancel</button>
+            </form>
+          </td>
+        </tr>
+        {% if b.notes %}<tr class="sched-note"><td colspan="5">{{ b.notes }}</td></tr>{% endif %}
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No upcoming bookings.</p>
+    {% endif %}
+  </section>
+
+  <section class="sched-block">
+    <h2>Past &amp; cancelled</h2>
+    {% if past %}
+    <table class="sched-table sched-past">
+      <thead><tr><th>When</th><th>Event</th><th>Who</th><th>Status</th></tr></thead>
+      <tbody>
+      {% for b in past %}
+        <tr class="{% if b.status != 'confirmed' %}sched-off{% endif %}">
+          <td>{{ b.start_utc | localtime }}</td>
+          <td>{{ b.event_name }}</td>
+          <td>{{ b.name }}</td>
+          <td>{{ b.status }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">Nothing here yet.</p>
+    {% endif %}
+  </section>
+</main>
+{% endblock %}

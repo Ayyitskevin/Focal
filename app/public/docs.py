@@ -43,8 +43,6 @@ async def accept_proposal(request: Request, slug: str):
         raise HTTPException(status_code=400, detail="proposal is not open for acceptance")
     db.run("UPDATE proposals SET status='accepted', accepted_at=datetime('now') WHERE id=?",
            (d["id"],))
-    db.run("""UPDATE projects SET status='contract' WHERE id=?
-              AND status IN ('lead','proposal')""", (d["project_id"],))
     log.info("proposal %s ACCEPTED from %s", d["id"], security.client_ip(request))
     return RedirectResponse(f"/p/{slug}", status_code=303)
 
@@ -95,7 +93,9 @@ async def sign_contract(request: Request, slug: str,
     db.run("""UPDATE contracts SET status='signed', signer_name=?, signer_ip=?,
               signed_at=datetime('now') WHERE id=?""",
            (signer_name.strip(), security.client_ip(request), d["id"]))
-    db.run("""UPDATE projects SET status='invoice' WHERE id=?
-              AND status IN ('lead','proposal','contract')""", (d["project_id"],))
+    db.run("""UPDATE projects SET status='contract_signed',
+              stage_changed_at=datetime('now') WHERE id=?
+              AND status IN ('inquiry_received','consultation_call','proposal_sent')""",
+           (d["project_id"],))
     log.info("contract %s SIGNED from %s", d["id"], security.client_ip(request))
     return RedirectResponse(f"/c/{slug}", status_code=303)

@@ -115,6 +115,13 @@ async def stripe_webhook(request: Request):
     else:
         db.run("UPDATE invoices SET status='paid', paid_at=datetime('now') WHERE id=?",
                (invoice_id,))
+    # Payment landed → advance the project to Retainer Paid (the funnel's money
+    # gate). Only moves forward from pre-payment stages; never rewinds a project
+    # already at session planning / closed / archived.
+    db.run("""UPDATE projects SET status='retainer_paid',
+              stage_changed_at=datetime('now') WHERE id=?
+              AND status IN ('inquiry_received','consultation_call',
+                             'proposal_sent','contract_signed')""", (d["project_id"],))
     jobs.enqueue("notion_sync_invoice", {"invoice_id": invoice_id})
     log.info("invoice %s payment recorded: %s %s cents (event %s)",
              invoice_id, kind, session["amount_total"], event["id"])

@@ -1,16 +1,18 @@
-{% extends "base.html" %}
+{% extends "admin/base_admin.html" %}
 {% block title %}{{ g.title }} · Mise admin{% endblock %}
 {% import "admin/_copy_link.html" as cp %}
-{% block content %}
+{% block admin_body %}
 <main class="admin-main">
   <div class="admin-bar">
-    <h1><a href="/admin">&larr;</a> {{ g.title }}</h1>
+    <h1><a href="/admin/galleries">&larr;</a> {{ g.title }}</h1>
     <a href="/admin/galleries/{{ g.id }}/activity">Activity</a>
   </div>
 
-  <p>Client link: <code class="slug">{{ base_url }}/g/{{ g.slug }}</code>
-     &nbsp;PIN: <code>{{ g.pin }}</code>
-     {{ cp.copy_link(base_url ~ "/g/" ~ g.slug, g.pin) }}</p>
+  {% set show_pin = g.type != 'drop' or g.require_pin %}
+  <p>{{ 'Transfer' if g.type == 'drop' else 'Client' }} link:
+     <code class="slug">{{ base_url }}/g/{{ g.slug }}</code>
+     {% if show_pin %}&nbsp;PIN: <code>{{ g.pin }}</code>{% endif %}
+     {{ cp.copy_link(base_url ~ "/g/" ~ g.slug, g.pin if show_pin else None) }}</p>
 
   <details id="g-settings" {% if not g.published %}open{% endif %}>
     <summary>Settings</summary>
@@ -41,6 +43,9 @@
       </label>
       <label>PIN <input type="text" name="pin" value="{{ g.pin }}" pattern="[0-9]{4}" maxlength="4" required></label>
       <label>Expires <input type="date" name="expires_at" value="{{ g.expires_at or '' }}"></label>
+      {% if g.type == 'drop' %}
+      <input type="hidden" name="published" value="true">
+      {% else %}
       <label class="row"><input type="checkbox" name="published" value="true"
              {% if g.published %}checked{% endif %}> Published</label>
 
@@ -62,12 +67,13 @@
         <label>Credits <textarea name="cs_credits" rows="4"
                placeholder="One per line — Chef: …  · Stylist: …  · Venue: …">{{ g.cs_credits or '' }}</textarea></label>
       </fieldset>
+      {% endif %}
 
       <button type="submit">Save</button>
     </form>
   </details>
 
-  {% if not g.published %}
+  {% if not g.published or g.type == 'drop' %}
   {% if portal_favs %}
     {% set confirm_msg = "WARNING: The linked client has " ~ portal_favs ~ " portal favorite" ~ ("s" if portal_favs != 1 else "") ~ " in this gallery. Deleting will break their social-crops view on the portal. Continue?" %}
   {% else %}
@@ -80,7 +86,7 @@
   </form>
   {% endif %}
 
-  {% if g.published %}
+  {% if g.published and g.type != 'drop' %}
   <details id="g-send-email">
     <summary>Send delivery email</summary>
     {% set p = {"client_email": (client.email if client else "") or "",
@@ -145,10 +151,12 @@
 
   <h2>Upload</h2>
   <form id="upform" class="stack-form">
+    {% if g.type != 'drop' %}
     <select name="section_id">
       <option value="">(no section)</option>
       {% for s in sections %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}
     </select>
+    {% endif %}
     <input type="file" name="files" multiple
            accept=".jpg,.jpeg,.png,.heic,.heif,.webp,.tif,.tiff,.mp4,.mov,.m4v,.avi,.mkv,.webm">
     <button type="submit">Upload</button>
@@ -156,6 +164,7 @@
     <p id="upmsg" class="muted"></p>
   </form>
 
+  {% if g.type != 'drop' %}
   <h2>Sections</h2>
   <ul class="sections">
     {% for s in sections %}
@@ -202,10 +211,11 @@
     <input type="text" name="name" placeholder="New section" required>
     <button type="submit">Add section</button>
   </form>
+  {% endif %}
 
   {% set n_faved = assets|selectattr("n_fav")|list|length %}
-  <h2>Assets ({{ assets|length }}{% if n_faved %} · &#9829; {{ n_faved }} faved{% endif %})</h2>
-  {% if assets %}
+  <h2>{{ 'Files' if g.type == 'drop' else 'Assets' }} ({{ assets|length }}{% if n_faved %} · &#9829; {{ n_faved }} faved{% endif %})</h2>
+  {% if assets and g.type != 'drop' %}
   <form id="bulkform" method="post" action="/admin/galleries/{{ g.id }}/assets/bulk-section"
         class="inline-form">
     <span class="muted">Move selected to</span>
@@ -263,6 +273,7 @@
                title="Select for bulk move">
         #{{ a.id }} {{ a.filename }} <span class="muted">{{ a.kind }}</span>
         {% if a.n_fav %}<span class="fav" title="{{ a.n_fav }} client favorite{{ '' if a.n_fav == 1 else 's' }}">&#9829;{% if a.n_fav > 1 %} {{ a.n_fav }}{% endif %}</span>{% endif %}
+        {% if g.type != 'drop' %}
         <form method="post" action="/admin/galleries/{{ g.id }}/assets/{{ a.id }}/section" class="inline">
           <select name="section_id" onchange="this.form.submit()">
             <option value="">(none)</option>
@@ -271,12 +282,13 @@
             {% endfor %}
           </select>
         </form>
+        {% endif %}
         <form method="post" action="/admin/galleries/{{ g.id }}/assets/{{ a.id }}/move"
               class="inline">
           <button class="link" name="dir" value="left" title="Move earlier">&larr;</button>
           <button class="link" name="dir" value="right" title="Move later">&rarr;</button>
         </form>
-        {% if a.kind == 'photo' %}
+        {% if a.kind == 'photo' and g.type != 'drop' %}
         <form method="post" action="/admin/galleries/{{ g.id }}/assets/{{ a.id }}/cover"
               class="inline">
           <button class="link" title="Toggle cover photo">
@@ -329,7 +341,8 @@ document.getElementById("upform").addEventListener("submit", function (e) {
   if (!files.length) return;
   const fd = new FormData();
   for (const f of files) fd.append("files", f);
-  const sec = this.querySelector('select[name=section_id]').value;
+  const secEl = this.querySelector('select[name=section_id]');
+  const sec = secEl ? secEl.value : "";
   const url = "/admin/galleries/{{ g.id }}/upload" + (sec ? "?section_id=" + sec : "");
   const bar = document.getElementById("upbar"), msg = document.getElementById("upmsg");
   const xhr = new XMLHttpRequest();
