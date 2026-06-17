@@ -24,7 +24,7 @@ Live: <https://kleephotography.com> · Runs on a single always-on node behind a 
 
 FastAPI · Jinja2 · HTMX (no front-end build) · SQLite (WAL) · Pillow + pillow-heif (imaging) ·
 ffmpeg (video transcode/poster) · Stripe (payments) · itsdangerous (signed cookies).
-Python deps pinned in `requirements.txt`. ~10K LOC Python, ~20K total; one 115-case
+Python deps pinned in `requirements.txt`. ~10K LOC Python, ~20K total; one 120-case
 end-to-end smoke suite. No ORM, no JS framework, no message broker — the platform is the
 standard library plus four well-chosen packages.
 
@@ -40,7 +40,7 @@ Three surfaces, one process:
 | Machine API | `app/service_api.py` | Internal automation | bearer token (`/api/shots`) |
 
 **Spine:** `main.py` (app factory + middleware), `config.py` (env-driven), `db.py`
-(SQLite, short-lived connections, 48 forward-only migrations in `migrations/`),
+(SQLite, short-lived connections, 49 forward-only migrations in `migrations/`),
 `security.py` (slugs/PINs/lockout/cookies), `jobs.py` (in-process queue for image
 derivatives + video transcodes), `scheduler.py` (retainer thread — drafts only).
 
@@ -62,8 +62,9 @@ don't need for operability I do:
   to run, monitor, or secure — uploads still return fast.
 - **HTMX over a SPA.** Server-rendered Jinja with HTMX for partial swaps. No build step, no
   bundle, no client-state duplication. Four hand-written vanilla JS files cover the rest.
-- **Forward-only migrations.** Plain numbered `.sql` applied on startup, idempotent, with a
-  parallel `rollback/` mirror. Schema history is readable in `git log`, not hidden behind a tool.
+- **Forward-only migrations.** Plain numbered `.sql` applied on startup, idempotent, with
+  hand-written down-scripts in `rollback/` for the riskier schema changes. Schema history is
+  readable in `git log`, not hidden behind a tool.
 - **Money/media truth is local; integrations are one-way.** Avoids the split-brain class of
   bug entirely — nothing external can write back and disagree with what Stripe charged.
 - **Defense in depth at the edge.** App-level PIN lockout + unguessable slugs *and*
@@ -71,7 +72,7 @@ don't need for operability I do:
 
 ## Testing
 
-`tests/test_smoke.py` is one end-to-end suite (115 cases) that exercises real routes against
+`tests/test_smoke.py` is one end-to-end suite (120 cases) that exercises real routes against
 a real SQLite DB via FastAPI's `TestClient` — auth gating, PIN lockout, the proposal →
 contract → invoice → receipt flow, Stripe webhook signature verification, and template
 rendering. Tests assert *intent* (e.g. a webhook with a bad signature is rejected), not just
@@ -93,11 +94,11 @@ app/
   service_api.py            bearer-gated /api/shots
   imaging.py video.py       media pipeline
   notion_sync.py caption_ai.py reopen_notify.py   one-way outbound integrations
-migrations/   001..048 forward-only (+ rollback/ mirror)
+migrations/   001..049 forward-only (+ rollback/ down-scripts for risky changes)
 templates/    admin/ · public/ · site/   (80 Jinja + HTMX templates)
 static/       mise.css + htmx.min.js + 4 vanilla JS (lightbox, copy-link, details-persist, site)
 ops/          systemd units + nightly backup
-tests/        test_smoke.py (115 end-to-end cases, real DB + TestClient)
+tests/        test_smoke.py (120 end-to-end cases, real DB + TestClient)
 ```
 
 ## Running it
