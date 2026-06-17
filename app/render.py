@@ -8,14 +8,27 @@ from fastapi.templating import Jinja2Templates
 from . import config, db
 
 ROOT = Path(__file__).resolve().parent.parent
-templates = Jinja2Templates(directory=ROOT / "templates")
+
+
+def _static_rev() -> int:
+    """Newest mtime among top-level /static files — the cache-buster appended to
+    every static URL. Recomputed per render (not frozen at startup) because
+    CSS/JS deploys land via `git pull` with no service restart: a startup-frozen
+    value would keep emitting the old `?v=` and browsers would serve stale CSS."""
+    return int(max(
+        (f.stat().st_mtime for f in (ROOT / "static").glob("*") if f.is_file()),
+        default=0))
+
+
+templates = Jinja2Templates(
+    directory=ROOT / "templates",
+    context_processors=[lambda request: {"static_rev": _static_rev()}],
+)
 templates.env.globals["site_name"] = config.SITE_NAME
 templates.env.globals["base_url"] = config.BASE_URL
-# cache-buster for /static/ URLs — Cloudflare edge-caches them for hours,
-# so deploys must change the URL, not wait out the TTL
-templates.env.globals["static_rev"] = int(max(
-    (f.stat().st_mtime for f in (ROOT / "static").glob("*") if f.is_file()),
-    default=0))
+# Startup fallback for any render path that doesn't run context processors
+# (the per-render value above overrides this for normal TemplateResponses).
+templates.env.globals["static_rev"] = _static_rev()
 
 
 def _og_image_id() -> int | None:
