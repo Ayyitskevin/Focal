@@ -8,6 +8,16 @@
     <nav><a href="/admin/home">Home</a> · <a href="/admin/galleries">Galleries</a> · <a href="/admin/scheduling">Scheduling</a> · <a href="/admin/studio/licenses">Licenses</a> · <a href="/admin/studio/press">Press</a> · <a href="/admin/studio/presets">Crop presets</a> · <a href="/admin/studio/testimonials">Testimonials</a> · <a href="/admin/studio/playbook">Booking playbook</a></nav>
   </div>
 
+  {% set na_count = (licenses_expiring or [])|length + (press_confirm or [])|length + (retainer_drafts or [])|length + (quota_behind or [])|length + (content_due or [])|length + (conflicts or [])|length + (proofing_waiting or [])|length %}
+  {% if na_count %}
+  <details class="needs-attention" id="studio-attention"{% if conflicts %} open{% endif %}>
+    <summary class="needs-attention-sum{% if conflicts %} warn{% endif %}">
+      <span class="na-ico" aria-hidden="true">&#9888;</span>
+      Needs attention <span class="na-count">{{ na_count }}</span>
+      {% if conflicts %}<span class="na-flag">· double-booking</span>{% endif %}
+    </summary>
+    <div class="needs-attention-body">
+
   {% if licenses_expiring %}
   <section class="upcoming conflicts" aria-label="Licenses expiring">
     <h2>&#9888; Licenses expiring / lapsed</h2>
@@ -101,36 +111,6 @@
   </section>
   {% endif %}
 
-  <nav class="spark-window-picker" aria-label="Sparkline window">
-    {% for w in [7, 30, 90] %}
-    <a href="/admin/studio?days={{ w }}"
-       class="spark-window-btn{% if spark_window == w %} spark-window-active{% endif %}">{{ w }}d</a>
-    {% endfor %}
-  </nav>
-
-  <section class="sparklines" aria-label="Last {{ spark_window }} days activity">
-    {% set bar_w = (100 / spark_window) - 0.2 if spark_window > 7 else (100 / spark_window) - 1 %}
-    {% set bar_step = 100 / spark_window %}
-    {% for s in sparklines %}
-    {% set peak = s.series|max if s.series|max > 0 else 1 %}
-    <div class="spark-card">
-      <p class="spark-head"><strong>{{ s.total }}</strong> {{ s.label }}
-        <span class="muted">· last {{ spark_window }}d</span></p>
-      <svg class="spark-svg" viewBox="0 0 100 20" preserveAspectRatio="none"
-           aria-label="{{ s.label }} per day for the last {{ spark_window }} days">
-        {% for n in s.series %}
-        {% set h = (n / peak * 18)|round(1) if n else 0 %}
-        <rect x="{{ (loop.index0 * bar_step)|round(2) }}" y="{{ 19 - h }}"
-              width="{{ bar_w|round(2) }}" height="{{ h if h > 0 else 0.6 }}"
-              fill="{{ 'var(--accent)' if n else 'var(--line)' }}">
-          <title>{{ spark_days[loop.index0] }}: {{ n }}</title>
-        </rect>
-        {% endfor %}
-      </svg>
-    </div>
-    {% endfor %}
-  </section>
-
   {% if conflicts %}
   <section class="upcoming conflicts" aria-label="Booking conflicts">
     <h2>&#9888; Booking conflicts</h2>
@@ -177,35 +157,9 @@
   </section>
   {% endif %}
 
-  <section class="upcoming" aria-label="Upcoming shoots">
-    <h2>Upcoming shoots</h2>
-    {% if upcoming %}
-    <ul class="upcoming-strip">
-      {% for u in upcoming %}
-      {% set cls = "ok" if u.days_out > 0 else ("today" if u.days_out == 0 else "overdue") %}
-      <li class="upcoming-chip upcoming-{{ cls }}">
-        <a href="/admin/studio/projects/{{ u.id }}">
-          <span class="upcoming-when">
-            {% if u.days_out < 0 %}{{ -u.days_out }}d ago
-            {% elif u.days_out == 0 %}today
-            {% elif u.days_out == 1 %}tomorrow
-            {% else %}in {{ u.days_out }}d{% endif %}
-          </span>
-          <span class="upcoming-date">{{ u.shoot_date }}</span>
-          <strong>{{ u.title }}</strong>
-          <span class="muted">{{ u.client_name }}{% if u.company %} · {{ u.company }}{% endif %}</span>
-          {% if u.days_out < 0 and u.status in ("inquiry_received", "consultation_call", "proposal_sent", "contract_signed", "retainer_paid") %}
-          <span class="warn">· not yet shooting</span>
-          {% endif %}
-        </a>
-      </li>
-      {% endfor %}
-    </ul>
-    {% else %}
-    <p class="muted">Nothing on the calendar between a week ago and two weeks
-      out. Add a shoot date on any project and it'll surface here.</p>
-    {% endif %}
-  </section>
+    </div>
+  </details>
+  {% endif %}
 
   {% set stage_label = {"inquiry_received": "Inquiry Received",
       "consultation_call": "Consultation Call", "proposal_sent": "Proposal Sent",
@@ -474,6 +428,66 @@
     });
   })();
   </script>
+
+  <section class="upcoming" aria-label="Upcoming shoots">
+    <h2>Upcoming shoots</h2>
+    {% if upcoming %}
+    <ul class="upcoming-strip">
+      {% for u in upcoming %}
+      {% set cls = "ok" if u.days_out > 0 else ("today" if u.days_out == 0 else "overdue") %}
+      <li class="upcoming-chip upcoming-{{ cls }}">
+        <a href="/admin/studio/projects/{{ u.id }}">
+          <span class="upcoming-when">
+            {% if u.days_out < 0 %}{{ -u.days_out }}d ago
+            {% elif u.days_out == 0 %}today
+            {% elif u.days_out == 1 %}tomorrow
+            {% else %}in {{ u.days_out }}d{% endif %}
+          </span>
+          <span class="upcoming-date">{{ u.shoot_date }}</span>
+          <strong>{{ u.title }}</strong>
+          <span class="muted">{{ u.client_name }}{% if u.company %} · {{ u.company }}{% endif %}</span>
+          {% if u.days_out < 0 and u.status in ("inquiry_received", "consultation_call", "proposal_sent", "contract_signed", "retainer_paid") %}
+          <span class="warn">· not yet shooting</span>
+          {% endif %}
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">Nothing on the calendar between a week ago and two weeks
+      out. Add a shoot date on any project and it'll surface here.</p>
+    {% endif %}
+  </section>
+
+  <nav class="spark-window-picker" aria-label="Sparkline window">
+    {% for w in [7, 30, 90] %}
+    <a href="/admin/studio?days={{ w }}"
+       class="spark-window-btn{% if spark_window == w %} spark-window-active{% endif %}">{{ w }}d</a>
+    {% endfor %}
+  </nav>
+
+  <section class="sparklines" aria-label="Last {{ spark_window }} days activity">
+    {% set bar_w = (100 / spark_window) - 0.2 if spark_window > 7 else (100 / spark_window) - 1 %}
+    {% set bar_step = 100 / spark_window %}
+    {% for s in sparklines %}
+    {% set peak = s.series|max if s.series|max > 0 else 1 %}
+    <div class="spark-card">
+      <p class="spark-head"><strong>{{ s.total }}</strong> {{ s.label }}
+        <span class="muted">· last {{ spark_window }}d</span></p>
+      <svg class="spark-svg" viewBox="0 0 100 20" preserveAspectRatio="none"
+           aria-label="{{ s.label }} per day for the last {{ spark_window }} days">
+        {% for n in s.series %}
+        {% set h = (n / peak * 18)|round(1) if n else 0 %}
+        <rect x="{{ (loop.index0 * bar_step)|round(2) }}" y="{{ 19 - h }}"
+              width="{{ bar_w|round(2) }}" height="{{ h if h > 0 else 0.6 }}"
+              fill="{{ 'var(--accent)' if n else 'var(--line)' }}">
+          <title>{{ spark_days[loop.index0] }}: {{ n }}</title>
+        </rect>
+        {% endfor %}
+      </svg>
+    </div>
+    {% endfor %}
+  </section>
 
   <h2>Clients</h2>
   <form method="post" action="/admin/studio/clients" class="inline-form">
