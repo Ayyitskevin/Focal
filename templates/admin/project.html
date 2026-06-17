@@ -288,6 +288,37 @@
           {% endif %}
         </section>
 
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Testimonial requests</h2>
+            <form method="post" action="/admin/studio/projects/{{ p.id }}/testimonial-request" class="inline-form">
+              <select name="gallery_id">
+                <option value="">— no gallery —</option>
+                {% for g in galleries %}
+                <option value="{{ g.id }}" {% if p.gallery_id == g.id %}selected{% endif %}>{{ g.title }}</option>
+                {% endfor %}
+              </select>
+              <button type="submit" class="ghost">New request link</button>
+              <span class="muted">send the link manually; the client writes their own — it lands unpublished for review</span>
+            </form>
+          </div>
+          {% if testimonial_reqs %}
+          <table class="list">
+            <tr><th>Raised</th><th>Status</th><th>Link</th></tr>
+            {% for t in testimonial_reqs %}
+            <tr>
+              <td class="muted">{{ t.created_at[:10] }}</td>
+              <td>{% if t.submitted_at %}
+                    {% if t.t_published %}<span class="badge is-active">published</span>
+                    {% else %}<span class="badge is-viewed">submitted — review</span>{% endif %}
+                  {% else %}<span class="badge is-draft">awaiting client</span>{% endif %}</td>
+              <td><code class="slug">{{ base_url }}/t/{{ t.slug }}</code></td>
+            </tr>
+            {% endfor %}
+          </table>
+          {% else %}<p class="muted">No testimonial requests yet — raise one after delivery to collect a client quote.</p>{% endif %}
+        </section>
+
       </div>
 
       <aside class="project-rail">

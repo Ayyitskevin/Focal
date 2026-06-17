@@ -1,0 +1,29 @@
+{% extends "base_cream.html" %}
+{% block title %}Share your experience · {{ site_name }}{% endblock %}
+{% block content %}
+<main class="doc-page">
+  <header class="doc-head">
+    <p class="muted">{{ site_name }}</p>
+    <h1>Share your experience</h1>
+    <p class="muted">Hi {{ r.client_name }}{% if r.company %} · {{ r.company }}{% endif %} — thank you for working with us.</p>
+  </header>
+
+  {% if submitted %}
+  <p class="doc-accepted">✓ Thank you — your words have been received. We may feature them on the site.</p>
+  {% else %}
+  <p class="doc-intro">A few honest words about your shoot mean the world. Write whatever feels true — we’ll only publish it with your name and business as you enter them below.</p>
+  <form method="post" action="/t/{{ r.slug }}" class="stack-form">
+    <label>Your testimonial
+      <textarea name="quote" rows="6" required
+                placeholder="What was it like working together? What did the photos do for your business?"></textarea></label>
+    <label>Your name
+      <input type="text" name="attribution_name" required autocomplete="name"
+             value="{{ r.client_name }}"></label>
+    <label>Business <span class="muted">(optional)</span>
+      <input type="text" name="business" autocomplete="organization"
+             value="{{ r.company or '' }}"></label>
+    <button type="submit">Submit testimonial</button>
+  </form>
+  {% endif %}
+</main>
+{% endblock %}

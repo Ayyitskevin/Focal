@@ -981,12 +981,20 @@ async def project_detail(request: Request, project_id: int):
                           WHERE i.project_id=? ORDER BY pm.created_at DESC""",
                        (project_id,))
     timeline = _build_timeline(proposals, contracts, invoices, payments, emails)
+    # Testimonial requests raised for this project, with the published state of
+    # any quote the client has submitted (so the admin sees pending vs. live).
+    testimonial_reqs = db.all_(
+        """SELECT tr.*, t.published AS t_published
+           FROM testimonial_requests tr
+           LEFT JOIN testimonials t ON t.id=tr.testimonial_id
+           WHERE tr.project_id=? ORDER BY tr.created_at DESC""", (project_id,))
     return templates.TemplateResponse(request, "admin/project.html",
                                       {"p": p, "proposals": proposals,
                                        "contracts": contracts, "invoices": invoices,
                                        "emails": emails, "galleries": galleries,
                                        "plans": plans, "shots": shots,
                                        "timeline": timeline,
+                                       "testimonial_reqs": testimonial_reqs,
                                        "shot_categories": usage_vocab.SHOT_CATEGORIES,
                                        "shot_priorities": usage_vocab.SHOT_PRIORITIES,
                                        "statuses": PROJECT_STATUSES,
@@ -1103,6 +1111,21 @@ async def update_testimonial(tid: int, quote: str = Form(...),
 async def delete_testimonial(tid: int):
     db.run("DELETE FROM testimonials WHERE id=?", (tid,))
     return RedirectResponse("/admin/studio/testimonials", status_code=303)
+
+
+@router.post("/projects/{project_id}/testimonial-request")
+async def request_testimonial(project_id: int,
+                              gallery_id: int | None = Form(None)):
+    """Raise a tokened /t/{slug} link for the client to write their own
+    testimonial. Manual send (matches the email doctrine) — the project page
+    shows the link to copy. The submitted quote lands unpublished for review."""
+    p = get_project(project_id)
+    tid = db.run("""INSERT INTO testimonial_requests
+                      (slug, client_id, project_id, gallery_id)
+                    VALUES (?,?,?,?)""",
+                 (security.new_slug(), p["client_id"], project_id, gallery_id))
+    log.info("testimonial request %s raised for project %s", tid, project_id)
+    return RedirectResponse(f"/admin/studio/projects/{project_id}", status_code=303)
 
 
 @router.post("/projects/{project_id}")

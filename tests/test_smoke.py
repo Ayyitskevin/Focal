@@ -1085,6 +1085,60 @@ def test_reports_top_clients(admin):
     assert db.one("SELECT id FROM clients WHERE id=?", (c["id"],)) is None
 
 
+def test_testimonial_self_submit(admin):
+    # A client must be able to write their own testimonial via a tokened /t/{slug}
+    # link, and it MUST land unpublished — the marketing site only shows moderated
+    # quotes. If a self-submission published itself, an unreviewed quote could go
+    # live. Also: the link is one-shot (re-POST is an idempotent thank-you, never a
+    # second testimonial row).
+    admin.post("/admin/studio/clients",
+               data={"name": "Marco Rossi", "company": "Trattoria Rossi",
+                     "email": "marco@trattoriarossi.com", "phone": ""},
+               follow_redirects=False)
+    c = db.one("SELECT * FROM clients ORDER BY id DESC LIMIT 1")
+    admin.post(f"/admin/studio/clients/{c['id']}/projects",
+               data={"title": "Dinner menu shoot"}, follow_redirects=False)
+    p = db.one("SELECT * FROM projects ORDER BY id DESC LIMIT 1")
+
+    # Admin raises the request link; the project page surfaces it.
+    admin.post(f"/admin/studio/projects/{p['id']}/testimonial-request",
+               data={"gallery_id": ""}, follow_redirects=False)
+    req = db.one("SELECT * FROM testimonial_requests ORDER BY id DESC LIMIT 1")
+    assert req["project_id"] == p["id"] and req["submitted_at"] is None
+    page = admin.get(f"/admin/studio/projects/{p['id']}").text
+    assert f"/t/{req['slug']}" in page and "awaiting client" in page
+
+    # Client opens the form (greeted by name) and submits.
+    form = admin.get(f"/t/{req['slug']}").text
+    assert "Trattoria Rossi" in form and "Share your experience" in form
+    r = admin.post(f"/t/{req['slug']}",
+                   data={"quote": "Marco's plates have never looked better.",
+                         "attribution_name": "Marco Rossi",
+                         "business": "Trattoria Rossi"},
+                   follow_redirects=False)
+    assert r.status_code == 303
+    t = db.one("SELECT * FROM testimonials ORDER BY id DESC LIMIT 1")
+    assert t["published"] == 0  # lands unpublished for moderation
+    assert t["quote"].startswith("Marco's plates")
+    req = db.one("SELECT * FROM testimonial_requests WHERE id=?", (req["id"],))
+    assert req["submitted_at"] and req["testimonial_id"] == t["id"]
+
+    # Thank-you state, and a re-POST does not create a second testimonial.
+    assert "your words have been received" in admin.get(f"/t/{req['slug']}").text.lower()
+    n_before = db.one("SELECT COUNT(*) AS n FROM testimonials")["n"]
+    admin.post(f"/t/{req['slug']}",
+               data={"quote": "second", "attribution_name": "x", "business": ""},
+               follow_redirects=False)
+    assert db.one("SELECT COUNT(*) AS n FROM testimonials")["n"] == n_before
+
+    # Clean up so downstream order-coupled tests keep their fixtures.
+    db.run("DELETE FROM testimonials WHERE id=?", (t["id"],))
+    db.run("DELETE FROM testimonial_requests WHERE id=?", (req["id"],))
+    admin.post(f"/admin/studio/clients/{c['id']}/delete",
+               data={"force": "1"}, follow_redirects=False)
+    assert db.one("SELECT id FROM clients WHERE id=?", (c["id"],)) is None
+
+
 def test_email_send(admin, monkeypatch):
     from app import config, mailer
     inv = db.one("SELECT * FROM invoices ORDER BY id DESC LIMIT 1")

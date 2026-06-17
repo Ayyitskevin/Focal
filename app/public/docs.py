@@ -99,3 +99,46 @@ async def sign_contract(request: Request, slug: str,
            (d["project_id"],))
     log.info("contract %s SIGNED from %s", d["id"], security.client_ip(request))
     return RedirectResponse(f"/c/{slug}", status_code=303)
+
+
+# ── Testimonial capture — client writes their own at /t/{slug} ───────────────
+
+def _testimonial_request_or_404(slug: str) -> "db.sqlite3.Row":
+    r = db.one("""SELECT tr.*, c.name AS client_name, c.company
+                  FROM testimonial_requests tr
+                  JOIN clients c ON c.id=tr.client_id
+                  WHERE tr.slug=?""", (slug,))
+    if not r:
+        raise HTTPException(status_code=404)
+    return r
+
+
+@router.get("/t/{slug}", response_class=HTMLResponse)
+async def view_testimonial_form(request: Request, slug: str):
+    r = _testimonial_request_or_404(slug)
+    return templates.TemplateResponse(request, "public/testimonial.html",
+                                      {"r": r, "submitted": bool(r["submitted_at"])})
+
+
+@router.post("/t/{slug}", response_class=HTMLResponse)
+async def submit_testimonial(request: Request, slug: str,
+                             quote: str = Form(...),
+                             attribution_name: str = Form(...),
+                             business: str = Form("")):
+    r = _testimonial_request_or_404(slug)
+    if r["submitted_at"]:  # one submission per link; idempotent thank-you
+        return RedirectResponse(f"/t/{slug}", status_code=303)
+    if not (quote.strip() and attribution_name.strip()):
+        raise HTTPException(status_code=400, detail="quote and name required")
+    # Lands unpublished — the existing /admin/studio/testimonials moderation
+    # decides if/when it goes live on the marketing site.
+    tid = db.run("""INSERT INTO testimonials (quote, attribution_name, business,
+                                              gallery_id, published)
+                    VALUES (?,?,?,?,0)""",
+                 (quote.strip(), attribution_name.strip(),
+                  business.strip() or None, r["gallery_id"]))
+    db.run("""UPDATE testimonial_requests
+              SET submitted_at=datetime('now'), testimonial_id=? WHERE id=?""",
+           (tid, r["id"]))
+    log.info("testimonial submitted via request %s -> testimonial %s", r["id"], tid)
+    return RedirectResponse(f"/t/{slug}", status_code=303)
