@@ -1306,6 +1306,58 @@ def test_invoice_duplicate(admin):
                data={"force": "1"}, follow_redirects=False)
 
 
+def test_contract_countersign(admin):
+    # A client-signed contract can be countersigned once by the studio: typed name +
+    # timestamp recorded alongside the client's, making the record bilateral. The
+    # client's signature is untouched; a second countersign attempt is rejected.
+    admin.post("/admin/studio/clients",
+               data={"name": "Lena Brandt", "company": "Copper Spoon",
+                     "email": "lena@copperspoon.test", "phone": ""},
+               follow_redirects=False)
+    c = db.one("SELECT * FROM clients ORDER BY id DESC LIMIT 1")
+    admin.post(f"/admin/studio/clients/{c['id']}/projects",
+               data={"title": "Tasting menu shoot"}, follow_redirects=False)
+    p = db.one("SELECT * FROM projects ORDER BY id DESC LIMIT 1")
+    src = db.run("""INSERT INTO contracts (project_id, slug, title, body, body_sha256,
+                    status, signer_name, signer_ip, signed_at)
+                    VALUES (?,?,?,?,?,?,?,?,datetime('now'))""",
+                 (p["id"], "csign-src", "Services Agreement", "BODY TEXT",
+                  "b" * 64, "signed", "Lena Brandt", "5.6.7.8"))
+
+    # the countersign form shows on a signed-but-not-countersigned contract
+    page = admin.get(f"/admin/studio/contracts/{src}")
+    assert f"/admin/studio/contracts/{src}/countersign" in page.text
+
+    # blank name is rejected
+    bad = admin.post(f"/admin/studio/contracts/{src}/countersign",
+                     data={"countersigner_name": "   "}, follow_redirects=False)
+    assert bad.status_code == 400
+
+    r = admin.post(f"/admin/studio/contracts/{src}/countersign",
+                   data={"countersigner_name": "Kevin Lee"}, follow_redirects=False)
+    assert r.status_code == 303
+    row = db.one("SELECT * FROM contracts WHERE id=?", (src,))
+    assert row["countersigner_name"] == "Kevin Lee" and row["countersigned_at"]
+    assert row["status"] == "signed" and row["signer_name"] == "Lena Brandt"
+
+    # second countersign is refused
+    dup = admin.post(f"/admin/studio/contracts/{src}/countersign",
+                     data={"countersigner_name": "Kevin Lee"}, follow_redirects=False)
+    assert dup.status_code == 400
+
+    # a draft contract cannot be countersigned
+    draft = db.run("""INSERT INTO contracts (project_id, slug, title, body, status)
+                      VALUES (?,?,?,?, 'draft')""",
+                   (p["id"], "csign-draft", "Draft", "X"))
+    nope = admin.post(f"/admin/studio/contracts/{draft}/countersign",
+                      data={"countersigner_name": "Kevin Lee"}, follow_redirects=False)
+    assert nope.status_code == 400
+
+    db.run("DELETE FROM contracts WHERE id IN (?,?)", (src, draft))
+    admin.post(f"/admin/studio/clients/{c['id']}/delete",
+               data={"force": "1"}, follow_redirects=False)
+
+
 def test_admin_global_search(admin):
     # The search box is the jump-to across the admin. It must find a client by
     # business name and its project by title, and link straight to each. It must

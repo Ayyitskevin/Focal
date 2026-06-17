@@ -148,6 +148,26 @@ async def duplicate_contract(contract_id: int):
     return RedirectResponse(f"/admin/studio/contracts/{did}", status_code=303)
 
 
+@router.post("/contracts/{contract_id}/countersign")
+async def countersign_contract(request: Request,
+                               contract_id: int, countersigner_name: str = Form(...)):
+    """Studio-side typed-name signature, recorded after the client signs, completing
+    the bilateral record. Same ESIGN basis as the client signature (name + timestamp).
+    Only a client-signed contract can be countersigned, and only once."""
+    d = get_contract(contract_id)
+    if d["status"] != "signed":
+        raise HTTPException(status_code=400, detail="only a client-signed contract can be countersigned")
+    if d["countersigned_at"]:
+        raise HTTPException(status_code=400, detail="already countersigned")
+    name = countersigner_name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="typed name required")
+    db.run("""UPDATE contracts SET countersigner_name=?, countersigned_at=datetime('now')
+              WHERE id=?""", (name, contract_id))
+    log.info("contract %s COUNTERSIGNED by %s", contract_id, name)
+    return RedirectResponse(f"/admin/studio/contracts/{contract_id}", status_code=303)
+
+
 @router.post("/contracts/{contract_id}/send")
 async def mark_contract_sent(contract_id: int):
     d = get_contract(contract_id)

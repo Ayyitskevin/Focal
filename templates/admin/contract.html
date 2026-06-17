@@ -28,6 +28,18 @@
   {% else %}
   {% if d.status == 'signed' %}
   <p class="doc-accepted">✓ Signed by {{ d.signer_name }} on {{ d.signed_at }} (IP {{ d.signer_ip }})</p>
+  {% if d.countersigned_at %}
+  <p class="doc-accepted">✓ Countersigned by {{ d.countersigner_name }} on {{ d.countersigned_at }}</p>
+  {% else %}
+  <form method="post" action="/admin/studio/contracts/{{ d.id }}/countersign"
+        class="stack-form" style="max-width:680px"
+        onsubmit="return confirm('Record your typed name as the studio countersignature? This completes the agreement as a bilateral record.')">
+    <label>Countersign as
+      <input type="text" name="countersigner_name" required
+             placeholder="Your full legal name"></label>
+    <button type="submit">Countersign (completes the agreement)</button>
+  </form>
+  {% endif %}
   {% else %}
   <p class="muted">Locked — awaiting client signature.</p>
   {% endif %}
