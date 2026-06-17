@@ -5,8 +5,9 @@
   <header class="doc-head">
     <p class="muted">{{ site_name }}</p>
     <h1>{{ d.title }}</h1>
-    <p class="muted">Billed to {{ d.client_name }}{% if d.company %} · {{ d.company }}{% endif %}
+    <p class="muted">Invoice #{{ d.id }}{% if d.created_at %} · issued {{ d.created_at[:10] }}{% endif %}
        {% if d.due_date %}· due {{ d.due_date }}{% endif %}</p>
+    <p class="muted">Billed to {{ d.client_name }}{% if d.company %} · {{ d.company }}{% endif %}</p>
   </header>
 
   <table class="list doc-items">
@@ -33,6 +34,8 @@
     <p>{{ d.terms }}</p>
   </section>
   {% endif %}
+
+  <p class="no-print"><button onclick="window.print()" class="link">Print / save as PDF</button></p>
 
   {% if d.status == 'paid' %}
   <p class="doc-accepted">✓ Paid in full {{ d.paid_at }} — thank you!</p>

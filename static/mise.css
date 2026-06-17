@@ -1861,6 +1861,30 @@ tr.inquiry-dismissed td:nth-child(2) { text-decoration: line-through; }
 .admin-shell .admin-brand .mark b {
   color: var(--terra); font-weight: 600;
 }
+.admin-shell .admin-nav-search { padding: .6rem .15rem .3rem; }
+.admin-shell .admin-nav-search input {
+  width: 100%; box-sizing: border-box; padding: .4rem .6rem;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--card); color: var(--ink); font: inherit; font-size: .85rem;
+}
+.admin-shell .search-page-form { display: flex; gap: .5rem; margin-bottom: 1.4rem; }
+.admin-shell .search-page-form input {
+  flex: 1; padding: .55rem .8rem; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--card); color: var(--ink); font: inherit;
+}
+.admin-shell .search-group { margin-bottom: 1.6rem; }
+.admin-shell .search-group h2 { font-size: 1rem; margin: 0 0 .5rem; }
+.admin-shell .search-hits {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.admin-shell .search-hits a {
+  display: flex; justify-content: space-between; gap: 1rem; align-items: baseline;
+  padding: .5rem .7rem; border: 1px solid var(--line); border-radius: 8px;
+  text-decoration: none; color: inherit; background: var(--card);
+}
+.admin-shell .search-hits a:hover { border-color: var(--terra); }
+.admin-shell .search-hit-meta { font-size: .82rem; text-align: right; flex-shrink: 0; }
 .admin-shell .admin-nav-group {
   display: flex; flex-direction: column; gap: 1px;
 }

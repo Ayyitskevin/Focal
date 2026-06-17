@@ -1085,6 +1085,39 @@ def test_reports_top_clients(admin):
     assert db.one("SELECT id FROM clients WHERE id=?", (c["id"],)) is None
 
 
+def test_admin_global_search(admin):
+    # The search box is the jump-to across the admin. It must find a client by
+    # business name and its project by title, and link straight to each. It must
+    # also escape LIKE wildcards in the query — a bare "%" must NOT match every
+    # record (that would make the box useless and leak the whole table).
+    admin.post("/admin/studio/clients",
+               data={"name": "Quinella Ostrowski", "company": "Zarzuela Cantina",
+                     "email": "q@zarzuela.test", "phone": ""},
+               follow_redirects=False)
+    c = db.one("SELECT * FROM clients ORDER BY id DESC LIMIT 1")
+    admin.post(f"/admin/studio/clients/{c['id']}/projects",
+               data={"title": "Zarzuela tasting menu shoot"}, follow_redirects=False)
+    p = db.one("SELECT * FROM projects ORDER BY id DESC LIMIT 1")
+
+    page = admin.get("/admin/search", params={"q": "zarzuela"}).text
+    assert "Zarzuela Cantina" in page
+    assert f"/admin/studio/clients/{c['id']}" in page
+    assert "Zarzuela tasting menu shoot" in page
+    assert f"/admin/studio/projects/{p['id']}" in page
+
+    # Nonsense query → no matches, not a 500.
+    miss = admin.get("/admin/search", params={"q": "qzxnomatchqzx"})
+    assert miss.status_code == 200 and "No matches" in miss.text
+
+    # Wildcard escape: "%" is a literal here, so the just-made client must NOT show.
+    wild = admin.get("/admin/search", params={"q": "%"}).text
+    assert "Zarzuela Cantina" not in wild
+
+    admin.post(f"/admin/studio/clients/{c['id']}/delete",
+               data={"force": "1"}, follow_redirects=False)
+    assert db.one("SELECT id FROM clients WHERE id=?", (c["id"],)) is None
+
+
 def test_testimonial_self_submit(admin):
     # A client must be able to write their own testimonial via a tokened /t/{slug}
     # link, and it MUST land unpublished — the marketing site only shows moderated

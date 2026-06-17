@@ -3,6 +3,10 @@
   <a class="admin-brand" href="/admin/home" aria-label="Kevin Lee — admin home">
     <span class="mark">Kevin <b>Lee</b></span>
   </a>
+  <form class="admin-nav-search" method="get" action="/admin/search" role="search">
+    <input type="search" name="q" value="{{ q if request.url.path == '/admin/search' else '' }}"
+           placeholder="Search…" aria-label="Search clients, projects, documents">
+  </form>
   <nav class="admin-nav-group" aria-label="Primary">
     <span class="admin-nav-label">Workspace</span>
     <a href="/admin/home" title="Home"{% if _p.startswith('/admin/home') %} class="is-active"{% endif %}><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg></span><span class="lbl">Home</span></a>

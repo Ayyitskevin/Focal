@@ -16,8 +16,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from . import config, db, jobs, ratelimit, scheduler, service_api
 from .admin import (activity, auth, contracts, doc_templates, email_templates,
                     emails, forms, galleries, invoices, licenses, presets, press,
-                    proposals, recurring, reference, reports, share, shotlist,
-                    studio, uploads)
+                    proposals, recurring, reference, reports, search, share,
+                    shotlist, studio, uploads)
 from .admin import scheduling as admin_scheduling
 from .public import docs, downloads, gallery, media, pay, portal, site, workspace
 from .public import forms as public_forms
@@ -93,7 +93,7 @@ for r in (auth.router, galleries.router, uploads.router, activity.router,
           studio.router, proposals.router, contracts.router, invoices.router,
           licenses.router, presets.router, press.router, recurring.router,
           reports.router, email_templates.router, doc_templates.router,
-          reference.router,
+          reference.router, search.router,
           shotlist.router, emails.router, share.router, forms.router,
           admin_scheduling.router,
           gallery.router, media.router,
