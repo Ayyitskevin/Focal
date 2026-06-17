@@ -57,6 +57,14 @@
         <td><strong>${{ "%.2f" % (d.total_cents / 100) }}</strong></td></tr>
   </table>
 
+  {% if d.status == 'accepted' %}
+  <form method="post" action="/admin/studio/proposals/{{ d.id }}/convert"
+        onsubmit="return confirm('Create a draft contract and draft invoice from this proposal? Both open as drafts for you to review before sending.')">
+    <button type="submit">Create contract + invoice from this proposal</button>
+    <span class="muted">Spawns drafts seeded from these line items — nothing is sent or charged.</span>
+  </form>
+  {% endif %}
+
   {% set email_action = "/admin/studio/proposals/" ~ d.id ~ "/email" %}
   {% set email_subject = "Proposal — " ~ d.title %}
   {% set email_intro = "Your proposal is ready to review and accept online:" %}

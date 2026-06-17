@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from .. import config, db, security
 from ..render import templates
+from .contracts import render_template
 from .studio import get_project
 
 log = logging.getLogger("mise.admin.proposals")
@@ -196,6 +197,29 @@ async def update_proposal(request: Request, proposal_id: int):
            ((form.get("title") or "").strip() or d["title"],
             (form.get("intro") or "").strip() or None, items_json, total, proposal_id))
     return RedirectResponse(f"/admin/studio/proposals/{proposal_id}", status_code=303)
+
+
+@router.post("/proposals/{proposal_id}/convert")
+async def convert_proposal(proposal_id: int):
+    """Once a client accepts, spawn the matching draft contract + draft invoice in
+    one click instead of rebuilding both by hand. Both are DRAFTS — Kevin still
+    reviews and hits Send/Issue (R16); nothing is sent or charged here. The invoice
+    copies this proposal's line items/total verbatim; the contract is the standard
+    body snapshot with the accepted total merged in (same logic as create_contract)."""
+    d = get_proposal(proposal_id)
+    if d["status"] != "accepted":
+        raise HTTPException(status_code=400,
+                            detail="only an accepted proposal can be converted")
+    p = get_project(d["project_id"])
+    cid = db.run("INSERT INTO contracts (project_id, slug, title, body) VALUES (?,?,?,?)",
+                 (p["id"], security.new_slug(),
+                  f"Services Agreement — {p['title']}", render_template(p)))
+    iid = db.run("""INSERT INTO invoices (project_id, slug, title, line_items, total_cents)
+                    VALUES (?,?,?,?,?)""",
+                 (p["id"], security.new_slug(), f"Invoice — {p['title']}",
+                  d["line_items"], d["total_cents"]))
+    log.info("proposal %s converted → contract %s + invoice %s", proposal_id, cid, iid)
+    return RedirectResponse(f"/admin/studio/projects/{p['id']}", status_code=303)
 
 
 @router.post("/proposals/{proposal_id}/send")

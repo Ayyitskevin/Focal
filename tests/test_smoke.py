@@ -1132,6 +1132,60 @@ def test_invoice_receipt(admin):
     assert db.one("SELECT id FROM clients WHERE id=?", (c["id"],)) is None
 
 
+def test_proposal_convert(admin):
+    # Once a client accepts a proposal, one click should spawn the matching draft
+    # contract + draft invoice instead of rebuilding both by hand. Both land as
+    # drafts (Kevin still reviews/sends — nothing is charged); the invoice copies
+    # the proposal's line items + total verbatim and the contract body carries the
+    # accepted total. A proposal that isn't accepted yet can't be converted.
+    admin.post("/admin/studio/clients",
+               data={"name": "Marco Reyes", "company": "Ember Room",
+                     "email": "marco@ember.test", "phone": ""},
+               follow_redirects=False)
+    c = db.one("SELECT * FROM clients ORDER BY id DESC LIMIT 1")
+    admin.post(f"/admin/studio/clients/{c['id']}/projects",
+               data={"title": "Dinner service shoot"}, follow_redirects=False)
+    p = db.one("SELECT * FROM projects ORDER BY id DESC LIMIT 1")
+    items = '[{"label": "Full-day shoot", "qty": 1, "unit_cents": 180000}]'
+    pid = db.run("""INSERT INTO proposals (project_id, slug, title, line_items,
+                                           total_cents, status, accepted_at)
+                    VALUES (?,?,?,?,?,?,datetime('now'))""",
+                 (p["id"], "conv-test", "Dinner proposal", items, 180000, "accepted"))
+
+    # the accepted proposal page offers the convert action
+    page = admin.get(f"/admin/studio/proposals/{pid}")
+    assert page.status_code == 200
+    assert f"/admin/studio/proposals/{pid}/convert" in page.text
+
+    r = admin.post(f"/admin/studio/proposals/{pid}/convert", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == f"/admin/studio/projects/{p['id']}"
+
+    ct = db.one("SELECT * FROM contracts WHERE project_id=? ORDER BY id DESC LIMIT 1",
+                (p["id"],))
+    inv = db.one("SELECT * FROM invoices WHERE project_id=? ORDER BY id DESC LIMIT 1",
+                 (p["id"],))
+    assert ct and ct["status"] == "draft"
+    assert "$1800.00" in ct["body"]  # accepted total merged into the contract body
+    assert inv and inv["status"] == "draft"
+    assert inv["total_cents"] == 180000 and inv["line_items"] == items
+
+    # a proposal that hasn't been accepted can't be converted
+    qid = db.run("""INSERT INTO proposals (project_id, slug, title, line_items,
+                                           total_cents, status)
+                    VALUES (?,?,?,?,?,?)""",
+                 (p["id"], "conv-draft", "Draft proposal", items, 180000, "sent"))
+    assert admin.post(f"/admin/studio/proposals/{qid}/convert",
+                      follow_redirects=False).status_code == 400
+
+    db.run("DELETE FROM contracts WHERE id=?", (ct["id"],))
+    db.run("DELETE FROM invoices WHERE id=?", (inv["id"],))
+    db.run("DELETE FROM proposals WHERE id IN (?,?)", (pid, qid))
+    admin.post(f"/admin/studio/clients/{c['id']}/delete",
+               data={"force": "1"}, follow_redirects=False)
+    assert db.one("SELECT id FROM clients WHERE id=?", (c["id"],)) is None
+
+
 def test_admin_global_search(admin):
     # The search box is the jump-to across the admin. It must find a client by
     # business name and its project by title, and link straight to each. It must
