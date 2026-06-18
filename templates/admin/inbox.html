@@ -1,0 +1,154 @@
+{% extends "admin/base_admin.html" %}
+{# Inbox — honest 1:1 of the Admin Inbox prototype. The mock is a two-way
+   SMS/email messenger; Mise has no SMS channel and email send is manual-only,
+   so this reads the REAL inquiries table in the prototype's 3-pane layout:
+   thread list · read-only inbound message (reply by email) · contact + the real
+   convert actions that already live in studio.py. No fake composer. #}
+{% block topbar %}{% endblock %}
+{% block admin_body %}
+<div class="ib">
+
+  {# ── PANE 1: threads ── #}
+  <div class="ib-threads">
+    <div class="ib-threads-head">
+      <div class="ib-threads-title">
+        <h1>Inbox</h1>
+      </div>
+      <div class="ib-tabs">
+        <a href="/admin/inbox?tab=all" class="ib-tab {{ 'is-active' if tab == 'all' }}">All
+          {% if counts.all %}<span class="ib-tab-n">{{ counts.all }}</span>{% endif %}</a>
+        <a href="/admin/inbox?tab=bookings" class="ib-tab {{ 'is-active' if tab == 'bookings' }}">Bookings
+          {% if counts.bookings %}<span class="ib-tab-n">{{ counts.bookings }}</span>{% endif %}</a>
+        <a href="/admin/inbox?tab=archived" class="ib-tab {{ 'is-active' if tab == 'archived' }}">Archived
+          {% if counts.archived %}<span class="ib-tab-n">{{ counts.archived }}</span>{% endif %}</a>
+      </div>
+    </div>
+    <div class="ib-thread-list">
+      {% for t in threads %}
+      <a href="/admin/inbox?tab={{ tab }}&sel={{ t.id }}" class="ib-row {{ 'is-active' if t.active }}">
+        <span class="ib-av-wrap">
+          <span class="ib-av" style="background: {{ t.av_bg }}; color: {{ t.av_color }};">{{ t.initials }}</span>
+          {% if t.unread %}<span class="ib-dot"></span>{% endif %}
+        </span>
+        <span class="ib-row-body">
+          <span class="ib-row-top">
+            <span class="ib-row-name">{{ t.name }}</span>
+            <span class="ib-row-time">{{ t.time | localtime }}</span>
+          </span>
+          <span class="ib-row-bot">
+            <span class="ib-chan" style="color: {{ t.ch_color }}; background: {{ t.ch_bg }};">{{ t.ch_label }}</span>
+            <span class="ib-preview {{ 'is-unread' if t.unread }}">{{ t.preview }}</span>
+          </span>
+        </span>
+      </a>
+      {% else %}
+      <div class="ib-empty-list">No messages in this view.</div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {# ── PANE 2: the inbound message (read-only, reply by email) ── #}
+  <div class="ib-convo">
+    {% if active %}
+    <div class="ib-convo-head">
+      <span class="ib-av" style="background: {{ active.av_bg }}; color: {{ active.av_color }};">{{ active.initials }}</span>
+      <div class="ib-convo-id">
+        <div class="ib-convo-name">
+          <h2>{{ active.name }}</h2>
+          <span class="ib-chan" style="color: {{ active.ch_color }}; background: {{ active.ch_bg }};">{{ active.ch_label }}</span>
+        </div>
+        <p class="ib-convo-sub">{{ active.sub }}</p>
+      </div>
+      <span class="ib-convo-when">received<br><b>{{ active.created_at | localtime }}</b></span>
+    </div>
+
+    <div class="ib-convo-body">
+      {% if active.message %}
+      <div class="ib-msg">
+        <div class="ib-bubble">{{ active.message }}</div>
+        <div class="ib-bubble-meta">{{ active.contact_name or active.name }} · {{ active.created_at | localtime }}</div>
+      </div>
+      {% else %}
+      <div class="ib-msg">
+        <div class="ib-bubble ib-bubble-empty">No message body — {{ active.ch_label | lower }} submitted with contact details only.</div>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="ib-reply">
+      {% if active.email %}
+      <a class="ib-reply-btn" href="mailto:{{ active.email }}?subject=Re%3A%20your%20inquiry%20%E2%80%94%20Kevin%20Lee%20Photography">
+        <span aria-hidden="true">✉</span> Reply by email
+      </a>
+      <span class="ib-reply-note">Email is sent from your mail client — Mise has no inbox send.</span>
+      {% else %}
+      <span class="ib-reply-note">No email on file — reply isn't available for this inquiry.</span>
+      {% endif %}
+    </div>
+    {% else %}
+    <div class="ib-blank">
+      <p>No inquiry selected.</p>
+    </div>
+    {% endif %}
+  </div>
+
+  {# ── PANE 3: contact + the real convert actions ── #}
+  {% if active %}
+  <div class="ib-context">
+    <div class="ib-ctx-id">
+      <span class="ib-av ib-av-lg" style="background: {{ active.av_bg }}; color: {{ active.av_color }};">{{ active.initials }}</span>
+      <h3>{{ active.name }}</h3>
+      {% if active.contact_name and active.contact_name != active.name %}
+      <p class="ib-ctx-contact">{{ active.contact_name }}</p>
+      {% endif %}
+    </div>
+
+    <div class="ib-ctx-stage">
+      <span class="ib-ctx-k">Stage</span>
+      <span class="ib-stage" style="color: {{ active.stage_color }}; background: {{ active.stage_bg }};">{{ active.stage }}</span>
+    </div>
+
+    <div class="ib-ctx-actions">
+      <span class="ib-ctx-label">Move it forward</span>
+      {% if active.is_converted %}
+        <a class="ib-act ib-act-primary"
+           href="{% if active.converted_project_id %}/admin/studio/projects/{{ active.converted_project_id }}{% elif active.converted_client_id %}/admin/studio/clients/{{ active.converted_client_id }}{% else %}/admin/studio{% endif %}">
+          <span aria-hidden="true">✦</span><span class="ib-act-t">Open converted record</span><span>→</span></a>
+        <form method="post" action="/admin/studio/inquiries/{{ active.id }}/unconvert">
+          <button class="ib-act" type="submit"><span aria-hidden="true">↩</span><span class="ib-act-t">Undo conversion</span></button>
+        </form>
+      {% elif active.is_dismissed %}
+        <form method="post" action="/admin/studio/inquiries/{{ active.id }}/undismiss">
+          <button class="ib-act ib-act-primary" type="submit"><span aria-hidden="true">↩</span><span class="ib-act-t">Restore to pipeline</span><span>→</span></button>
+        </form>
+      {% else %}
+        <form method="post" action="/admin/studio/inquiries/{{ active.id }}/quote">
+          <button class="ib-act ib-act-primary" type="submit"><span aria-hidden="true">$</span><span class="ib-act-t">Send a quick quote</span><span>→</span></button>
+        </form>
+        <form method="post" action="/admin/studio/inquiries/{{ active.id }}/client">
+          <button class="ib-act" type="submit"><span aria-hidden="true">⊞</span><span class="ib-act-t">Create client &amp; project</span></button>
+        </form>
+        <form method="post" action="/admin/studio/inquiries/{{ active.id }}/dismiss">
+          <button class="ib-act" type="submit"><span aria-hidden="true">✕</span><span class="ib-act-t">Dismiss</span></button>
+        </form>
+      {% endif %}
+    </div>
+
+    {% if active.details %}
+    <div class="ib-ctx-details">
+      <span class="ib-ctx-label">Details</span>
+      <div class="ib-ctx-rows">
+        {% for d in active.details %}
+        <div class="ib-ctx-row">
+          <span class="ib-ctx-rk">{{ d.k }}</span>
+          <span class="ib-ctx-rv">{{ d.v }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}
