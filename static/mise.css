@@ -3197,3 +3197,32 @@ tr.inquiry-dismissed td:nth-child(2) { text-decoration: line-through; }
 .admin-shell .dash-money-paid .lead,
 .admin-shell .dash-paid-row a { color: #a9c8b5; }
 .admin-shell .dash-money-paid { border-top-color: rgba(243, 234, 217, .14); }
+
+/* ===== FOREST + GOLD THEME — MARKETING SECTION 1 (public site → forest/gold; supersedes locked terracotta per Kevin 2026-06-18) ===== */
+/* ── 1. Base + marketing-site tokens ────────────────────────────────────── */
+:root { --accent: #1C4A3A; }
+
+.site-body, .cream-theme {
+  --accent:     #1C4A3A;   /* forest — links, ::selection, hero accents      */
+  --espresso:   #143C2F;   /* dark sections (delivery, footer, foot card)    */
+  --espresso2:  #1C4A3A;   /* nested dark panels                             */
+  --accent-lt:  #E0A43B;   /* gold — unchanged, now the sole bright accent   */
+  /* --cream / --bg / --line / --paper2 kept: warm paper still reads under green */
+}
+
+/* Marketing dark-section neutrals were bordeaux-tinted — re-tint to sage so
+   text on the new forest panels stays in-key. */
+.site-body .svc-foot-card p,
+.site-body .delivery-intro p,
+.site-body .proof-head span,
+.site-body .crop-btn,
+.site-body .crop-meta p,
+.site-body .site-footer,
+.site-body .footer-brand p,
+.site-body .footer-col a,
+.site-body .btn-ghost-dark { color: #a9c0b0; }
+.site-body .footer-col b { color: #84a08f; }
+.site-body .proof-panel,
+.site-body .crop-btn { border-color: #2c5142; }
+.site-body .proof-bar { background: #2c5142; }
+.site-body .btn-ghost-dark { border-bottom-color: #2f5a47; }
