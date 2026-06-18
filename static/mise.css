@@ -1813,7 +1813,7 @@ tr.inquiry-dismissed td:nth-child(2) { text-decoration: line-through; }
 
   
   --font-display: "Newsreader", Georgia, "Times New Roman", serif;
-  --font-ui: "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-ui: "Archivo", "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
 
   --nav-w: 244px;
   --content-max: 1180px;
@@ -3226,3 +3226,132 @@ tr.inquiry-dismissed td:nth-child(2) { text-decoration: line-through; }
 .site-body .crop-btn { border-color: #2c5142; }
 .site-body .proof-bar { background: #2c5142; }
 .site-body .btn-ghost-dark { border-bottom-color: #2f5a47; }
+
+/* ============================================================================
+   NS-* SHELL  —  1:1 recreation of the Claude Design "Admin Sidebar" prototype
+   ----------------------------------------------------------------------------
+   Honey-badger crest, gold "CRM" lockup, ⌘K command palette, animated active
+   indicator and a live status pulse. Layered on the existing forest .admin-nav
+   (forest_gold_theme §3) and the Mise responsive bands — desktop matches the
+   prototype 1:1; tablet/mobile keep their icon-rail / bar behaviour.
+   ========================================================================== */
+@keyframes miseBadgePulse { 0%,100% { box-shadow: 0 0 0 0 rgba(95,210,154,0); } 50% { box-shadow: 0 0 0 4px rgba(95,210,154,.22); } }
+@keyframes misePalIn { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes miseOverlayIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* ── Brand: crest + Kevin Lee + CRM badge ───────────────────────────────── */
+.admin-shell .ns-brand { display: flex; align-items: center; gap: 10px; }
+.admin-shell .ns-crest {
+  width: 32px; height: 32px; border-radius: 9px; background: #EDB23C; flex: none;
+  display: grid; place-items: center;
+  box-shadow: inset 0 0 0 1.5px rgba(20,60,47,.22);
+  transition: transform .3s cubic-bezier(.22,1.4,.4,1);
+}
+.admin-shell .ns-brand:hover .ns-crest { transform: rotate(-6deg) scale(1.06); }
+.admin-shell .ns-brandtext { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.admin-shell .ns-brand .mark { font-size: 1.3rem; border-bottom: 0; }
+.admin-shell .ns-crm {
+  font: 700 .55rem/1 var(--font-ui); letter-spacing: .14em; color: #EDB23C;
+  border: 1px solid rgba(237,178,60,.45); border-radius: 5px; padding: 3px 5px; flex: none;
+}
+
+/* ── ⌘K search button (replaces the old inline search field) ────────────── */
+.admin-shell .ns-cmd {
+  display: flex; align-items: center; gap: 9px; width: 100%; box-sizing: border-box;
+  height: 40px; padding: 0 10px; cursor: pointer;
+  background: #0f2f25; border: 1px solid #295142; border-radius: 10px;
+  color: #8fb09f; font: 600 .82rem/1 var(--font-ui);
+  transition: background .18s, border-color .18s, box-shadow .18s;
+}
+.admin-shell .ns-cmd:hover { background: #123a2d; border-color: #38624f; box-shadow: 0 0 0 3px rgba(237,178,60,.08); }
+.admin-shell .ns-cmd-ic { flex: none; display: grid; place-items: center; }
+.admin-shell .ns-cmd-txt { flex: 1; text-align: left; white-space: nowrap; }
+.admin-shell .ns-kbd {
+  flex: none; display: inline-flex; align-items: center; gap: 2px;
+  font: 700 .62rem/1 var(--font-ui); color: #6f9080;
+  background: #0b241b; border: 1px solid #295142; border-radius: 5px; padding: 4px 6px;
+}
+
+/* ── Animated active-indicator + item layering ──────────────────────────── */
+.admin-shell .ns-list { position: relative; }
+.admin-shell .ns-ind {
+  position: absolute; left: 0; right: 0; top: 0; height: 0; opacity: 0; z-index: 0;
+  border-radius: var(--r-sm); background: #1C4A3A; pointer-events: none;
+  transition: transform .32s cubic-bezier(.22,1,.36,1), height .32s cubic-bezier(.22,1,.36,1), opacity .2s ease;
+}
+.admin-shell .ns-list a { position: relative; z-index: 1; }
+/* Active item: indicator provides the fill — drop the standalone box, keep a
+   gold left-bar + light text (matches the prototype, robust if JS is off). */
+.admin-shell .ns-list a.is-active { background: transparent; border: 0; box-shadow: none; color: #F3F0E2; }
+.admin-shell .ns-list a.is-active::before {
+  content: ""; position: absolute; left: -10px; top: 50%; transform: translateY(-50%);
+  width: 4px; height: 20px; border-radius: 0 4px 4px 0; background: #EDB23C;
+}
+.admin-shell .ns-list a:hover { background: transparent; }
+
+/* ── Foot pulse (replaces the static dot) ───────────────────────────────── */
+.admin-shell .ns-pulse {
+  width: 8px; height: 8px; border-radius: 999px; flex: none;
+  background: #5fd29a; box-shadow: 0 0 8px #5fd29a;
+  animation: miseBadgePulse 3s ease-in-out infinite;
+}
+
+/* ── Command palette (⌘K overlay) ───────────────────────────────────────── */
+.ns-pal {
+  position: fixed; inset: 0; z-index: 200; display: none;
+  align-items: flex-start; justify-content: center; padding-top: 14vh;
+  background: rgba(11,28,21,.5); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+}
+.ns-pal.open { display: flex; animation: miseOverlayIn .18s ease; }
+.ns-pal-box {
+  width: min(560px, 92vw); background: #F7F5EC; border-radius: 16px; overflow: hidden;
+  border: 1px solid rgba(20,60,47,.1); box-shadow: 0 30px 80px -20px rgba(11,28,21,.6);
+  font-family: var(--font-ui); animation: misePalIn .22s cubic-bezier(.22,1,.36,1);
+}
+.ns-pal-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid #E6E2D2; }
+.ns-pal-input { flex: 1; border: 0; background: transparent; outline: none; font: 500 1rem var(--font-ui); color: #18241E; }
+.ns-pal-input::placeholder { color: #9aa39a; }
+.ns-pal-esc { font: 700 .6rem/1 var(--font-ui); color: #8A9183; background: #ECE8D8; border-radius: 5px; padding: 5px 7px; }
+.ns-pal-list { max-height: 46vh; overflow-y: auto; padding: 8px; }
+.ns-pal-group { font: 700 .6rem/1 var(--font-ui); letter-spacing: .14em; text-transform: uppercase; color: #A0A893; padding: 12px 12px 6px; }
+.ns-pal-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; text-decoration: none; color: #283A30; cursor: pointer; }
+.ns-pal-row:hover { text-decoration: none; }
+.ns-pal-row.sel { background: #143C2F; color: #F7F5EC; }
+.ns-pal-ic { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; flex: none; background: #ECE8D8; color: #3B5A48; font: 700 .8rem var(--font-display); }
+.ns-pal-row.sel .ns-pal-ic { background: #EDB23C; color: #143C2F; }
+.ns-pal-lab { flex: 1; font: 600 .9rem/1.2 var(--font-ui); }
+.ns-pal-sub { font: 600 .66rem/1 var(--font-ui); color: #9aa39a; text-transform: uppercase; letter-spacing: .08em; }
+.ns-pal-row.sel .ns-pal-sub { color: #cfe0d4; }
+.ns-pal-go { opacity: 0; font-size: .9rem; }
+.ns-pal-row.sel .ns-pal-go { opacity: 1; }
+.ns-pal-empty { padding: 28px 16px; text-align: center; color: #9aa39a; font: 500 .9rem var(--font-ui); }
+.ns-pal-foot { display: flex; align-items: center; gap: 16px; padding: 10px 16px; border-top: 1px solid #E6E2D2; font: 600 .68rem/1 var(--font-ui); color: #8A9183; }
+
+/* ── Item count badges (Inbox/Studio etc. — wired as those pages ship) ──── */
+.admin-shell .ns-badge { flex: none; font: 700 .62rem/1 var(--font-ui); padding: 3px 7px; border-radius: 999px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-shell .ns-ind, .admin-shell .ns-crest, .ns-pal-box { transition: none !important; animation: none !important; }
+  .admin-shell .ns-pulse { animation: none !important; }
+}
+
+/* ── NS-* responsive reconciliation with the existing collapse bands ─────── */
+/* Mobile bar (<=860px): nav is a horizontal scroller — collapse the ⌘K field
+   to an icon, drop the vertical indicator (it only makes sense in a column). */
+@media (max-width: 860px) {
+  .admin-shell .ns-cmd {
+    width: auto; flex: 0 0 auto; height: auto; padding: .4rem .55rem; gap: 0;
+  }
+  .admin-shell .ns-cmd-txt, .admin-shell .ns-kbd { display: none; }
+  .admin-shell .ns-ind { display: none; }
+  .admin-shell .ns-crm { display: none; }
+}
+/* Icon rail (861–1280px): 64px column — crest only, ⌘K as a centred icon. */
+@media (min-width: 861px) and (max-width: 1280px) {
+  .admin-shell .ns-brandtext { display: none; }
+  .admin-shell .ns-brand { justify-content: center; }
+  .admin-shell .ns-cmd {
+    width: auto; justify-content: center; padding: .5rem 0; gap: 0;
+  }
+  .admin-shell .ns-cmd-txt, .admin-shell .ns-kbd { display: none; }
+}

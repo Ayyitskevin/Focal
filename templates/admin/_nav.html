@@ -1,27 +1,184 @@
 {% set _p = request.url.path %}
-<aside class="admin-nav">
-  <a class="admin-brand" href="/admin/home" aria-label="Kevin Lee — admin home">
-    <span class="mark">Kevin <b>Lee</b></span>
+{# Shared admin sidebar — recreated 1:1 from the Claude Design "Admin Sidebar"
+   prototype: honey-badger crest, gold "CRM" lockup, ⌘K command palette, an
+   animated active-indicator and a live status pulse. The Mise class hooks
+   (.admin-nav / .admin-nav-label / a.is-active / .ico / .lbl) are kept so the
+   existing responsive bands (icon-rail 861–1280px, mobile bar <860px) still
+   work — the static prototype is desktop-only, this is the responsive superset.
+   Nav links point at live routes only; less-used pages (Templates, Reference,
+   Email templates, Search) live in the ⌘K palette so nothing is orphaned. #}
+<aside class="admin-nav ns-shell" aria-label="Primary">
+  <a class="admin-brand ns-brand" href="/admin/home" aria-label="Kevin Lee — admin home">
+    <span class="ns-crest" aria-hidden="true"><svg viewBox="0 0 32 32" width="26" height="26" fill="none"><circle cx="9.5" cy="11" r="2.4" fill="#17110c"/><circle cx="22.5" cy="11" r="2.4" fill="#17110c"/><path d="M16 7c5.2 0 8.4 3.6 8.4 8.6 0 5.4-3.8 9.6-8.4 9.6S7.6 21 7.6 15.6C7.6 10.6 10.8 7 16 7Z" fill="#17110c"/><path d="M12.7 9.8c-1.1 1.7-1.5 5.3-1 8.2l2.2-.4-.5-7.2Z" fill="#F7F1E1"/><path d="M19.3 9.8c1.1 1.7 1.5 5.3 1 8.2l-2.2-.4.5-7.2Z" fill="#F7F1E1"/><circle cx="13" cy="15.4" r="0.95" fill="#F7F1E1"/><circle cx="19" cy="15.4" r="0.95" fill="#F7F1E1"/><ellipse cx="16" cy="20.2" rx="2.1" ry="2.5" fill="#3a2a20"/><ellipse cx="16" cy="21" rx="0.95" ry="0.8" fill="#17110c"/></svg></span>
+    <span class="ns-brandtext"><span class="mark">Kevin <b>Lee</b></span><span class="ns-crm">CRM</span></span>
   </a>
-  <form class="admin-nav-search" method="get" action="/admin/search" role="search">
-    <input type="search" name="q" value="{{ q if request.url.path == '/admin/search' else '' }}"
-           placeholder="Search…" aria-label="Search clients, projects, documents">
-  </form>
-  <nav class="admin-nav-group" aria-label="Primary">
+  <button type="button" class="ns-cmd" id="ns-cmd-open" aria-haspopup="dialog" aria-label="Search — Command menu (Ctrl or ⌘ + K)">
+    <span class="ns-cmd-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></span>
+    <span class="ns-cmd-txt">Search…</span>
+    <span class="ns-kbd" aria-hidden="true">⌘K</span>
+  </button>
+  <nav class="admin-nav-group ns-list" id="ns-list" aria-label="Sections">
+    <span class="ns-ind" aria-hidden="true"></span>
     <span class="admin-nav-label">Workspace</span>
     <a href="/admin/home" title="Home"{% if _p.startswith('/admin/home') %} class="is-active"{% endif %}><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg></span><span class="lbl">Home</span></a>
     <a href="/admin/galleries" title="Galleries"{% if _p.startswith('/admin/galleries') %} class="is-active"{% endif %}><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="m4 19 5-5 3 3 4-4 4 4"/></svg></span><span class="lbl">Galleries</span></a>
-    <a href="/admin/transfers" title="Transfers"{% if _p.startswith('/admin/transfers') %} class="is-active"{% endif %}><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M5 20h14"/></svg></span><span class="lbl">Transfers</span></a>
     <a href="/admin/studio" title="Studio"{% if _p.startswith('/admin/studio') and not _p.startswith('/admin/studio/email-templates') %} class="is-active"{% endif %}><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M3 12h18"/></svg></span><span class="lbl">Studio</span></a>
     <a href="/admin/scheduling" title="Scheduling"{% if _p.startswith('/admin/scheduling') %} class="is-active"{% endif %}><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span class="lbl">Scheduling</span></a>
+    <a href="/admin/transfers" title="Transfers"{% if _p.startswith('/admin/transfers') %} class="is-active"{% endif %}><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M5 20h14"/></svg></span><span class="lbl">Transfers</span></a>
     <a href="/admin/calendar" title="Calendar"{% if _p.startswith('/admin/calendar') %} class="is-active"{% endif %}><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4"/></svg></span><span class="lbl">Calendar</span></a>
     <span class="admin-nav-label">Manage</span>
+    <a href="/admin/reports" title="Reports"{% if _p.startswith('/admin/reports') %} class="is-active"{% endif %}><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M6 21V11M11 21V5M16 21v-8"/></svg></span><span class="lbl">Reports</span></a>
     <a href="/admin/tasks" title="Tasks"{% if _p.startswith('/admin/tasks') %} class="is-active"{% endif %}><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="m8 12 3 3 5-6"/></svg></span><span class="lbl">Tasks</span></a>
     <a href="/admin/forms" title="Forms"{% if _p.startswith('/admin/forms') %} class="is-active"{% endif %}><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v2H9z"/><path d="M9 11h6M9 15h4"/></svg></span><span class="lbl">Forms</span></a>
-    <a href="/admin/templates" title="Templates"{% if _p.startswith('/admin/templates') %} class="is-active"{% endif %}><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 4.5-9 4.5-9-4.5z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg></span><span class="lbl">Templates</span></a>
-    <a href="/admin/reference" title="Reference"{% if _p.startswith('/admin/reference') %} class="is-active"{% endif %}><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h13v18H6a2 2 0 0 1-2-2z"/><path d="M8 3v16"/></svg></span><span class="lbl">Reference</span></a>
-    <a href="/admin/studio/email-templates" title="Email templates"{% if _p.startswith('/admin/studio/email-templates') %} class="is-active"{% endif %}><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></span><span class="lbl">Email templates</span></a>
-    <a href="/admin/reports" title="Reports"{% if _p.startswith('/admin/reports') %} class="is-active"{% endif %}><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M6 21V11M11 21V5M16 21v-8"/></svg></span><span class="lbl">Reports</span></a>
   </nav>
-  <div class="admin-nav-foot"><span class="dot"></span> <span class="lbl">Self-hosted · synced</span></div>
+  <div class="admin-nav-foot ns-foot"><span class="ns-pulse" aria-hidden="true"></span> <span class="lbl">Self-hosted · synced</span></div>
 </aside>
+
+{# ── Command palette (⌘K) — overlay, lives once per page ──────────────────── #}
+<div class="ns-pal" id="ns-pal" role="presentation" hidden>
+  <div class="ns-pal-box" role="dialog" aria-modal="true" aria-label="Command menu">
+    <div class="ns-pal-head">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#3B5A48" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <input class="ns-pal-input" id="ns-pal-input" type="text" autocomplete="off" spellcheck="false" placeholder="Jump to a page or run an action…" aria-label="Search pages and actions">
+      <span class="ns-pal-esc">ESC</span>
+    </div>
+    <div class="ns-pal-list" id="ns-pal-list"></div>
+    <div class="ns-pal-foot"><span>↑↓ Navigate</span><span>↵ Open</span><span>esc Close</span></div>
+  </div>
+</div>
+<script>
+(function () {
+  "use strict";
+  var CMDS = [
+    { label: "Home",            group: "Workspace", href: "/admin/home",                  glyph: "H", kw: "home dashboard overview today" },
+    { label: "Galleries",       group: "Workspace", href: "/admin/galleries",             glyph: "G", kw: "galleries gallery deliver photos proof pixieset" },
+    { label: "Studio",          group: "Workspace", href: "/admin/studio",                glyph: "S", kw: "studio projects board pipeline jobs clients invoices" },
+    { label: "Scheduling",      group: "Workspace", href: "/admin/scheduling",            glyph: "C", kw: "scheduling booking shoot session calendly" },
+    { label: "Transfers",       group: "Workspace", href: "/admin/transfers",             glyph: "T", kw: "transfers upload files send wetransfer" },
+    { label: "Calendar",        group: "Workspace", href: "/admin/calendar",              glyph: "M", kw: "calendar month agenda" },
+    { label: "Reports",         group: "Manage",    href: "/admin/reports",               glyph: "R", kw: "reports analytics revenue metrics" },
+    { label: "Tasks",           group: "Manage",    href: "/admin/tasks",                 glyph: "K", kw: "tasks todo checklist" },
+    { label: "Forms",           group: "Manage",    href: "/admin/forms",                 glyph: "O", kw: "forms intake questionnaire booking submissions" },
+    { label: "Templates",       group: "Manage",    href: "/admin/templates",             glyph: "L", kw: "templates library proposal contract email gallery" },
+    { label: "Email templates", group: "Manage",    href: "/admin/studio/email-templates", glyph: "E", kw: "email templates merge fields send" },
+    { label: "Reference",       group: "Manage",    href: "/admin/reference",             glyph: "B", kw: "reference playbook docs notes" },
+    { label: "Search everything", group: "Action",  href: "/admin/search",                glyph: "?", kw: "search find clients projects documents global" },
+    { label: "New gallery",     group: "Action",    href: "/admin/galleries",             glyph: "+", kw: "new gallery create upload deliver" },
+    { label: "New transfer",    group: "Action",    href: "/admin/transfers",             glyph: "+", kw: "new transfer send files" },
+    { label: "New form",        group: "Action",    href: "/admin/forms",                 glyph: "+", kw: "new form create intake questionnaire" }
+  ];
+
+  var pal = document.getElementById("ns-pal");
+  var input = document.getElementById("ns-pal-input");
+  var list = document.getElementById("ns-pal-list");
+  var openBtn = document.getElementById("ns-cmd-open");
+  if (!pal || !input || !list) return;
+
+  var open = false, sel = 0, rows = [];
+
+  function recent() {
+    try { var r = JSON.parse(localStorage.getItem("miseRecent")); return Array.isArray(r) ? r : []; }
+    catch (e) { return []; }
+  }
+  function remember(href) {
+    var r = [href].concat(recent().filter(function (h) { return h !== href; })).slice(0, 4);
+    try { localStorage.setItem("miseRecent", JSON.stringify(r)); } catch (e) {}
+  }
+  function esc(s) { return s.replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+
+  function visible() {
+    var q = input.value.trim().toLowerCase();
+    if (q) {
+      return CMDS.filter(function (c) {
+        return (c.label + " " + c.kw + " " + c.group).toLowerCase().indexOf(q) !== -1;
+      });
+    }
+    var rec = recent()
+      .map(function (h) { return CMDS.filter(function (c) { return c.group !== "Action" && c.href === h; })[0]; })
+      .filter(Boolean)
+      .slice(0, 4)
+      .map(function (c) { var o = {}; for (var k in c) o[k] = c[k]; o.group = "Recent"; return o; });
+    return rec.concat(CMDS);
+  }
+
+  function render() {
+    rows = visible();
+    if (sel >= rows.length) sel = Math.max(0, rows.length - 1);
+    if (!rows.length) {
+      list.innerHTML = '<div class="ns-pal-empty">No matches for &ldquo;' + esc(input.value) + '&rdquo;</div>';
+      return;
+    }
+    var html = "", lastGroup = null;
+    rows.forEach(function (c, i) {
+      if (c.group !== lastGroup) { html += '<div class="ns-pal-group">' + esc(c.group) + "</div>"; lastGroup = c.group; }
+      html += '<a href="' + esc(c.href) + '" class="ns-pal-row' + (i === sel ? " sel" : "") + '" data-i="' + i + '">' +
+              '<span class="ns-pal-ic">' + esc(c.glyph) + "</span>" +
+              '<span class="ns-pal-lab">' + esc(c.label) + "</span>" +
+              '<span class="ns-pal-sub">' + esc(c.group) + "</span>" +
+              '<span class="ns-pal-go">↵</span></a>';
+    });
+    list.innerHTML = html;
+  }
+
+  function scrollSel() {
+    var el = list.querySelector(".ns-pal-row.sel");
+    if (!el) return;
+    var lt = list.scrollTop, lb = lt + list.clientHeight, et = el.offsetTop, eb = et + el.offsetHeight;
+    if (et < lt) list.scrollTop = Math.max(0, et - 8);
+    else if (eb > lb) list.scrollTop = eb - list.clientHeight + 8;
+  }
+
+  function show() {
+    open = true; sel = 0; input.value = ""; pal.hidden = false;
+    pal.classList.add("open"); render();
+    setTimeout(function () { input.focus(); }, 40);
+  }
+  function hide() { open = false; pal.classList.remove("open"); pal.hidden = true; }
+
+  if (openBtn) openBtn.addEventListener("click", show);
+  pal.addEventListener("click", function (e) { if (e.target === pal) hide(); });
+  input.addEventListener("input", function () { sel = 0; render(); });
+  list.addEventListener("mousemove", function (e) {
+    var row = e.target.closest(".ns-pal-row"); if (!row) return;
+    var i = parseInt(row.getAttribute("data-i"), 10);
+    if (!isNaN(i) && i !== sel) { sel = i; render(); }
+  });
+  list.addEventListener("click", function (e) {
+    var row = e.target.closest(".ns-pal-row"); if (row) remember(row.getAttribute("href"));
+  });
+
+  document.addEventListener("keydown", function (e) {
+    if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+      e.preventDefault(); open ? hide() : show(); return;
+    }
+    if (!open) return;
+    if (e.key === "Escape") { e.preventDefault(); hide(); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); sel = Math.min(sel + 1, rows.length - 1); render(); scrollSel(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); sel = Math.max(sel - 1, 0); render(); scrollSel(); }
+    else if (e.key === "Enter") {
+      e.preventDefault();
+      var t = rows[sel];
+      if (t) { remember(t.href); window.location.href = t.href; }
+    }
+  });
+
+  /* Animated active-indicator: slides to the active item, follows hover. */
+  var nav = document.getElementById("ns-list");
+  var ind = nav ? nav.querySelector(".ns-ind") : null;
+  if (nav && ind) {
+    var place = function (el) {
+      if (!el) { ind.style.opacity = "0"; return; }
+      ind.style.transform = "translateY(" + el.offsetTop + "px)";
+      ind.style.height = el.offsetHeight + "px";
+      ind.style.opacity = "1";
+    };
+    var activeEl = function () { return nav.querySelector("a.is-active"); };
+    nav.querySelectorAll("a").forEach(function (a) {
+      a.addEventListener("mouseenter", function () { place(a); });
+    });
+    nav.addEventListener("mouseleave", function () { place(activeEl()); });
+    requestAnimationFrame(function () { place(activeEl()); });
+    window.addEventListener("resize", function () { place(activeEl()); });
+  }
+})();
+</script>
