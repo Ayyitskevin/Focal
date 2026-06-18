@@ -6494,3 +6494,54 @@ def test_shots_read_api(admin):
         assert admin.get("/api/shots?session=", headers=bearer).status_code == 400
     finally:
         config.SHOTS_TOKEN = saved
+
+
+def test_inbox_reply_sends_logs_and_marks_emailed(admin):
+    """Inbox reply: manual Gmail send → emails_log row → inquiry marked emailed.
+
+    The send is the whole point (a real reply, not a mailto bounce), so we assert
+    the mailer was called with the inquiry's address and that the audit row +
+    unread-clearing flag both land. mailer.send is patched so no SMTP happens."""
+    from unittest import mock
+    from app import mailer
+
+    iid = db.run("INSERT INTO inquiries (name, email, business, message, kind) "
+                 "VALUES (?,?,?,?,?)",
+                 ("Ana Diaz", "ana@bistro.test", "Bistro Verde",
+                  "Need a full menu shoot in July.", "contact"))
+
+    with mock.patch.object(mailer, "configured", return_value=True), \
+         mock.patch.object(mailer, "send") as send:
+        r = admin.post(f"/admin/inbox/{iid}/reply",
+                       data={"tab": "all", "subject": "Re: your inquiry",
+                             "message": "Hi Ana — happy to help, sending a quote."},
+                       follow_redirects=False)
+
+    assert r.status_code == 303
+    assert r.headers["location"] == f"/admin/inbox?tab=all&sel={iid}"
+    send.assert_called_once()
+    to, subject, body = send.call_args.args[:3]
+    assert to == "ana@bistro.test"
+    assert "happy to help" in body
+    assert db.one("SELECT emailed FROM inquiries WHERE id=?", (iid,))["emailed"] == 1
+    logged = db.one("SELECT doc_kind, doc_id, to_email FROM emails_log "
+                    "WHERE to_email='ana@bistro.test'")
+    assert logged is not None
+    assert logged["doc_kind"] == "other" and logged["doc_id"] == iid
+
+
+def test_inbox_reply_blocked_without_email(admin):
+    """An inquiry with no email address can't be replied to — 400, no send."""
+    from unittest import mock
+    from app import mailer
+
+    iid = db.run("INSERT INTO inquiries (name, email, business, message, kind) "
+                 "VALUES (?,?,?,?,?)", ("No Email", "", "Ghost Cafe", "hi", "contact"))
+    # email is NOT NULL in schema; an empty string is the realistic "missing" case
+    with mock.patch.object(mailer, "configured", return_value=True), \
+         mock.patch.object(mailer, "send") as send:
+        r = admin.post(f"/admin/inbox/{iid}/reply",
+                       data={"subject": "Re", "message": "x"},
+                       follow_redirects=False)
+    assert r.status_code == 400
+    send.assert_not_called()

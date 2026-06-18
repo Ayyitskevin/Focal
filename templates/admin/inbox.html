@@ -76,13 +76,26 @@
     </div>
 
     <div class="ib-reply">
-      {% if active.email %}
-      <a class="ib-reply-btn" href="mailto:{{ active.email }}?subject=Re%3A%20your%20inquiry%20%E2%80%94%20Kevin%20Lee%20Photography">
+      {% if not active.email %}
+      <span class="ib-reply-note">No email on file — reply isn't available for this inquiry.</span>
+      {% elif not mail_configured %}
+      <a class="ib-reply-btn" href="mailto:{{ active.email }}?subject={{ active.reply_subject|urlencode }}">
         <span aria-hidden="true">✉</span> Reply by email
       </a>
-      <span class="ib-reply-note">Email is sent from your mail client — Mise has no inbox send.</span>
+      <span class="ib-reply-note">Mail isn't configured — this opens your mail client instead.</span>
       {% else %}
-      <span class="ib-reply-note">No email on file — reply isn't available for this inquiry.</span>
+      <form method="post" action="/admin/inbox/{{ active.id }}/reply" class="ib-reply-form">
+        <input type="hidden" name="tab" value="{{ tab }}">
+        {% if active.is_replied %}<p class="ib-reply-sent">✓ You've replied to this inquiry — send another below.</p>{% endif %}
+        <label class="ib-reply-to">To <b>{{ active.email }}</b></label>
+        <input class="ib-reply-subj" type="text" name="subject" value="{{ active.reply_subject }}" required>
+        <textarea class="ib-reply-msg" name="message" rows="5" required
+                  placeholder="Write your reply…&#10;&#10;Sends from {{ site_name }} via Gmail — logged in Sent."></textarea>
+        <div class="ib-reply-foot">
+          <span class="ib-reply-note">Sends now from your Gmail · logged in Sent</span>
+          <button class="ib-reply-send" type="submit"><span aria-hidden="true">✉</span> Send reply</button>
+        </div>
+      </form>
       {% endif %}
     </div>
     {% else %}

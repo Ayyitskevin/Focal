@@ -10,10 +10,10 @@ dismiss) that already live in studio.py. No fake composer, no invented channel.
 
 import logging
 
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 
-from .. import db, security
+from .. import config, db, mailer, security
 from ..render import templates
 
 log = logging.getLogger("mise.admin.inbox")
@@ -70,6 +70,11 @@ def _thread_row(inq, active_id):
     }
 
 
+def _reply_subject(inq) -> str:
+    kind = "booking request" if inq["kind"] == "booking" else "inquiry"
+    return f"Re: your {kind} — {config.SITE_NAME}"
+
+
 def _detail_rows(inq) -> list[dict]:
     rows = []
     if inq["email"]:
@@ -96,6 +101,8 @@ def _active_ctx(inq) -> dict:
         "converted_client_id": inq["converted_client_id"],
         "is_converted": bool(inq["converted_at"]),
         "is_dismissed": bool(inq["dismissed_at"]),
+        "is_replied": bool(inq["emailed"]),
+        "reply_subject": _reply_subject(inq),
         "sub": (inq["email"] or "") + (" · booking request" if inq["kind"] == "booking" else ""),
         "details": _detail_rows(inq),
         **_channel(inq), **_stage(inq),
@@ -135,4 +142,38 @@ async def inbox(request: Request, tab: str = "all", sel: int | None = None):
         "tab": tab, "counts": counts,
         "threads": [_thread_row(r, active["id"] if active else None) for r in rows],
         "active": active,
+        "mail_configured": mailer.configured(),
     })
+
+
+@router.post("/{inquiry_id}/reply")
+async def reply(inquiry_id: int, tab: str = Form("all"),
+                subject: str = Form(...), message: str = Form(...)):
+    """Reply to an inquiry from inside Mise — manual Gmail SMTP send, logged.
+
+    Mirrors app.admin.emails: Kevin clicks Send, nothing auto-sends. The send is
+    recorded in emails_log (doc_kind='other') and the inquiry is marked emailed so
+    the unread dot clears and the thread shows as replied."""
+    inq = db.one("SELECT * FROM inquiries WHERE id=?", (inquiry_id,))
+    if not inq:
+        raise HTTPException(status_code=404)
+    if not inq["email"]:
+        raise HTTPException(status_code=400, detail="no email on file for this inquiry")
+    if not mailer.configured():
+        raise HTTPException(status_code=503, detail="email is not configured")
+    subject, message = subject.strip(), message.strip()
+    if not subject or not message:
+        raise HTTPException(status_code=400, detail="subject and message required")
+    try:
+        mailer.send(inq["email"], subject, message)
+    except Exception:
+        log.exception("inbox reply send failed for inquiry %s", inquiry_id)
+        raise HTTPException(status_code=502, detail="SMTP send failed — check logs")
+    db.run("""INSERT INTO emails_log (project_id, doc_kind, doc_id, to_email, subject)
+              VALUES (?, 'other', ?, ?, ?)""",
+           (inq["converted_project_id"], inquiry_id, inq["email"], subject))
+    db.run("UPDATE inquiries SET emailed=1 WHERE id=?", (inquiry_id,))
+    log.info("inbox reply sent for inquiry %s", inquiry_id)
+    if tab not in _TABS:
+        tab = "all"
+    return RedirectResponse(f"/admin/inbox?tab={tab}&sel={inquiry_id}", status_code=303)

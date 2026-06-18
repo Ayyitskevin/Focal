@@ -3606,6 +3606,28 @@ tr.inquiry-dismissed td:nth-child(2) { text-decoration: line-through; }
 }
 .admin-shell .ib-reply-btn:hover { text-decoration: none; background: var(--terra); }
 .admin-shell .ib-reply-note { font-size: .74rem; color: var(--ink-faint); }
+/* in-Mise reply composer (Gmail SMTP send) */
+.admin-shell .ib-reply-form { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+.admin-shell .ib-reply-sent {
+  margin: 0 0 2px; font-size: .76rem; font-weight: 600; color: #2f7d57;
+}
+.admin-shell .ib-reply-to { font-size: .74rem; color: var(--ink-faint); }
+.admin-shell .ib-reply-to b { color: var(--ink); font-weight: 600; }
+.admin-shell .ib-reply-subj,
+.admin-shell .ib-reply-msg {
+  width: 100%; padding: .6em .75em; border: 1px solid var(--line);
+  border-radius: 9px; background: var(--card); color: var(--ink);
+  font: inherit; font-size: .86rem; resize: vertical;
+}
+.admin-shell .ib-reply-subj:focus,
+.admin-shell .ib-reply-msg:focus { outline: none; border-color: var(--terra-deep); }
+.admin-shell .ib-reply-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.admin-shell .ib-reply-send {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: .6em 1.25em; background: var(--terra-deep); color: #F3F0E2;
+  border: 0; border-radius: 999px; font-size: .84rem; font-weight: 600; cursor: pointer;
+}
+.admin-shell .ib-reply-send:hover { background: var(--terra); }
 .admin-shell .ib-blank { flex: 1; display: grid; place-items: center; color: var(--ink-faint); }
 
 /* Pane 3 — context + convert */
