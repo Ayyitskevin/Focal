@@ -2981,7 +2981,7 @@ tr.inquiry-dismissed td:nth-child(2) { text-decoration: line-through; }
 }
 .admin-shell .pgtop-sub b { color: var(--ink); font-weight: 700; }
 .admin-shell .pgtop-sub .pos { color: var(--ok); }
-.admin-shell .pgtop-sub a.neg { color: var(--clay); font-weight: 700; text-decoration: none; }
+.admin-shell .pgtop-sub .neg { color: var(--clay); font-weight: 700; text-decoration: none; }
 .admin-shell .pgtop-sub a.neg:hover { text-decoration: underline; text-underline-offset: 2px; }
 .admin-shell .pgtop-actions { display: flex; align-items: center; gap: .75rem; margin-left: auto; }
 .admin-shell .pgtop-link {
