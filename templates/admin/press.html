@@ -1,18 +1,29 @@
 {% extends "admin/base_admin.html" %}
 {% block title %}Press · Studio · Mise{% endblock %}
+{% block topbar %}
+<header class="admin-topbar pgtop">
+  <div class="pgtop-lead">
+    <h1>Press</h1>
+    <p class="pgtop-sub">
+      {% if press %}<b>{{ press|length }}</b> hit{{ "s" if press|length != 1 }} ·
+        <b>{{ press|selectattr("publish_date")|list|length }}</b> published
+      {% else %}Evidenced record behind a license's published state{% endif %}
+    </p>
+  </div>
+  <div class="pgtop-actions">
+    <a class="pgtop-link" href="/admin/studio">&larr; Studio</a>
+    <a class="pgtop-new" href="#log-hit"><span class="qc-plus" aria-hidden="true">+</span> Log a hit</a>
+  </div>
+</header>
+{% endblock %}
 {% block admin_body %}
 <main class="admin-main">
-  <div class="admin-bar">
-    <h1><a href="/admin/studio">&larr;</a> Press</h1>
-    <nav><a href="/admin/galleries">Galleries</a> · <a href="/admin/studio">Studio</a></nav>
-  </div>
-
   <p class="muted">Where Kevin's F&amp;B work ran in the real world — the evidenced
     record behind a license's "published" state. A <strong>publish date</strong>
     marks it published; leave it blank for a piece that's expected but not out yet.
     Link a client / project / gallery so the publication can back a usage license.</p>
 
-  <h2>Log a press hit</h2>
+  <h2 id="log-hit">Log a press hit</h2>
   <form method="post" action="/admin/studio/press" class="stack-form">
     <label>Outlet <input type="text" name="outlet" required
            placeholder="Garden &amp; Gun"></label>
