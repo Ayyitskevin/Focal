@@ -1,19 +1,23 @@
 {% extends "admin/base_admin.html" %}
 {% block title %}Galleries · Mise{% endblock %}
+{% block topbar %}
+<header class="admin-topbar pgtop">
+  <div class="pgtop-lead">
+    <h1>Galleries</h1>
+    <p class="pgtop-sub">
+      <b>{{ totals.n }}</b> galler{{ "ies" if totals.n != 1 else "y" }} ·
+      {{ totals.size }} · {{ totals.published }} live · {{ totals.assets }} photos
+      {% if failed_jobs %}· <a class="neg" href="/admin/jobs">{{ failed_jobs }} job{{ "s" if failed_jobs != 1 }} failed</a>{% endif %}
+    </p>
+  </div>
+  <div class="pgtop-actions">
+    <a class="pgtop-new" href="#new-gallery"><span class="qc-plus" aria-hidden="true">+</span> New gallery</a>
+  </div>
+</header>
+{% endblock %}
 {% block admin_body %}
 <main class="admin-main">
-  <div class="admin-bar">
-    <h1>Galleries</h1>
-    <nav>
-      <a href="/admin/today">Today</a> ·
-      <a href="/admin/emails">Emails</a> ·
-      <a href="/admin/sent">Sent</a> ·
-      <a href="/admin/jobs">Jobs{% if failed_jobs %} <span class="warn">({{ failed_jobs }} failed)</span>{% endif %}</a> ·
-      <a href="/admin/share">Share</a></nav>
-    <form method="post" action="/admin/logout"><button class="link">Sign out</button></form>
-  </div>
-
-  <form method="post" action="/admin/galleries" class="inline-form">
+  <form id="new-gallery" method="post" action="/admin/galleries" class="inline-form">
     <input type="text" name="title" placeholder="Gallery title" required>
     <input type="text" name="client_name" placeholder="Client (optional)">
     <button type="submit">Create gallery</button>
@@ -50,12 +54,9 @@
 
   {% if galleries %}
   <div class="gal-summary" aria-label="Library summary">
-    <span class="gal-sum"><strong>{{ totals.n }}</strong> collection{{ "s" if totals.n != 1 }}</span>
     <span class="gal-sum muted">{{ totals.published }} published · {{ totals.draft }} draft{% if totals.expired %} · <span class="warn">{{ totals.expired }} expired</span>{% endif %}</span>
-    <span class="gal-sum"><strong>{{ totals.assets }}</strong> assets</span>
     <span class="gal-sum"><strong>{{ totals.fav }}</strong> &#9829; favorites</span>
     <span class="gal-sum"><strong>{{ totals.dl }}</strong> &#8595; downloads</span>
-    <span class="gal-sum muted">{{ totals.size }} stored</span>
   </div>
 
   <div class="studio-toolbar" role="search">

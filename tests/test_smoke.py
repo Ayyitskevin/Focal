@@ -2708,8 +2708,10 @@ def test_jobs_admin_view(admin):
     jid = db.run("INSERT INTO jobs (kind, payload, status, attempts, error) VALUES "
                  "('social_crops', '{\"asset_id\": 999999}', 'failed', 3, 'boom')")
 
-    # dashboard badge + jobs page surface the failure (R14: no silent failures)
-    assert "failed)" in admin.get("/admin/galleries").text
+    # dashboard badge + jobs page surface the failure (R14: no silent failures).
+    # The 1:1 reskin moved the badge from the old nav strip into the Galleries
+    # topbar subtitle as an oxblood warning linking to /admin/jobs.
+    assert "1 job failed" in admin.get("/admin/galleries").text
     page = admin.get("/admin/jobs")
     assert page.status_code == 200
     assert "social_crops" in page.text and "boom" in page.text
@@ -2820,8 +2822,9 @@ def test_share_debugger(admin):
     # URLs are url-encoded so colons + slashes survive the inspector links
     assert "https%3A" in r.text or "http%3A" in r.text
 
-    # nav link from the dashboard
-    assert 'href="/admin/share"' in admin.get("/admin/galleries").text
+    # the 1:1 reskin dropped the old Galleries nav strip; Share is now reached
+    # from any admin page via the ⌘K command palette (a JS-built CMDS entry).
+    assert '"/admin/share"' in admin.get("/admin/galleries").text
 
     # publish a case study and confirm it appears with its specific OG values
     g = db.one("SELECT * FROM galleries ORDER BY id LIMIT 1")
