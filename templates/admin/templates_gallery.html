@@ -1,12 +1,18 @@
 {% extends "admin/base_admin.html" %}
 {% block title %}Templates · Mise{% endblock %}
+{% block topbar %}
+<header class="admin-topbar pgtop">
+  <div class="pgtop-lead">
+    <h1>Templates</h1>
+    <p class="pgtop-sub">Ready-made client documents — pick one, populate a draft</p>
+  </div>
+  <div class="pgtop-actions">
+    <a class="pgtop-link" href="/admin/forms">Forms <span aria-hidden="true">&rarr;</span></a>
+  </div>
+</header>
+{% endblock %}
 {% block admin_body %}
 <main class="admin-main">
-  <div class="admin-bar">
-    <h1>Templates</h1>
-    <nav><a href="/admin/studio">Studio</a> · <a href="/admin/forms">Forms</a></nav>
-  </div>
-
   <p class="muted">Your ready-made client documents. Pick one, choose the project,
     and it opens a populated draft you can adjust before sending. Nothing goes out
     automatically — every document still has its own Send button.</p>
