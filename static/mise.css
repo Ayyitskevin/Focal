@@ -2915,7 +2915,7 @@ tr.inquiry-dismissed td:nth-child(2) { text-decoration: line-through; }
   --dash-planning:  #4f7a72;  /* teal-sage  */
   --dash-closed:    #3b2a1e;  /* espresso   */
   --dash-archived:  #b6ab9b;  /* ghost      */
-  --dash-gold:      #d99a32;  /* live gold accent on dark money panel */
+  --dash-gold:      #E0A43B;  /* live gold accent on dark money panel (matches public --accent-lt) */
 }
 
 /* Lift the content cap a touch — the dashboard wants two real columns. */
@@ -3148,11 +3148,11 @@ tr.inquiry-dismissed td:nth-child(2) { text-decoration: line-through; }
 /* ===== FOREST + GOLD THEME — ADMIN ONLY (marketing section 1 intentionally held; public brand is locked candlelit-terracotta) ===== */
 /* ── 2. Admin shell tokens ──────────────────────────────────────────────── */
 .admin-shell {
-  --terra:        #20614a;   /* forest accent — links, focus rings           */
+  --terra:        #1C4A3A;   /* forest accent — links, focus rings (matches public --accent) */
   --terra-deep:   #143C2F;   /* hover / pressed                              */
   --terra-tint:   #e7efe9;   /* tinted fills (avatars, chips, menu hover)    */
   --terra-tint-2: #cfe0d4;   /* deeper tint                                  */
-  --gold:         #C8902F;   /* bright accent on cream                       */
+  --gold:         #E0A43B;   /* gold — matches public --accent-lt            */
   --clay:         #7C2F38;   /* alerts / danger / overdue → oxblood          */
   --clay-bg:      #f3e3e5;
   --clay-line:    #e2c2c7;
@@ -3184,7 +3184,7 @@ tr.inquiry-dismissed td:nth-child(2) { text-decoration: line-through; }
 }
 .admin-shell .admin-brand { border-bottom-color: rgba(243, 240, 226, .14); }
 .admin-shell .admin-brand .mark { color: #f3f0e2; }
-.admin-shell .admin-brand .mark b { color: #EDB23C; }   /* gold */
+.admin-shell .admin-brand .mark b { color: #E0A43B; }   /* gold */
 .admin-shell .admin-nav-search input {
   background: rgba(255, 255, 255, .06);
   border-color: rgba(243, 240, 226, .16);
@@ -3201,7 +3201,7 @@ tr.inquiry-dismissed td:nth-child(2) { text-decoration: line-through; }
   box-shadow: none;
 }
 .admin-shell .admin-nav a .ico { color: #8aa595; }
-.admin-shell .admin-nav a.is-active .ico { color: #EDB23C; }   /* gold */
+.admin-shell .admin-nav a.is-active .ico { color: #E0A43B; }   /* gold */
 .admin-shell .admin-nav-foot {
   color: #8aa595;
   border-top-color: rgba(243, 240, 226, .12);
@@ -3213,13 +3213,13 @@ tr.inquiry-dismissed td:nth-child(2) { text-decoration: line-through; }
 
 /* ── 4. Dashboard pipeline + money panel ────────────────────────────────── */
 /* the one terracotta stage color → oxblood, so the pipeline drops the old hue */
-.admin-shell .dash { --dash-contract: #7C2F38; --dash-gold: #EDB23C; }
+.admin-shell .dash { --dash-contract: #7C2F38; --dash-gold: #E0A43B; }
 .admin-shell .dash-money {
   background: linear-gradient(165deg, #1c4a3a 0%, #143c2f 100%);
   border-color: #143c2f;
 }
 .admin-shell .dash-money .pct,
-.admin-shell .dash-paid-amt { color: #EDB23C; }
+.admin-shell .dash-paid-amt { color: #E0A43B; }
 .admin-shell .dash-ring-cap,
 .admin-shell .dash-fig-cap,
 .admin-shell .dash-money-paid .lead,
@@ -3270,7 +3270,7 @@ tr.inquiry-dismissed td:nth-child(2) { text-decoration: line-through; }
 /* ── Brand: crest + Kevin Lee + CRM badge ───────────────────────────────── */
 .admin-shell .ns-brand { display: flex; align-items: center; gap: 10px; }
 .admin-shell .ns-crest {
-  width: 32px; height: 32px; border-radius: 9px; background: #EDB23C; flex: none;
+  width: 32px; height: 32px; border-radius: 9px; background: #E0A43B; flex: none;
   display: grid; place-items: center;
   box-shadow: inset 0 0 0 1.5px rgba(20,60,47,.22);
   transition: transform .3s cubic-bezier(.22,1.4,.4,1);
@@ -3279,7 +3279,7 @@ tr.inquiry-dismissed td:nth-child(2) { text-decoration: line-through; }
 .admin-shell .ns-brandtext { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .admin-shell .ns-brand .mark { font-size: 1.3rem; border-bottom: 0; }
 .admin-shell .ns-crm {
-  font: 700 .55rem/1 var(--font-ui); letter-spacing: .14em; color: #EDB23C;
+  font: 700 .55rem/1 var(--font-ui); letter-spacing: .14em; color: #E0A43B;
   border: 1px solid rgba(237,178,60,.45); border-radius: 5px; padding: 3px 5px; flex: none;
 }
 
@@ -3313,7 +3313,7 @@ tr.inquiry-dismissed td:nth-child(2) { text-decoration: line-through; }
 .admin-shell .ns-list a.is-active { background: transparent; border: 0; box-shadow: none; color: #F3F0E2; }
 .admin-shell .ns-list a.is-active::before {
   content: ""; position: absolute; left: -10px; top: 50%; transform: translateY(-50%);
-  width: 4px; height: 20px; border-radius: 0 4px 4px 0; background: #EDB23C;
+  width: 4px; height: 20px; border-radius: 0 4px 4px 0; background: #E0A43B;
 }
 .admin-shell .ns-list a:hover { background: transparent; }
 
@@ -3346,7 +3346,7 @@ tr.inquiry-dismissed td:nth-child(2) { text-decoration: line-through; }
 .ns-pal-row:hover { text-decoration: none; }
 .ns-pal-row.sel { background: #143C2F; color: #F7F5EC; }
 .ns-pal-ic { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; flex: none; background: #ECE8D8; color: #3B5A48; font: 700 .8rem var(--font-display); }
-.ns-pal-row.sel .ns-pal-ic { background: #EDB23C; color: #143C2F; }
+.ns-pal-row.sel .ns-pal-ic { background: #E0A43B; color: #143C2F; }
 .ns-pal-lab { flex: 1; font: 600 .9rem/1.2 var(--font-ui); }
 .ns-pal-sub { font: 600 .66rem/1 var(--font-ui); color: #9aa39a; text-transform: uppercase; letter-spacing: .08em; }
 .ns-pal-row.sel .ns-pal-sub { color: #cfe0d4; }
