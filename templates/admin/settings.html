@@ -1,0 +1,56 @@
+{% extends "admin/base_admin.html" %}
+{# Settings — honest read-only status over the real .env config. Integrations
+   report configured/not-set (never a secret value); Google Calendar links to
+   its real OAuth connect flow. "How the studio runs" lists the genuine
+   operational settings. Nothing here writes — .env is the source of truth. #}
+{% block topbar %}
+<div class="pgtop">
+  <div class="pgtop-lead">
+    <h1>Settings</h1>
+    <p class="pgtop-sub">Integrations, automations, and how the studio runs</p>
+  </div>
+</div>
+{% endblock %}
+{% block admin_body %}
+<div class="set-wrap">
+
+  <section class="set-section">
+    <h2 class="set-h2">Integrations</h2>
+    <div class="set-grid">
+      {% for i in integrations %}
+      <div class="set-card">
+        <span class="set-mark" style="background: {{ i.icon_bg }}; color: {{ i.icon_color }};">{{ i.mark }}</span>
+        <div class="set-card-body">
+          <div class="set-card-name">{{ i.name }}</div>
+          <div class="set-card-desc">{{ i.desc }}</div>
+        </div>
+        {% if i.href %}
+        <a class="set-badge set-badge-{{ i.status }}" href="{{ i.href }}">{{ i.label }} →</a>
+        {% else %}
+        <span class="set-badge set-badge-{{ i.status }}">{{ i.label }}</span>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="set-ops">
+    <h2 class="set-h2">How the studio runs</h2>
+    {% for o in operations %}
+    <div class="set-op-row">
+      <div class="set-op-body">
+        <div class="set-op-label">{{ o.label }}</div>
+        <div class="set-op-desc">{{ o.desc }}</div>
+      </div>
+      <span class="set-op-value">{{ o.value }}</span>
+    </div>
+    {% endfor %}
+  </section>
+
+  <p class="set-note">Money &amp; media truth live here on your own node. Integrations push
+    status outward only — nothing external can overwrite what Stripe charged or what you
+    delivered. These are provisioned in <code>.env</code> on the server; this page reads
+    their state, it never stores a key.</p>
+
+</div>
+{% endblock %}
