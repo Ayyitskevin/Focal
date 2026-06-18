@@ -1,13 +1,24 @@
 {% extends "admin/base_admin.html" %}
 {% from "admin/_audit.html" import diff_chips %}
 {% block title %}Crop presets · Studio · Mise{% endblock %}
+{% block topbar %}
+<header class="admin-topbar pgtop">
+  <div class="pgtop-lead">
+    <h1>Crop presets</h1>
+    <p class="pgtop-sub">
+      {% if presets %}<b>{{ presets|length }}</b> export format{{ "s" if presets|length != 1 }} ·
+        <b>{{ presets|selectattr("active")|list|length }}</b> active
+      {% else %}Export/crop formats for favorited photos{% endif %}
+    </p>
+  </div>
+  <div class="pgtop-actions">
+    <a class="pgtop-link" href="/admin/studio">&larr; Studio</a>
+    <a class="pgtop-link" href="/admin/galleries">Galleries</a>
+  </div>
+</header>
+{% endblock %}
 {% block admin_body %}
 <main class="admin-main">
-  <div class="admin-bar">
-    <h1><a href="/admin/studio">&larr;</a> Crop presets</h1>
-    <nav><a href="/admin/galleries">Galleries</a> · <a href="/admin/studio">Studio</a></nav>
-  </div>
-
   <p class="muted">The export/crop formats every favorited photo is cut into.
     A new channel (DoorDash, menu print) is a new row here — not new code.
     <strong>Slug</strong> is the on-disk filename + portal URL token, so it can't
