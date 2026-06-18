@@ -1,12 +1,21 @@
 {% extends "admin/base_admin.html" %}
 {% block title %}Jobs · Mise admin{% endblock %}
+{% block topbar %}
+<header class="admin-topbar pgtop">
+  <div class="pgtop-lead">
+    <h1>Jobs</h1>
+    <p class="pgtop-sub">
+      <b>{{ pending }}</b> pending
+      {% if failed %}· <span class="neg"><b>{{ failed|length }}</b> failed</span>{% endif %}
+    </p>
+  </div>
+  <div class="pgtop-actions">
+    <a class="pgtop-link" href="/admin/galleries">&larr; Galleries</a>
+  </div>
+</header>
+{% endblock %}
 {% block admin_body %}
 <main class="admin-main">
-  <div class="admin-bar">
-    <h1><a href="/admin/galleries">&larr;</a> Jobs</h1>
-    <span class="muted">{{ pending }} pending</span>
-  </div>
-
   <h2>Failed</h2>
   {% if failed %}
   <table class="list">
