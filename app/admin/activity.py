@@ -168,6 +168,7 @@ async def home(request: Request):
            ORDER BY i.due_date ASC LIMIT 5"""):
         who = r["company"] or r["client_name"]
         next_steps.append({"tone": "warn",
+                           "key": f"inv_overdue:{r['id']}",
                            "text": f"Invoice overdue — {r['title']} · {who} (due {r['due_date']})",
                            "url": f"/admin/studio/invoices/{r['id']}"})
     for r in db.all_(
@@ -179,6 +180,7 @@ async def home(request: Request):
            ORDER BY created_at ASC LIMIT 5"""):
         who = r["business"] or r["name"]
         next_steps.append({"tone": "warn",
+                           "key": f"inq_reply:{r['id']}",
                            "text": f"Reply to {who} — inquiry {r['age_d']}d old",
                            "url": "/admin/studio#inquiries"})
     for r in db.all_(
@@ -188,10 +190,11 @@ async def home(request: Request):
            ORDER BY p.stage_changed_at ASC LIMIT 5"""):
         who = r["company"] or r["client_name"]
         next_steps.append({"tone": "info",
+                           "key": f"retainer_send:{r['id']}",
                            "text": f"Send retainer invoice — {r['title']} · {who}",
                            "url": f"/admin/studio/projects/{r['id']}"})
     for r in db.all_(
-        """SELECT pr.status, p.id AS project_id, p.title,
+        """SELECT pr.id AS proposal_id, pr.status, p.id AS project_id, p.title,
                   c.name AS client_name, c.company
            FROM proposals pr JOIN projects p ON p.id=pr.project_id
            JOIN clients c ON c.id=p.client_id
@@ -200,6 +203,7 @@ async def home(request: Request):
         who = r["company"] or r["client_name"]
         seen = "viewed, not accepted" if r["status"] == "viewed" else "sent, not viewed"
         next_steps.append({"tone": "info",
+                           "key": f"prop_followup:{r['proposal_id']}",
                            "text": f"Follow up proposal — {r['title']} · {who} ({seen})",
                            "url": f"/admin/studio/projects/{r['project_id']}"})
     # Client-submitted testimonials sit unpublished until moderated — surface them
@@ -210,10 +214,18 @@ async def home(request: Request):
            WHERE t.published = 0""")["n"]
     if pending_t:
         next_steps.append({"tone": "info",
+                           "key": "testimonials_review",
                            "text": f"Review {pending_t} client testimonial"
                                    f"{'s' if pending_t != 1 else ''} awaiting publish",
                            "url": "/admin/studio/testimonials"})
-    next_steps = next_steps[:8]
+    # Drop nudges the operator has already cleared today — a dismissal only
+    # suppresses for the current local day, so the list returns tomorrow if the
+    # underlying condition still holds. Slice AFTER filtering so up to 8 LIVE
+    # nudges still surface.
+    dismissed_today = {row["nudge_key"] for row in db.all_(
+        """SELECT nudge_key FROM dismissed_nudges
+           WHERE date(dismissed_at, 'localtime') = date('now', 'localtime')""")}
+    next_steps = [n for n in next_steps if n["key"] not in dismissed_today][:8]
 
     # --- Documents in flight (lifecycle: sent -> viewed -> signed/paid) ---
     docs_in_flight = db.all_(
@@ -289,6 +301,29 @@ async def home(request: Request):
                                        "revenue": revenue,
                                        "mini_cal": mini_cal,
                                        "base_url": config.BASE_URL})
+
+
+# Stable prefixes for the derived "Needs you today" nudges (activity.home).
+# A dismissal is keyed "<prefix>:<id>" (or the bare prefix for the aggregate
+# testimonials nudge); we allowlist the prefix so a stray POST can't pollute
+# the table with junk keys that would never match a real nudge anyway.
+_NUDGE_PREFIXES = frozenset(
+    {"inv_overdue", "inq_reply", "retainer_send", "prop_followup",
+     "testimonials_review"})
+
+
+@router.post("/home/nudge/dismiss")
+async def nudge_dismiss(key: str = Form(...)):
+    """Clear a Home 'Needs you today' nudge for the rest of the local day.
+    The nudges are recomputed from live data, so we can't mark a stored row
+    done — instead we record the dismissal and home() filters it out until the
+    date rolls over (it returns tomorrow if the condition still holds)."""
+    if key.split(":", 1)[0] not in _NUDGE_PREFIXES:
+        raise HTTPException(status_code=400, detail="unknown nudge")
+    db.run("INSERT OR REPLACE INTO dismissed_nudges (nudge_key, dismissed_at) "
+           "VALUES (?, datetime('now'))", (key,))
+    log.info("dashboard nudge cleared for today: %s", key)
+    return RedirectResponse("/admin/home", status_code=303)
 
 
 @router.get("/jobs", response_class=HTMLResponse)

@@ -6629,3 +6629,32 @@ def test_mileage_create_deduction_and_delete(admin):
                    follow_redirects=False)
     assert r.status_code == 303
     assert db.one("SELECT id FROM mileage WHERE id=?", (trip["id"],)) is None
+
+
+def test_dashboard_nudge_dismiss_clears_for_today(admin):
+    """A 'Needs you today' nudge can be checked off; the dismissal is keyed to the
+    underlying item and only suppresses it for the current local day (the worklist
+    is 'needs you TODAY', so the item returns tomorrow if the condition still holds)."""
+    iid = db.run(
+        "INSERT INTO inquiries (name, business, email, message, created_at) "
+        "VALUES (?,?,?,?, datetime('now','-5 days'))",
+        ("Nudge Test Co", "Nudge Bistro", "nudge@example.com", "test msg"))
+    key = f"inq_reply:{iid}"
+    try:
+        # the stale inquiry surfaces as a checkable nudge
+        assert key in admin.get("/admin/home").text
+
+        # an unknown nudge prefix is rejected (validated input, R18)
+        bad = admin.post("/admin/home/nudge/dismiss",
+                         data={"key": "bogus:1"}, follow_redirects=False)
+        assert bad.status_code == 400
+
+        # checking it off records the dismissal and drops it from today's worklist
+        ok = admin.post("/admin/home/nudge/dismiss",
+                        data={"key": key}, follow_redirects=False)
+        assert ok.status_code == 303
+        assert db.one("SELECT 1 FROM dismissed_nudges WHERE nudge_key=?", (key,))
+        assert key not in admin.get("/admin/home").text
+    finally:
+        db.run("DELETE FROM dismissed_nudges WHERE nudge_key=?", (key,))
+        db.run("DELETE FROM inquiries WHERE id=?", (iid,))

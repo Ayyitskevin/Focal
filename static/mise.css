@@ -3134,7 +3134,8 @@ tr.inquiry-dismissed td:nth-child(2) { text-decoration: line-through; }
   background: none; color: transparent; cursor: pointer; flex: none;
   display: grid; place-items: center; font-size: .7rem; padding: 0;
 }
-.admin-shell .dash-check:hover { border-color: var(--ok); }
+.admin-shell .dash-check:hover { border-color: var(--ok); color: var(--ok); }
+.admin-shell .dash-todo-check { display: contents; margin: 0; }
 
 /* ── Schedule ───────────────────────────────────────────────────────────── */
 .admin-shell .dash-horizon {

@@ -118,6 +118,12 @@
             </div>
             {% if n.meta %}<span class="dash-todo-meta {{ n.tone or 'mute' }}">{{ n.meta }}</span>{% endif %}
             <a class="dash-todo-meta go" href="{{ n.url }}" aria-label="Open">&rarr;</a>
+            {% if n.key %}
+            <form method="post" action="/admin/home/nudge/dismiss" class="dash-todo-check">
+              <input type="hidden" name="key" value="{{ n.key }}">
+              <button type="submit" class="dash-check" title="Clear for today" aria-label="Clear for today">&#9711;</button>
+            </form>
+            {% endif %}
           </li>
           {% endfor %}
         </ul>
