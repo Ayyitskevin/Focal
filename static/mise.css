@@ -1284,29 +1284,33 @@ progress { width: 100%; }
 .cal-nav { display: flex; gap: 1rem; margin-bottom: 0.6rem; }
 .cal-nav a { font-size: 0.85rem; }
 .cal-legend { display: flex; gap: 0.6rem; margin-bottom: 0.8rem; flex-wrap: wrap; }
-.cal-tag { font-size: 0.72rem; padding: 0.12rem 0.5rem; border-radius: 999px;
-  color: #fff; }
-.cal-tag.cal-shoot, .cal-event.cal-shoot { background: var(--accent); }
-.cal-tag.cal-task, .cal-event.cal-task { background: #4a7c59; }
-.cal-tag.cal-invoice, .cal-event.cal-invoice { background: var(--clay); }
-.cal-tag.cal-booking, .cal-event.cal-booking { background: #6a86b3; }
-.cal-tag.cal-expiry, .cal-event.cal-expiry { background: #c79a3e; }
-.cal-grid { width: 100%; border-collapse: collapse; table-layout: fixed; }
-.cal-grid th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em;
-  color: var(--muted); padding: 0.4rem 0.2rem; text-align: left; font-weight: 600; }
-.cal-cell { border: 1px solid var(--line); vertical-align: top; height: 92px;
-  padding: 0.25rem; background: var(--card); }
-.cal-empty { background: var(--bg); }
-.cal-today { outline: 2px solid var(--accent); outline-offset: -2px; }
-.cal-daynum { display: block; font-size: 0.78rem; color: var(--muted);
-  margin-bottom: 0.2rem; }
-.cal-today .cal-daynum { color: var(--accent); font-weight: 700; }
-.cal-event { display: block; font-size: 0.72rem; color: #fff; border-radius: 5px;
-  padding: 0.1rem 0.35rem; margin-bottom: 0.15rem; overflow: hidden;
+.cal-tag { font-size: 0.72rem; padding: 0.18rem 0.6rem; border-radius: 999px;
+  font-weight: 600; }
+/* tinted kind pairs — shared by legend chips and event chips */
+.cal-tag.cal-shoot,   .cal-event.cal-shoot   { color: #7C2F38; background: #f3e3e5; }
+.cal-tag.cal-booking, .cal-event.cal-booking { color: #2f7d57; background: #e1f2e9; }
+.cal-tag.cal-task,    .cal-event.cal-task    { color: #2f6d8a; background: #ddeef0; }
+.cal-tag.cal-invoice, .cal-event.cal-invoice { color: #9a7a2c; background: #f7ecd2; }
+.cal-tag.cal-expiry,  .cal-event.cal-expiry  { color: #b5532e; background: #f7e6dc; }
+.cal-grid { width: 100%; border-collapse: separate; border-spacing: 8px;
+  table-layout: fixed; }
+.cal-grid th { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--ink-faint); padding: 0.1rem 0.5rem; text-align: left; font-weight: 700; }
+.cal-cell { border: 1px solid var(--line-strong); border-radius: 10px;
+  vertical-align: top; height: 96px; padding: 8px; background: var(--surface); }
+.cal-empty { background: transparent; border-color: transparent; }
+.cal-today { border-color: var(--terra); }
+.cal-daynum { float: right; font: 600 0.8rem/1 var(--font-ui); color: var(--ink-soft);
+  padding: 3px; }
+.cal-today .cal-daynum { background: var(--terra); color: #F3F0E2; padding: 0;
+  width: 22px; height: 22px; border-radius: 999px; display: grid; place-items: center; }
+.cal-event { clear: both; display: block; font: 600 0.68rem/1.2 var(--font-ui);
+  border-radius: 6px; padding: 4px 7px; margin-top: 4px; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 720px) {
-  .cal-cell { height: 64px; }
-  .cal-event { font-size: 0.62rem; }
+  .cal-grid { border-spacing: 4px; }
+  .cal-cell { height: 64px; padding: 5px; }
+  .cal-event { font-size: 0.6rem; }
 }
 
 /* ── Calendar: summary + clickable legend + agenda (unified dates) ────── */
