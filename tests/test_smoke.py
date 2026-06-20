@@ -2037,30 +2037,30 @@ def test_contact_prefill():
         assert "question about" not in r.text
 
 
-@pytest.mark.xfail(reason="Studio stripped to strict-1:1 board-only; Activity strip re-renders in phase-2 re-link (data still computed in handler)", strict=False)
 def test_pipeline_dashboard(admin):
-    page = admin.get("/admin/studio")
+    # The pipeline summary strip lives on the Activity view (the board itself is
+    # strict-1:1 kanban). The per-stage overdue chip is the overdue indicator.
+    page = admin.get("/admin/studio/activity")
     assert page.status_code == 200
     assert "Retainer Paid <strong>1</strong>" in page.text  # Dana's project sits at retainer paid
     assert "nothing outstanding" in page.text         # her invoice is fully paid
-    # No overdue *indicators* when nothing is overdue. Checks the actual indicator
-    # text, not the bare word — the saved-view toolbar has a permanent "Overdue"
-    # filter chip (data-view-filter="overdue") that is a control, not a state.
-    assert "overdue invoice" not in page.text
+    # No overdue *indicator* when nothing is overdue: the per-stage chip only
+    # renders for a stage that actually has past-due invoices.
+    assert "pipeline-overdue" not in page.text
 
-    # a sent invoice past its due date flags the project row and the summary
+    # a sent invoice past its due date flags the stage chip and the summary
     p = db.one("SELECT id, status FROM projects ORDER BY id LIMIT 1")
     iid = db.run("""INSERT INTO invoices (project_id, slug, title, total_cents,
                     status, due_date) VALUES (?,?,?,?,?,?)""",
                  (p["id"], "overdue-test-slug", "Late", 50000, "sent", "2000-01-01"))
-    page = admin.get("/admin/studio").text
-    assert "1 overdue" in page and "overdue invoice" in page
+    page = admin.get("/admin/studio/activity").text
+    assert "1 overdue" in page
     # per-stage chip: the project's current stage shows "(1 overdue)" inline
     # so Kevin can see which bucket of the pipeline is stuck.
     assert 'class="warn pipeline-overdue">(1 overdue)' in page
     # paid invoices stop counting even with a past due date
     db.run("UPDATE invoices SET status='paid' WHERE id=?", (iid,))
-    assert "overdue invoice" not in admin.get("/admin/studio").text
+    assert "pipeline-overdue" not in admin.get("/admin/studio/activity").text
     db.run("DELETE FROM invoices WHERE id=?", (iid,))
 
 
@@ -2164,16 +2164,18 @@ def test_inquiry_form(monkeypatch):
         assert q["name"] == "Pat" and q["emailed"] == 0
 
 
-@pytest.mark.xfail(reason="Inquiries-on-Studio UI stripped for strict-1:1; inquiries live at /admin/inbox, conversion route unchanged. Re-cover in phase-2 re-link", strict=False)
 def test_inquiries_admin_view(admin):
     iid = db.run("INSERT INTO inquiries (name, email, business, message, emailed) "
                  "VALUES (?,?,?,?,0)",
                  ("Robin Chef", "robin@bistro.com", "Bistro Vert", "Spring menu?"))
 
-    # listed on the studio page, with the send-failed warning visible
-    r = admin.get("/admin/studio")
+    # the inquiry surfaces in the unified inbox; selecting it shows the business
+    # as the thread name, the contact name beneath, and the real convert action.
+    r = admin.get(f"/admin/inbox?sel={iid}")
     assert r.status_code == 200
-    assert "Robin Chef" in r.text and "Bistro Vert" in r.text and "⚠" in r.text
+    assert "Bistro Vert" in r.text and "Robin Chef" in r.text and "Spring menu?" in r.text
+    assert f'action="/admin/studio/inquiries/{iid}/client"' in r.text
+    assert "Create client &amp; project" in r.text
 
     # one click creates a client carrying the inquiry context
     r = admin.post(f"/admin/studio/inquiries/{iid}/client", follow_redirects=False)
@@ -2187,12 +2189,12 @@ def test_inquiries_admin_view(admin):
                   "FROM inquiries WHERE id=?", (iid,))
     assert conv["converted_at"] and conv["converted_client_id"] == c["id"]
     assert conv["converted_project_id"] is None  # contact-kind, no project
-    # row visually de-emphasized on the studio page: strike-through class
-    # carried + the action cell becomes a ✓ link to the spawned client
-    page = admin.get("/admin/studio").text
-    assert 'class="inquiry-converted"' in page
+    # converted inquiries leave the default inbox and land in the archived tab,
+    # where the context pane links straight to the spawned client record
+    assert "Bistro Vert" not in admin.get("/admin/inbox").text
+    page = admin.get(f"/admin/inbox?tab=archived&sel={iid}").text
+    assert "Open converted record" in page
     assert f'href="/admin/studio/clients/{c["id"]}"' in page
-    assert "&#10003; client" in page  # the ✓ marker for contact conversions
 
     # idempotent: same email → redirect to the existing client, no duplicate
     r = admin.post(f"/admin/studio/inquiries/{iid}/client", follow_redirects=False)
@@ -2211,10 +2213,10 @@ def test_inquiries_admin_view(admin):
     assert conv["converted_client_id"] is None
     # client still exists — the unconvert is NOT a cascade delete
     assert db.one("SELECT id FROM clients WHERE id=?", (c["id"],)) is not None
-    # row re-appears as actionable: action button back, no strike-through
-    page = admin.get("/admin/studio").text
-    assert "inquiry-converted" not in page  # only Robin's row exists
-    assert "add as client" in page
+    # the inquiry re-appears in the default inbox as actionable again
+    page = admin.get(f"/admin/inbox?sel={iid}").text
+    assert "Bistro Vert" in page
+    assert "Create client &amp; project" in page
 
     assert admin.post("/admin/studio/inquiries/99999/client").status_code == 404
     assert admin.post("/admin/studio/inquiries/99999/unconvert").status_code == 404
@@ -3406,7 +3408,7 @@ def test_lightbox_doubletap_gesture():
     assert "touch-action: manipulation" in css
 
 
-@pytest.mark.xfail(reason="Studio stripped to strict-1:1 board-only; Activity strip re-renders in phase-2 re-link (data still computed in handler)", strict=False)
+@pytest.mark.xfail(reason="Portal-hint clients table was stripped in the strict-1:1 rewrite and re-homed nowhere (only client.html carries a single 'never visited' hint). Needs a re-built clients listing — feature work, not a route re-point", strict=False)
 def test_studio_portal_hint(admin):
     import datetime as dt
 
@@ -3519,10 +3521,9 @@ def _spark_rect_count(html: str) -> int:
     return html[start:end].count("<rect")
 
 
-@pytest.mark.xfail(reason="Studio stripped to strict-1:1 board-only; Activity strip re-renders in phase-2 re-link (data still computed in handler)", strict=False)
 def test_studio_sparklines(admin):
     # baseline: studio loads with 3 sparkline cards regardless of state
-    page = admin.get("/admin/studio").text
+    page = admin.get("/admin/studio/activity").text
     assert "Inquiries" in page and "Downloads" in page and "Favorites" in page
     assert page.count('class="spark-card"') == 3
     assert page.count("spark-svg") == 3
@@ -3530,37 +3531,37 @@ def test_studio_sparklines(admin):
     # (nav SVG icons also contain <rect> — scope to sparklines section)
     assert _spark_rect_count(page) == 21
     # 3-button window picker, 7d active by default
-    assert 'href="/admin/studio?days=7"' in page
-    assert 'href="/admin/studio?days=30"' in page
-    assert 'href="/admin/studio?days=90"' in page
+    assert 'href="/admin/studio/activity?days=7"' in page
+    assert 'href="/admin/studio/activity?days=30"' in page
+    assert 'href="/admin/studio/activity?days=90"' in page
     assert page.count("spark-window-active") == 1
     # active class is on the 7d button
-    seven_idx = page.index('href="/admin/studio?days=7"')
+    seven_idx = page.index('href="/admin/studio/activity?days=7"')
     line_end = page.index("</a>", seven_idx)
     assert "spark-window-active" in page[seven_idx:line_end]
 
     # ?days=30 → 30 x 3 = 90 bars + the 30d button becomes active
-    page30 = admin.get("/admin/studio?days=30").text
+    page30 = admin.get("/admin/studio/activity?days=30").text
     assert _spark_rect_count(page30) == 90
-    thirty_idx = page30.index('href="/admin/studio?days=30"')
+    thirty_idx = page30.index('href="/admin/studio/activity?days=30"')
     assert "spark-window-active" in page30[thirty_idx:page30.index("</a>", thirty_idx)]
 
     # ?days=90 → 90 x 3 = 270 bars
-    assert _spark_rect_count(admin.get("/admin/studio?days=90").text) == 270
+    assert _spark_rect_count(admin.get("/admin/studio/activity?days=90").text) == 270
 
     # bogus values clamp to the nearest allowed bucket: 999 → 90, 2 → 7, "abc" → 7
-    assert _spark_rect_count(admin.get("/admin/studio?days=999").text) == 270
-    assert _spark_rect_count(admin.get("/admin/studio?days=2").text) == 21
-    assert _spark_rect_count(admin.get("/admin/studio?days=abc").text) == 21
+    assert _spark_rect_count(admin.get("/admin/studio/activity?days=999").text) == 270
+    assert _spark_rect_count(admin.get("/admin/studio/activity?days=2").text) == 21
+    assert _spark_rect_count(admin.get("/admin/studio/activity?days=abc").text) == 21
     # 15 sits closer to 7 than 30 → clamps to 7
-    assert _spark_rect_count(admin.get("/admin/studio?days=15").text) == 21
+    assert _spark_rect_count(admin.get("/admin/studio/activity?days=15").text) == 21
     # 22 sits closer to 30 than 7 → clamps to 30
-    assert _spark_rect_count(admin.get("/admin/studio?days=22").text) == 90
+    assert _spark_rect_count(admin.get("/admin/studio/activity?days=22").text) == 90
 
     # seed a fresh inquiry → today's bar grows to >= 1
     db.run("INSERT INTO inquiries (name, email, message) VALUES (?,?,?)",
            ("Spark Tester", "spark@cafe.com", "test message"))
-    page = admin.get("/admin/studio").text
+    page = admin.get("/admin/studio/activity").text
     import re
     m = re.search(r'<strong>(\d+)</strong> Inquiries', page)
     assert m and int(m.group(1)) >= 1
@@ -3633,10 +3634,9 @@ def test_invoice_overdue_judged_on_local_wall_clock(admin, monkeypatch):
     assert "1 overdue" in row(admin.get("/admin/studio").text)
 
 
-@pytest.mark.xfail(reason="Studio stripped to strict-1:1 board-only; Activity strip re-renders in phase-2 re-link (data still computed in handler)", strict=False)
 def test_studio_proofing_waiting(admin):
     # baseline: nothing in the proofing-waiting strip → section hidden
-    r = admin.get("/admin/studio")
+    r = admin.get("/admin/studio/activity")
     assert "Proofing waiting" not in r.text
 
     # set up: client → project → published gallery linked to project → proofing
@@ -3670,7 +3670,7 @@ def test_studio_proofing_waiting(admin):
         start = text.index('aria-label="Proofing waiting"')
         return text[start:text.index("</section>", start)]
 
-    r = admin.get("/admin/studio")
+    r = admin.get("/admin/studio/activity")
     assert "Proofing waiting" in r.text
     strip = waiting_strip(r.text)
     assert "Spring shoot — proofing" in strip
@@ -3683,27 +3683,26 @@ def test_studio_proofing_waiting(admin):
            (vid, asset_ids[1]))
     db.run("INSERT INTO favorites (visitor_id, asset_id) VALUES (?,?)",
            (vid, asset_ids[2]))
-    assert "Spring shoot — proofing" not in waiting_strip(admin.get("/admin/studio").text)
+    assert "Spring shoot — proofing" not in waiting_strip(admin.get("/admin/studio/activity").text)
 
     # archived project → never surfaces even with unfilled proofing
     db.run("DELETE FROM favorites WHERE visitor_id=?", (vid,))
-    assert "Spring shoot — proofing" in waiting_strip(admin.get("/admin/studio").text)
+    assert "Spring shoot — proofing" in waiting_strip(admin.get("/admin/studio/activity").text)
     db.run("UPDATE projects SET status='archived' WHERE id=?", (pid,))
-    assert "Spring shoot — proofing" not in waiting_strip(admin.get("/admin/studio").text)
+    assert "Spring shoot — proofing" not in waiting_strip(admin.get("/admin/studio/activity").text)
 
     # unpublished gallery → no nudge (client can't see it yet, nothing to proof)
     db.run("UPDATE projects SET status='session_planning' WHERE id=?", (pid,))
     db.run("UPDATE galleries SET published=0 WHERE id=?", (gid,))
-    assert "Spring shoot — proofing" not in waiting_strip(admin.get("/admin/studio").text)
+    assert "Spring shoot — proofing" not in waiting_strip(admin.get("/admin/studio/activity").text)
 
 
-@pytest.mark.xfail(reason="Studio stripped to strict-1:1 board-only; Activity strip re-renders in phase-2 re-link (data still computed in handler)", strict=False)
 def test_studio_upcoming_strip(admin):
     import datetime as dt
     today = dt.date.today()
 
     # baseline: empty strip → muted "Nothing on the calendar" copy
-    r = admin.get("/admin/studio")
+    r = admin.get("/admin/studio/activity")
     assert r.status_code == 200
     assert "Upcoming shoots" in r.text and "Nothing on the calendar" in r.text
 
@@ -3723,7 +3722,7 @@ def test_studio_upcoming_strip(admin):
         db.run("INSERT INTO projects (client_id, title, status, shoot_date) VALUES (?,?,?,?)",
                (cid, title, status, sdate))
 
-    r = admin.get("/admin/studio")
+    r = admin.get("/admin/studio/activity")
     # isolate the upcoming-shoots strip specifically — there's also a
     # proofing-waiting strip on the page if any gallery has unfilled proofing.
     sec_start = r.text.index('aria-label="Upcoming shoots"')
@@ -3748,14 +3747,13 @@ def test_studio_upcoming_strip(admin):
 
     # archived projects don't surface even if in-window
     db.run("UPDATE projects SET status='archived' WHERE title='Today launch'")
-    r = admin.get("/admin/studio")
+    r = admin.get("/admin/studio/activity")
     sec_start = r.text.index('aria-label="Upcoming shoots"')
     strip = r.text[r.text.index('class="upcoming-strip"', sec_start):
                    r.text.index("</ul>", r.text.index('class="upcoming-strip"', sec_start))]
     assert "Today launch" not in strip
 
 
-@pytest.mark.xfail(reason="Studio stripped to strict-1:1 board-only; Activity strip re-renders in phase-2 re-link (data still computed in handler)", strict=False)
 def test_studio_booking_conflicts(admin):
     import datetime as dt
     today = dt.date.today()
@@ -3763,7 +3761,7 @@ def test_studio_booking_conflicts(admin):
     # baseline: no shoot_date set on any project → conflicts strip absent
     db.run("UPDATE projects SET shoot_date=NULL")
     db.run("DELETE FROM inquiries")
-    r = admin.get("/admin/studio")
+    r = admin.get("/admin/studio/activity")
     assert r.status_code == 200
     assert "Booking conflicts" not in r.text
 
@@ -3787,7 +3785,7 @@ def test_studio_booking_conflicts(admin):
     db.run("INSERT INTO projects (client_id, title, status, shoot_date) "
            "VALUES (?,?,?,?)", (cid, "Far future", "inquiry_received", d_far))
 
-    r = admin.get("/admin/studio")
+    r = admin.get("/admin/studio/activity")
     sec_start = r.text.index('aria-label="Booking conflicts"')
     sec_end = r.text.index("</section>", sec_start)
     sec = r.text[sec_start:sec_end]
@@ -3813,7 +3811,7 @@ def test_studio_booking_conflicts(admin):
            "converted_at) VALUES (?,?,?,?,?,?, datetime('now'))",
            ("Already booked", "ab@x.com", "", "booking", d_inq, "Videography"))
 
-    r = admin.get("/admin/studio")
+    r = admin.get("/admin/studio/activity")
     sec_start = r.text.index('aria-label="Booking conflicts"')
     sec_end = r.text.index("</section>", sec_start)
     sec = r.text[sec_start:sec_end]
@@ -4004,7 +4002,6 @@ def test_faq_block():
         assert '"@type": "FAQPage"' not in pub.get("/").text
 
 
-@pytest.mark.xfail(reason="Studio stripped to strict-1:1 board-only; Activity strip re-renders in phase-2 re-link (data still computed in handler)", strict=False)
 def test_license_lifecycle(admin):
     import json as _json
 
@@ -4080,7 +4077,7 @@ def test_license_lifecycle(admin):
     # active + dated within 45d surfaces on the dashboard + licenses strips
     db.run("UPDATE licenses SET ends_on=date('now','+10 days') WHERE id=?", (lic["id"],))
     assert lic["title"] in admin.get("/admin/studio/licenses").text
-    assert "expiring" in admin.get("/admin/studio").text.lower()
+    assert "expiring" in admin.get("/admin/studio/activity").text.lower()
 
     # 'specific' coverage syncs the join table inside the same tx
     other = db.run("INSERT INTO clients (name) VALUES (?)", ("Sister Venue",))
@@ -5167,7 +5164,6 @@ def test_recurring_scheduler_sweep(admin):
            (plan["id"],))
 
 
-@pytest.mark.xfail(reason="Studio stripped to strict-1:1 board-only; Activity strip re-renders in phase-2 re-link (data still computed in handler)", strict=False)
 def test_retainer_draft_waiting_strip(admin):
     """Slice 3 — the manual-send safety valve: once slice 2's scheduler can
     create retainer drafts unattended, those drafts must not rot unsent. The
@@ -5203,14 +5199,14 @@ def test_retainer_draft_waiting_strip(admin):
     inv = db.one("SELECT * FROM invoices WHERE recurring_plan_id=? "
                  "ORDER BY id DESC LIMIT 1", (plan["id"],))
     assert inv["status"] == "draft"
-    page = admin.get("/admin/studio").text
+    page = admin.get("/admin/studio/activity").text
     assert "Retainer drafts waiting to send" in page
     assert f"/admin/studio/invoices/{inv['id']}" in page
 
     # Kevin reviews and Sends it → it drops off the waiting strip
     r = admin.post(f"/admin/studio/invoices/{inv['id']}/send", follow_redirects=False)
     assert r.status_code == 303
-    page = admin.get("/admin/studio").text
+    page = admin.get("/admin/studio/activity").text
     assert f"/admin/studio/invoices/{inv['id']}" not in page
 
     # leave no active plan lingering in the shared DB for later modules
@@ -5310,7 +5306,6 @@ def test_retainer_deliverable_quota(admin):
                   (plan["id"],))["n"] == 0
 
 
-@pytest.mark.xfail(reason="Studio stripped to strict-1:1 board-only; Activity strip re-renders in phase-2 re-link (data still computed in handler)", strict=False)
 def test_retainer_behind_quota_strip(admin):
     """Domain G slice 2 — the pace-aware 'behind quota' dashboard strip. A retainer
     surfaces only when its this-period delivery lags the month's run-rate (a label
@@ -5349,7 +5344,7 @@ def test_retainer_behind_quota_strip(admin):
                data={"label": "Reels", "qty": "4", "period": period},
                follow_redirects=False)
 
-    page = admin.get("/admin/studio").text
+    page = admin.get("/admin/studio/activity").text
     assert "Retainers behind quota" in page
     # the un-delivered retainer is on the strip with its worst-label gap
     assert f"/admin/studio/recurring/{behind_id}" in page
@@ -5363,13 +5358,13 @@ def test_retainer_behind_quota_strip(admin):
     admin.post(f"/admin/studio/recurring/{behind_id}/deliveries",
                data={"label": "Hero images", "qty": "20", "period": period},
                follow_redirects=False)
-    page = admin.get("/admin/studio").text
+    page = admin.get("/admin/studio/activity").text
     assert f"/admin/studio/recurring/{behind_id}" not in page
 
     # a PAUSED behind plan never nags (you chose to stop the retainer)
     paused_id = mk_plan("Paused Pub", "Paused retainer", "Stories", 10)
     db.run("UPDATE recurring_plans SET active=0 WHERE id=?", (paused_id,))
-    page = admin.get("/admin/studio").text
+    page = admin.get("/admin/studio/activity").text
     assert f"/admin/studio/recurring/{paused_id}" not in page
 
     # clean up: hard-delete the plans so no active quota plan lingers for later modules
@@ -5532,7 +5527,6 @@ def test_retainer_assisted_credit_prefill(admin):
     db.run("DELETE FROM recurring_plans WHERE id=?", (pid,))
 
 
-@pytest.mark.xfail(reason="Studio stripped to strict-1:1 board-only; Activity strip re-renders in phase-2 re-link (data still computed in handler)", strict=False)
 def test_content_due_strip(admin, monkeypatch):
     """Domain G slice 5 — the 'Content due' dashboard strip: calendar slots
     scheduled this period and not yet delivered (the 'what's coming' companion to
@@ -5584,7 +5578,7 @@ def test_content_due_strip(admin, monkeypatch):
     overdue_id = mk_plan("Overdue Oven", f"{period}-05")
     delivered_id = mk_plan("Done Deli", f"{period}-20", status="delivered")
 
-    page = admin.get("/admin/studio").text
+    page = admin.get("/admin/studio/activity").text
     assert "Content due" in page
     # planned/shot in-period slots appear, linking to the plan's #calendar anchor
     assert f"/admin/studio/recurring/{due_id}#calendar" in page
@@ -5601,7 +5595,7 @@ def test_content_due_strip(admin, monkeypatch):
                    (pid_,))
         admin.post(f"/admin/studio/recurring/{pid_}/calendar/{s['id']}/status",
                    data={"status": "delivered"}, follow_redirects=False)
-    page = admin.get("/admin/studio").text
+    page = admin.get("/admin/studio/activity").text
     assert "Content due" not in page  # silent when empty
 
     # clean up: hard-delete the plans (cascades their calendar slots)
@@ -5609,7 +5603,6 @@ def test_content_due_strip(admin, monkeypatch):
         db.run("DELETE FROM recurring_plans WHERE id=?", (pid_,))
 
 
-@pytest.mark.xfail(reason="Studio stripped to strict-1:1 board-only; Activity strip re-renders in phase-2 re-link (data still computed in handler)", strict=False)
 def test_content_due_carries_overdue_across_period_rollover(admin, monkeypatch):
     """Overdue-rollover VISIBILITY fix (Domain G, read-only): an undelivered content
     slot from a PRIOR period must NOT vanish when the month rolls over — it stays on
@@ -5659,7 +5652,7 @@ def test_content_due_carries_overdue_across_period_rollover(admin, monkeypatch):
     current_id = mk_plan("Current Counter", "2026-06-25")   # this period
     future_id = mk_plan("Future Fry", "2026-07-10")         # next period (look-ahead)
 
-    page = admin.get("/admin/studio").text
+    page = admin.get("/admin/studio/activity").text
     # the carried-over prior-period slot STAYS visible (this is the fix) and reads overdue
     assert f"/admin/studio/recurring/{carry_id}#calendar" in page
     # current-period slot still shows (unchanged behavior)
@@ -5672,7 +5665,7 @@ def test_content_due_carries_overdue_across_period_rollover(admin, monkeypatch):
                (carry_id,))
     admin.post(f"/admin/studio/recurring/{carry_id}/calendar/{s['id']}/status",
                data={"status": "delivered"}, follow_redirects=False)
-    page = admin.get("/admin/studio").text
+    page = admin.get("/admin/studio/activity").text
     assert f"/admin/studio/recurring/{carry_id}#calendar" not in page
 
     # clean up: hard-delete the plans (cascades their calendar slots)
@@ -6298,7 +6291,6 @@ def test_press_evidence_render_writes_nothing(admin):
     assert "review the evidence below and confirm published" not in body  # cue gone
 
 
-@pytest.mark.xfail(reason="Studio stripped to strict-1:1 board-only; Activity strip re-renders in phase-2 re-link (data still computed in handler)", strict=False)
 def test_press_confirm_strip_rolls_up_h3_cue(admin):
     """Domain H, H2 — the studio dashboard 'Press evidence — confirm published'
     strip rolls up H3's per-license cue: an ACTIVE license with matching published
@@ -6326,7 +6318,7 @@ def test_press_confirm_strip_rolls_up_h3_cue(admin):
     db.run("""INSERT INTO press (gallery_id, outlet, channel, publish_date)
               VALUES (?,?,?,?)""", (g4, "Local Weekly", "print", "2021-05-01"))
 
-    body = admin.get("/admin/studio").text
+    body = admin.get("/admin/studio/activity").text
     assert "Press evidence — confirm published" in body          # strip rendered
     assert f"/admin/studio/licenses/{on_id}" in body             # the actionable one
     assert f"/admin/studio/licenses/{none_id}" not in body       # no evidence → silent
@@ -6336,7 +6328,7 @@ def test_press_confirm_strip_rolls_up_h3_cue(admin):
     # read-only: repeated renders never flip the matched license's published bit,
     # and the strip writes no audit row against it.
     for _ in range(3):
-        assert admin.get("/admin/studio").status_code == 200
+        assert admin.get("/admin/studio/activity").status_code == 200
     assert db.one("SELECT published FROM licenses WHERE id=?", (on_id,))["published"] == 0
     assert db.all_("""SELECT 1 FROM audit_log WHERE entity_type='license'
                       AND entity_id=? AND action IN ('update','status_change')""",
