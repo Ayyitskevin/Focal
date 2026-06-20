@@ -1120,6 +1120,12 @@ progress { width: 100%; }
   background: transparent; border: 1px dashed #cdc3ae; border-radius: 10px; padding: 9px;
   color: #8A9183; font: 600 0.78rem/1 var(--font-ui); }
 .admin-shell .stu-add:hover { border-color: #b8ac92; color: var(--ink-soft); }
+/* Portal-engagement chip on the Clients list — tone keyed to the handler hint. */
+.admin-shell .stu-portal { display: inline-flex; align-items: center;
+  font: 600 0.74rem/1 var(--font-ui); padding: .32em .7em; border-radius: 999px;
+  border: 1px solid var(--line); white-space: nowrap; }
+.admin-shell .stu-portal-ok { color: #2f7d57; background: #eef6f0; border-color: #cfe6d8; }
+.admin-shell .stu-portal-muted { color: #8A9183; background: #FBFAF4; }
 /* "+ New project" popover — a create-client form hanging off the topbar pill. */
 .admin-shell .stu-newproj { position: relative; }
 .admin-shell .stu-newproj > summary { list-style: none; cursor: pointer; }

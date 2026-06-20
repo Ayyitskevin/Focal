@@ -81,9 +81,56 @@ def _spark_series(table: str, today: dt.date, window: int) -> tuple[list[int], i
     return series, sum(series)
 
 
+def _clients_with_hints() -> tuple[list, dict]:
+    """Clients with per-client project counts + portal engagement, plus a friendly
+    "visited Xh ago" / "never visited" hint keyed by client id so the template
+    stays declarative. Portal engagement (Phase 2) is otherwise invisible from the
+    studio. last_visit is stored UTC; compared against a UTC 'now' here."""
+    clients = db.all_("""SELECT c.*,
+                         (SELECT COUNT(*) FROM projects p WHERE p.client_id=c.id) AS n_projects,
+                         (SELECT po.published FROM portals po WHERE po.client_id=c.id) AS portal_published,
+                         (SELECT po.visits FROM portals po WHERE po.client_id=c.id) AS portal_visits,
+                         (SELECT po.last_visit FROM portals po WHERE po.client_id=c.id) AS portal_last_visit
+                         FROM clients c ORDER BY c.name""")
+    now = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
+    hints = {}
+    for c in clients:
+        if c["portal_published"] is None:
+            hints[c["id"]] = ("muted", "no portal")
+        elif not c["portal_last_visit"]:
+            hints[c["id"]] = ("muted", "never visited")
+        else:
+            try:
+                last = dt.datetime.fromisoformat(c["portal_last_visit"])
+            except ValueError:
+                hints[c["id"]] = ("muted", "visited (date unknown)")
+                continue
+            delta = now - last
+            if delta.total_seconds() < 60:
+                hint = "just now"
+            elif delta.total_seconds() < 3600:
+                hint = f"{int(delta.total_seconds() // 60)}m ago"
+            elif delta.total_seconds() < 86400:
+                hint = f"{int(delta.total_seconds() // 3600)}h ago"
+            elif delta.days < 30:
+                hint = f"{delta.days}d ago"
+            else:
+                hint = last.date().isoformat()
+            hints[c["id"]] = ("ok", f"👁 {hint}")
+    return clients, hints
+
+
 @router.get("/playbook", response_class=HTMLResponse)
 async def studio_playbook(request: Request):
     return templates.TemplateResponse(request, "admin/studio_playbook.html", {})
+
+
+@router.get("/clients", response_class=HTMLResponse)
+async def studio_clients(request: Request):
+    clients, client_portal_hints = _clients_with_hints()
+    return templates.TemplateResponse(request, "admin/studio_clients.html",
+                                      {"clients": clients,
+                                       "client_portal_hints": client_portal_hints})
 
 
 @router.get("", response_class=HTMLResponse)
@@ -122,40 +169,6 @@ async def studio_home(request: Request):
     pipeline_value_total = sum(stage_value.values())
     booked_value = sum(v for s, v in stage_value.items()
                        if s in ("retainer_paid", "session_planning", "project_closed"))
-    clients = db.all_("""SELECT c.*,
-                         (SELECT COUNT(*) FROM projects p WHERE p.client_id=c.id) AS n_projects,
-                         (SELECT po.published FROM portals po WHERE po.client_id=c.id) AS portal_published,
-                         (SELECT po.visits FROM portals po WHERE po.client_id=c.id) AS portal_visits,
-                         (SELECT po.last_visit FROM portals po WHERE po.client_id=c.id) AS portal_last_visit
-                         FROM clients c ORDER BY c.name""")
-    # Compute a friendly "visited Xh ago" / "never visited" hint per client so
-    # the template stays declarative. Engagement on the client portal (Phase 2)
-    # was invisible from the studio dashboard before this.
-    now = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
-    client_portal_hints = {}
-    for c in clients:
-        if c["portal_published"] is None:
-            client_portal_hints[c["id"]] = ("muted", "no portal")
-        elif not c["portal_last_visit"]:
-            client_portal_hints[c["id"]] = ("muted", "never visited")
-        else:
-            try:
-                last = dt.datetime.fromisoformat(c["portal_last_visit"])
-            except ValueError:
-                client_portal_hints[c["id"]] = ("muted", "visited (date unknown)")
-                continue
-            delta = now - last
-            if delta.total_seconds() < 60:
-                hint = "just now"
-            elif delta.total_seconds() < 3600:
-                hint = f"{int(delta.total_seconds() // 60)}m ago"
-            elif delta.total_seconds() < 86400:
-                hint = f"{int(delta.total_seconds() // 3600)}h ago"
-            elif delta.days < 30:
-                hint = f"{delta.days}d ago"
-            else:
-                hint = last.date().isoformat()
-            client_portal_hints[c["id"]] = ("ok", f"👁 {hint}")
     counts = {r["status"]: r["n"] for r in db.all_(
         """SELECT status, COUNT(*) AS n FROM projects
            WHERE status != 'archived' GROUP BY status""")}
@@ -405,7 +418,7 @@ async def studio_home(request: Request):
                  "usage_tier": lic["usage_tier"], "n": len(hits), "latest": hits[0]})
     press_confirm.sort(key=lambda x: x["n"], reverse=True)
     return templates.TemplateResponse(request, "admin/studio.html",
-                                      {"projects": projects, "clients": clients,
+                                      {"projects": projects,
                                        "statuses": PROJECT_STATUSES, "counts": counts,
                                        "stale_days": STALE_DAYS,
                                        "outstanding": outstanding,
@@ -419,7 +432,6 @@ async def studio_home(request: Request):
                                        "upcoming": upcoming,
                                        "proofing_waiting": list(waiting.values()),
                                        "conflicts": conflicts,
-                                       "client_portal_hints": client_portal_hints,
                                        "overdue_by_stage": overdue_by_stage,
                                        "sparklines": sparklines,
                                        "spark_days": day_strs,

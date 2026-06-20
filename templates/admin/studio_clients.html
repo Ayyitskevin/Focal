@@ -1,0 +1,53 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Clients · Studio · Mise{% endblock %}
+{% block topbar %}
+{% set n_portals = clients|selectattr('portal_published')|list|length %}
+<header class="admin-topbar pgtop">
+  <div class="pgtop-lead">
+    <h1>Clients</h1>
+    <p class="pgtop-sub">
+      <b>{{ clients|length }}</b> client{{ "s" if clients|length != 1 }}
+      {% if n_portals %}· <b>{{ n_portals }}</b> live portal{{ "s" if n_portals != 1 }}{% endif %}
+    </p>
+  </div>
+  <div class="pgtop-actions">
+    <a class="pgtop-link" href="/admin/studio">Studio <span aria-hidden="true">&rarr;</span></a>
+    <details class="stu-newproj" id="new-client">
+      <summary class="pgtop-new"><span class="qc-plus" aria-hidden="true">+</span> New client</summary>
+      <form method="post" action="/admin/studio/clients" class="stu-newproj-pop">
+        <p class="stu-newproj-hint">Add the contact — sessions, portal, and brand kit live on their page.</p>
+        <input type="text" name="name" placeholder="Contact name" required>
+        <input type="text" name="company" placeholder="Company / venue">
+        <input type="email" name="email" placeholder="Email">
+        <input type="text" name="phone" placeholder="Phone">
+        <button type="submit">Add client</button>
+      </form>
+    </details>
+  </div>
+</header>
+{% endblock %}
+{% block admin_body %}
+<main class="admin-main">
+  {% if clients %}
+  <table class="list">
+    <thead>
+      <tr><th>Client</th><th>Company</th><th class="num">Sessions</th><th>Portal</th></tr>
+    </thead>
+    <tbody>
+    {% for c in clients %}
+    {% set hint = client_portal_hints.get(c.id, ('muted', '—')) %}
+    <tr>
+      <td><a href="/admin/studio/clients/{{ c.id }}">{{ c.name }}</a></td>
+      <td>{% if c.company %}{{ c.company }}{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="num">{{ c.n_projects }}</td>
+      <td><span class="stu-portal stu-portal-{{ hint[0] }}">{{ hint[1] }}</span></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No clients yet. Add one with <b>+ New client</b>, or convert an inquiry
+    from the <a href="/admin/inbox">Inbox</a>.</p>
+  {% endif %}
+</main>
+{% endblock %}
