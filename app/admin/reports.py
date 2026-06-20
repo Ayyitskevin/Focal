@@ -1,20 +1,17 @@
 import datetime as dt
 import logging
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from .. import db, security
 from ..render import templates
+from .financials import _RANGE_LABELS, _RANGES, _range_bounds
 from .studio import PROJECT_STATUSES
 
 log = logging.getLogger("mise.admin.reports")
 router = APIRouter(prefix="/admin/reports",
                    dependencies=[Depends(security.require_admin)])
-
-
-def _year_bounds(year):
-    return f"{year}-01-01", f"{year + 1}-01-01"
 
 
 def _months_back(n=12):
@@ -41,20 +38,22 @@ def _collected_by_month():
 
 
 @router.get("", response_class=HTMLResponse)
-async def reports(request: Request, year: int | None = None):
+async def reports(request: Request, period: str = Query("ytd", alias="range")):
     """Read-only business analytics — the HoneyBook 'Reports' tab. Cash from
     the payments (Stripe webhook) table is the truth for collected revenue;
     invoices give booked value and AR; inquiries give leads/conversion.
-    No writes, so nothing narrates to the Notion Activity Log."""
-    this_year = dt.date.today().year
-    if year is None:
-        year = this_year
-    y_start, y_end = _year_bounds(year)
+    The range pill (month/quarter/YTD/last-year — shared with the Income page)
+    scopes the headline numbers; the funnel, top clients and engagement panels
+    stay all-time pipeline snapshots. No writes, so nothing narrates to the
+    Notion Activity Log."""
+    if period not in _RANGE_LABELS:
+        period = "ytd"
+    r_start, r_end = _range_bounds(period)
 
     collected = db.one(
         """SELECT COALESCE(SUM(amount_cents), 0) AS cents, COUNT(*) AS n
            FROM payments WHERE created_at >= ? AND created_at < ?""",
-        (y_start, y_end))
+        (r_start, r_end))
     outstanding = db.one(
         """SELECT COUNT(*) AS n, COALESCE(SUM(CASE
              WHEN status='deposit_paid' THEN total_cents - deposit_cents
@@ -64,11 +63,11 @@ async def reports(request: Request, year: int | None = None):
         """SELECT COUNT(*) AS n, COALESCE(SUM(total_cents), 0) AS cents
            FROM invoices
            WHERE status != 'draft' AND created_at >= ? AND created_at < ?""",
-        (y_start, y_end))
-    leads_year = db.one(
+        (r_start, r_end))
+    leads_range = db.one(
         """SELECT COUNT(*) AS n FROM inquiries
            WHERE created_at >= ? AND created_at < ?
-             AND dismissed_at IS NULL""", (y_start, y_end))["n"]
+             AND dismissed_at IS NULL""", (r_start, r_end))["n"]
 
     # rolling 12-month collected revenue (Python buckets so empty months show 0)
     by_month = _collected_by_month()
@@ -163,12 +162,12 @@ async def reports(request: Request, year: int | None = None):
            ORDER BY collected_cents DESC, last_paid DESC
            LIMIT 10""")
 
-    years = list(range(this_year, this_year - 4, -1))
+    ranges = [{"key": k, "label": lbl, "on": k == period} for k, lbl in _RANGES]
 
     return templates.TemplateResponse(request, "admin/reports.html", {
-        "year": year, "this_year": this_year, "years": years,
+        "range": period, "range_label": _RANGE_LABELS[period], "ranges": ranges,
         "collected": collected, "outstanding": outstanding,
-        "booked": booked, "leads_year": leads_year,
+        "booked": booked, "leads_range": leads_range,
         "chart": chart, "chart_max": chart_max,
         "funnel": funnel, "win_rate": win_rate,
         "won": won, "archived": archived, "total_active": total_active,

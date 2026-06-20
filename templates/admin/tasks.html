@@ -62,6 +62,7 @@
       <div class="studio-view-toggle" role="group" aria-label="Grouping">
         <button type="button" data-group="flat" class="is-active" aria-pressed="true">List</button>
         <button type="button" data-group="project" aria-pressed="false">By session</button>
+        <button type="button" data-group="board" aria-pressed="false">Board</button>
       </div>
     </div>
     <ul class="task-list" id="task-list">
@@ -85,6 +86,30 @@
       {% endfor %}
     </ul>
     <p class="studio-empty" id="task-empty" hidden>No tasks match.</p>
+
+    {# Board view — same task rows redistributed into due-buckets (kanban). JS
+       moves the existing <li> nodes between #task-list and these columns; no
+       markup is duplicated, so search/filter still apply. #}
+    <div class="task-board" id="task-board" hidden>
+      <div class="task-col">
+        <div class="task-col-head"><span class="task-col-dot tcd-today"></span>Today
+          <span class="task-col-n" data-col-n="today"></span></div>
+        <ul class="task-col-list" data-col="today"></ul>
+        <p class="task-col-empty muted" hidden>Nothing due today.</p>
+      </div>
+      <div class="task-col">
+        <div class="task-col-head"><span class="task-col-dot tcd-week"></span>This week
+          <span class="task-col-n" data-col-n="week"></span></div>
+        <ul class="task-col-list" data-col="week"></ul>
+        <p class="task-col-empty muted" hidden>Nothing this week.</p>
+      </div>
+      <div class="task-col">
+        <div class="task-col-head"><span class="task-col-dot tcd-later"></span>No due date
+          <span class="task-col-n" data-col-n="later"></span></div>
+        <ul class="task-col-list" data-col="later"></ul>
+        <p class="task-col-empty muted" hidden>Nothing here.</p>
+      </div>
+    </div>
     {% else %}<p class="muted">All clear — nothing open.</p>{% endif %}
   </section>
 
@@ -118,6 +143,13 @@
     var fDue = document.getElementById('task-due');
     var fSort = document.getElementById('task-sort');
     var empty = document.getElementById('task-empty');
+    var board = document.getElementById('task-board');
+    var cols = {
+      today: board.querySelector('[data-col="today"]'),
+      week: board.querySelector('[data-col="week"]'),
+      later: board.querySelector('[data-col="later"]')
+    };
+    var bucketCol = { overdue: 'today', today: 'today', week: 'week', none: 'later' };
     var group = 'flat';
 
     function visible(r) {
@@ -146,7 +178,7 @@
       });
       return arr;
     }
-    function render() {
+    function renderList() {
       list.querySelectorAll('.task-group-head').forEach(function (h) { h.remove(); });
       var arr = ordered();
       var vis = arr.filter(visible), hid = arr.filter(function (r) { return !visible(r); });
@@ -164,6 +196,32 @@
       });
       hid.forEach(function (r) { r.classList.add('studio-hidden'); list.appendChild(r); });
       empty.hidden = vis.length !== 0;
+    }
+    function renderBoard() {
+      var counts = { today: 0, week: 0, later: 0 };
+      ordered().forEach(function (r) {
+        if (!visible(r)) { r.classList.add('studio-hidden'); return; }
+        r.classList.remove('studio-hidden');
+        var col = bucketCol[r.dataset.bucket] || 'later';
+        cols[col].appendChild(r);
+        counts[col]++;
+      });
+      Object.keys(cols).forEach(function (k) {
+        board.querySelector('[data-col-n="' + k + '"]').textContent = counts[k] || '';
+        cols[k].nextElementSibling.hidden = counts[k] !== 0;
+      });
+    }
+    function render() {
+      if (group === 'board') {
+        list.hidden = true;
+        empty.hidden = true;
+        board.hidden = false;
+        renderBoard();
+      } else {
+        board.hidden = true;
+        list.hidden = false;
+        renderList();
+      }
     }
 
     [search, fProject, fDue, fSort].forEach(function (el) {

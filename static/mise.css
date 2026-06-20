@@ -1384,8 +1384,7 @@ progress { width: 100%; }
 .req { color: var(--accent); }
 
 /* ── Reports (Phase 5) ─────────────────────────────────────────── */
-.report-year { margin: 0 0 1.2rem; }
-.report-year select { padding: 0.3rem 0.5rem; }
+.report-range { margin: 0 0 1.2rem; }
 .report-block { margin: 1.6rem 0; }
 .report-block h2 { margin-bottom: 0.6rem; }
 .report-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1.6rem; }
@@ -2875,6 +2874,25 @@ tr.inquiry-dismissed td:nth-child(2) { text-decoration: line-through; }
   font-size: 0.78rem; font-weight: 700; letter-spacing: 0.02em;
   text-transform: uppercase; color: var(--muted); }
 .task-group-head:first-child { margin-top: 0; }
+
+/* Tasks board (kanban) — same rows redistributed into due-buckets */
+.task-board { display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 1rem; margin: 0 0 1.5rem; }
+.task-col { background: var(--card); border: 1px solid var(--line);
+  border-radius: 12px; padding: 0.7rem 0.8rem; }
+.task-col-head { display: flex; align-items: center; gap: 0.45rem;
+  font-size: 0.8rem; font-weight: 700; letter-spacing: 0.02em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 0.6rem; }
+.task-col-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.tcd-today { background: var(--clay); }
+.tcd-week  { background: var(--honey); }
+.tcd-later { background: var(--muted); }
+.task-col-n { margin-left: auto; font-weight: 700; color: var(--ink); }
+.task-col-list { list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 0.4rem; }
+.task-col-list .task-row { margin: 0; }
+.task-col-empty { font-size: 0.85rem; margin: 0.3rem 0 0; }
+@media (max-width: 720px) { .task-board { grid-template-columns: 1fr; } }
 
 /* Transfers (WeTransfer-style drops) — admin list */
 .summary-strip { display: flex; flex-wrap: wrap; gap: 1.2rem; margin: 1rem 0;

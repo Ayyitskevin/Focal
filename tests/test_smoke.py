@@ -1085,6 +1085,58 @@ def test_reports_top_clients(admin):
     assert db.one("SELECT id FROM clients WHERE id=?", (c["id"],)) is None
 
 
+def test_reports_range_toggle(admin):
+    # Reports headline numbers must scope to the selected range (month/quarter/
+    # YTD/last-year) — the same pills the Income page uses. An unknown range must
+    # fall back to YTD, not 500. If the toggle silently ignores ?range=, the page
+    # would always show YTD and the pills would be decorative lies.
+    for key, label in (("month", "This month"), ("quarter", "Quarter"),
+                       ("ytd", "YTD"), ("lastyear", "Last year")):
+        page = admin.get(f"/admin/reports?range={key}").text
+        assert "fin-range-pill" in page
+        assert f'href="/admin/reports?range={key}"' in page
+        # the active pill carries fin-range-on next to its own key
+        on = page.split(f'?range={key}', 1)[1][:60]
+        assert "fin-range-on" in on
+    # garbage range → YTD fallback, still 200
+    bad = admin.get("/admin/reports?range=bogus")
+    assert bad.status_code == 200
+    assert "fin-range-on" in bad.text
+
+
+def test_tasks_board_view(admin):
+    # The open-tasks toolbar must offer a Board (kanban) grouping alongside
+    # List / By session, and the three due-bucket columns must exist for the JS
+    # to redistribute rows into. The rows are moved, not duplicated, so search/
+    # filter keep working — guard the markup the JS depends on.
+    admin.post("/admin/tasks", data={"title": "Board-view smoke task"},
+               follow_redirects=False)
+    page = admin.get("/admin/tasks").text
+    assert 'data-group="board"' in page
+    assert 'id="task-board"' in page
+    for col in ("today", "week", "later"):
+        assert f'data-col="{col}"' in page
+        assert f'data-col-n="{col}"' in page
+    db.run("DELETE FROM tasks WHERE title='Board-view smoke task'")
+
+
+def test_manage_nav_financials_expenses(admin):
+    # Financials and Expenses must appear as first-class links in the Manage
+    # sidebar (not palette-only), and their active-state guards must not overlap:
+    # on the income page only Financials is highlighted; on the expenses/mileage
+    # pages only Expenses is. A bad guard would light both at once and mislead.
+    inc = admin.get("/admin/financials").text
+    assert 'href="/admin/financials" title="Financials"' in inc
+    assert 'href="/admin/financials/expenses" title="Expenses"' in inc
+    # active financials link, inactive expenses link, on the income page
+    assert 'href="/admin/financials" title="Financials" class="is-active"' in inc
+    assert 'href="/admin/financials/expenses" title="Expenses"><' in inc
+
+    exp = admin.get("/admin/financials/expenses").text
+    assert 'href="/admin/financials/expenses" title="Expenses" class="is-active"' in exp
+    assert 'href="/admin/financials" title="Financials"><' in exp
+
+
 def test_invoice_receipt(admin):
     # A paid invoice must offer a printable receipt that lists the recorded
     # payments and totals — for the client's accountant. The receipt is a pure

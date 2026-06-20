@@ -5,7 +5,7 @@
   <div class="pgtop-lead">
     <h1>Reports</h1>
     <p class="pgtop-sub">
-      <b>${{ "{:,.0f}".format(collected.cents / 100) }}</b> collected in {{ year }} ·
+      <b>${{ "{:,.0f}".format(collected.cents / 100) }}</b> collected · {{ range_label|lower }} ·
       <b>${{ "{:,.0f}".format(booked.cents / 100) }}</b> booked
       {% if outstanding.cents %}· <span class="neg">${{ "{:,.0f}".format(outstanding.cents / 100) }} outstanding</span>{% endif %}
     </p>
@@ -17,19 +17,17 @@
 {% endblock %}
 {% block admin_body %}
 <main class="admin-main">
-  <form method="get" action="/admin/reports" class="report-year">
-    <label>Year
-      <select name="year" onchange="this.form.submit()">
-        {% for y in years %}<option value="{{ y }}"{% if y == year %} selected{% endif %}>{{ y }}</option>{% endfor %}
-      </select>
-    </label>
-    <noscript><button type="submit">Go</button></noscript>
-  </form>
+  <div class="fin-range report-range" role="group" aria-label="Time range">
+    {% for r in ranges %}
+    <a href="/admin/reports?range={{ r.key }}"
+       class="fin-range-pill{% if r.on %} fin-range-on{% endif %}">{{ r.label }}</a>
+    {% endfor %}
+  </div>
 
   <section class="home-tiles" aria-label="Headline numbers">
     <div class="home-tile home-tile-money">
       <span class="home-tile-n">${{ "%.2f" % (collected.cents / 100) }}</span>
-      <span class="home-tile-label">Collected in {{ year }} · {{ collected.n }} payment{{ "s" if collected.n != 1 }}</span>
+      <span class="home-tile-label">Collected · {{ range_label|lower }} · {{ collected.n }} payment{{ "s" if collected.n != 1 }}</span>
     </div>
     <div class="home-tile{% if outstanding.cents %} home-tile-warn{% endif %}">
       <span class="home-tile-n">${{ "%.2f" % (outstanding.cents / 100) }}</span>
@@ -37,11 +35,11 @@
     </div>
     <div class="home-tile">
       <span class="home-tile-n">${{ "%.2f" % (booked.cents / 100) }}</span>
-      <span class="home-tile-label">Booked in {{ year }} · {{ booked.n }} invoice{{ "s" if booked.n != 1 }}</span>
+      <span class="home-tile-label">Booked · {{ range_label|lower }} · {{ booked.n }} invoice{{ "s" if booked.n != 1 }}</span>
     </div>
     <div class="home-tile">
-      <span class="home-tile-n">{{ leads_year }}</span>
-      <span class="home-tile-label">New leads in {{ year }}</span>
+      <span class="home-tile-n">{{ leads_range }}</span>
+      <span class="home-tile-label">New leads · {{ range_label|lower }}</span>
     </div>
   </section>
 
