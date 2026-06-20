@@ -20,6 +20,15 @@
 <main class="admin-main">
   {% if g_error %}<p class="sched-flash sched-flash-err">{{ g_error }}</p>{% endif %}
 
+  <section class="sched-hero" aria-label="Booking page">
+    <span class="sched-hero-ico" aria-hidden="true">&#9719;</span>
+    <div class="sched-hero-body">
+      <h2>Your booking page is live</h2>
+      <p><code>/book</code> · clients pick a time that fits your weekly hours</p>
+    </div>
+    <button type="button" class="sched-hero-copy" data-copy-path="/book">Copy link</button>
+  </section>
+
   <section class="sched-card">
     <div class="sched-card-head">
       <h2>Google Calendar</h2>
@@ -143,5 +152,23 @@
       <button type="submit">Add</button>
     </form>
   </section>
+
+  <script>
+  (function () {
+    var btn = document.querySelector('.sched-hero-copy');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      var url = window.location.origin + (btn.dataset.copyPath || '/book');
+      var done = function () {
+        var was = btn.textContent;
+        btn.textContent = '✓ Copied';
+        setTimeout(function () { btn.textContent = was; }, 1600);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(done, done);
+      } else { done(); }
+    });
+  })();
+  </script>
 </main>
 {% endblock %}
