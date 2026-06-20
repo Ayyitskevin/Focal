@@ -1077,7 +1077,7 @@ def test_reports_top_clients(admin):
     page = admin.get("/admin/reports").text
     assert "Top clients" in page
     assert "Osteria Vega" in page
-    assert "$10000.00" in page  # 600000 + 400000 cents collected
+    assert "$10,000" in page  # 600000 + 400000 cents collected
     # Two paid projects → repeat badge.
     block = page.split("Osteria Vega", 1)[1][:200]
     assert "repeat" in block

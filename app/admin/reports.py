@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from .. import db, security
 from ..render import templates
-from .financials import _RANGE_LABELS, _RANGES, _range_bounds
+from .financials import _RANGE_LABELS, _RANGES, _range_bounds, _usd0
 from .studio import PROJECT_STATUSES
 
 log = logging.getLogger("mise.admin.reports")
@@ -26,6 +26,42 @@ def _months_back(n=12):
             y, m = y - 1, 12
     out.reverse()
     return out
+
+
+def _prior_bounds(key: str) -> tuple[str, str]:
+    """(start, end) of the period immediately before the current one, for
+    'vs prior' trend deltas. Mirrors financials._range_bounds shape."""
+    today = dt.date.today()
+    if key == "month":
+        cur = today.replace(day=1)
+        end = cur
+        start = (dt.date(cur.year - 1, 12, 1) if cur.month == 1
+                 else dt.date(cur.year, cur.month - 1, 1))
+    elif key == "ytd":
+        start, end = dt.date(today.year - 1, 1, 1), dt.date(today.year, 1, 1)
+    elif key == "lastyear":
+        start, end = dt.date(today.year - 2, 1, 1), dt.date(today.year - 1, 1, 1)
+    else:  # quarter
+        q_start_month = 3 * ((today.month - 1) // 3) + 1
+        end = dt.date(today.year, q_start_month, 1)
+        pm = q_start_month - 3
+        start = (dt.date(today.year - 1, pm + 12, 1) if pm <= 0
+                 else dt.date(today.year, pm, 1))
+    return start.isoformat(), end.isoformat()
+
+
+def _trend(cur: int, prior: int) -> dict:
+    """Up/down/flat delta vs the prior period. Green up, clay down, muted flat."""
+    if prior == 0:
+        if cur == 0:
+            return {"text": "—", "tone": "flat"}
+        return {"text": "▲ new", "tone": "up"}
+    pct = round(100 * (cur - prior) / prior)
+    if pct > 0:
+        return {"text": f"▲ {pct}%", "tone": "up"}
+    if pct < 0:
+        return {"text": f"▼ {abs(pct)}%", "tone": "down"}
+    return {"text": "▬ 0%", "tone": "flat"}
 
 
 def _collected_by_month():
@@ -68,6 +104,33 @@ async def reports(request: Request, period: str = Query("ytd", alias="range")):
         """SELECT COUNT(*) AS n FROM inquiries
            WHERE created_at >= ? AND created_at < ?
              AND dismissed_at IS NULL""", (r_start, r_end))["n"]
+
+    # prior period (same kind, immediately before) for honest 'vs prior' deltas
+    p_start, p_end = _prior_bounds(period)
+    prior_collected = db.one(
+        "SELECT COALESCE(SUM(amount_cents),0) AS cents FROM payments "
+        "WHERE created_at >= ? AND created_at < ?", (p_start, p_end))["cents"]
+    prior_booked = db.one(
+        "SELECT COUNT(*) AS n, COALESCE(SUM(total_cents),0) AS cents FROM invoices "
+        "WHERE status != 'draft' AND created_at >= ? AND created_at < ?",
+        (p_start, p_end))
+    prior_leads = db.one(
+        "SELECT COUNT(*) AS n FROM inquiries WHERE created_at >= ? "
+        "AND created_at < ? AND dismissed_at IS NULL", (p_start, p_end))["n"]
+
+    avg_val = round(booked["cents"] / booked["n"]) if booked["n"] else 0
+    prior_avg = (round(prior_booked["cents"] / prior_booked["n"])
+                 if prior_booked["n"] else 0)
+    kpis = [
+        {"label": "Revenue", "value": _usd0(collected["cents"]),
+         "trend": _trend(collected["cents"], prior_collected)},
+        {"label": "Bookings", "value": str(booked["n"]),
+         "trend": _trend(booked["n"], prior_booked["n"])},
+        {"label": "Avg value", "value": _usd0(avg_val),
+         "trend": _trend(avg_val, prior_avg)},
+        {"label": "New leads", "value": str(leads_range),
+         "trend": _trend(leads_range, prior_leads)},
+    ]
 
     # rolling 12-month collected revenue (Python buckets so empty months show 0)
     by_month = _collected_by_month()
@@ -167,7 +230,7 @@ async def reports(request: Request, period: str = Query("ytd", alias="range")):
     return templates.TemplateResponse(request, "admin/reports.html", {
         "range": period, "range_label": _RANGE_LABELS[period], "ranges": ranges,
         "collected": collected, "outstanding": outstanding,
-        "booked": booked, "leads_range": leads_range,
+        "booked": booked, "leads_range": leads_range, "kpis": kpis,
         "chart": chart, "chart_max": chart_max,
         "funnel": funnel, "win_rate": win_rate,
         "won": won, "archived": archived, "total_active": total_active,

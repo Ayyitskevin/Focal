@@ -4,141 +4,129 @@
 <header class="admin-topbar pgtop">
   <div class="pgtop-lead">
     <h1>Reports</h1>
-    <p class="pgtop-sub">
-      <b>${{ "{:,.0f}".format(collected.cents / 100) }}</b> collected · {{ range_label|lower }} ·
-      <b>${{ "{:,.0f}".format(booked.cents / 100) }}</b> booked
-      {% if outstanding.cents %}· <span class="neg">${{ "{:,.0f}".format(outstanding.cents / 100) }} outstanding</span>{% endif %}
-    </p>
+    <p class="pgtop-sub">How the studio is doing · {{ range_label|lower }}</p>
   </div>
-  <div class="pgtop-actions">
+  <div class="pgtop-actions rep-top-actions">
+    <div class="fin-range rep-seg" role="group" aria-label="Time range">
+      {% for r in ranges %}
+      <a href="/admin/reports?range={{ r.key }}"
+         class="fin-range-pill{% if r.on %} fin-range-on{% endif %}">{{ r.label }}</a>
+      {% endfor %}
+    </div>
     <a class="pgtop-link" href="/admin/reports/revenue.csv">Revenue CSV <span aria-hidden="true">&darr;</span></a>
   </div>
 </header>
 {% endblock %}
 {% block admin_body %}
 <main class="admin-main">
-  <div class="fin-range report-range" role="group" aria-label="Time range">
-    {% for r in ranges %}
-    <a href="/admin/reports?range={{ r.key }}"
-       class="fin-range-pill{% if r.on %} fin-range-on{% endif %}">{{ r.label }}</a>
+
+  <section class="kpi-strip" aria-label="Headline numbers">
+    {% for k in kpis %}
+    <div class="kpi-card">
+      <span class="kpi-label">{{ k.label }}</span>
+      <div class="kpi-val">{{ k.value }}</div>
+      <span class="kpi-trend kpi-trend-{{ k.trend.tone }}">{{ k.trend.text }} <span class="kpi-trend-cap">vs prior</span></span>
+    </div>
     {% endfor %}
-  </div>
-
-  <section class="home-tiles" aria-label="Headline numbers">
-    <div class="home-tile home-tile-money">
-      <span class="home-tile-n">${{ "%.2f" % (collected.cents / 100) }}</span>
-      <span class="home-tile-label">Collected · {{ range_label|lower }} · {{ collected.n }} payment{{ "s" if collected.n != 1 }}</span>
-    </div>
-    <div class="home-tile{% if outstanding.cents %} home-tile-warn{% endif %}">
-      <span class="home-tile-n">${{ "%.2f" % (outstanding.cents / 100) }}</span>
-      <span class="home-tile-label">Outstanding · {{ outstanding.n }} open invoice{{ "s" if outstanding.n != 1 }}</span>
-    </div>
-    <div class="home-tile">
-      <span class="home-tile-n">${{ "%.2f" % (booked.cents / 100) }}</span>
-      <span class="home-tile-label">Booked · {{ range_label|lower }} · {{ booked.n }} invoice{{ "s" if booked.n != 1 }}</span>
-    </div>
-    <div class="home-tile">
-      <span class="home-tile-n">{{ leads_range }}</span>
-      <span class="home-tile-label">New leads · {{ range_label|lower }}</span>
-    </div>
   </section>
 
-  <section class="report-block" aria-label="Collected revenue, last 12 months">
-    <h2>Collected revenue <span class="muted">· last 12 months</span></h2>
-    <div class="rev-chart">
-      {% for m in chart %}
-      <div class="rev-bar-wrap" title="{{ m.label }}: ${{ '%.2f' % (m.cents / 100) }}">
-        <span class="rev-val">{% if m.cents %}${{ (m.cents / 100)|round|int }}{% endif %}</span>
-        <div class="rev-bar" style="height:{{ (100 * m.cents / chart_max)|round(1) }}%"></div>
-        <span class="rev-label">{{ m.label }}</span>
-      </div>
-      {% endfor %}
-    </div>
-  </section>
+  <div class="rep-grid">
+    <div class="rep-col">
 
-  {% set stage_label = {"inquiry_received": "Inquiry Received",
-    "consultation_call": "Consultation Call", "proposal_sent": "Proposal Sent",
-    "contract_signed": "Contract Signed", "retainer_paid": "Retainer Paid",
-    "session_planning": "Session Planning", "project_closed": "Project Closed",
-    "archived": "Archived"} %}
-  <section class="report-block" aria-label="Sales funnel">
-    <h2>Sales funnel
-      <span class="muted">· {{ win_rate }}% win rate — {{ won }} closed of {{ total_active + archived.n }} all-time</span></h2>
-    <div class="funnel">
-      {% for row in funnel %}
-      <div class="funnel-row">
-        <div class="funnel-meta">
-          <span class="stage-tag stage-{{ row.status }}">{{ stage_label.get(row.status, row.status) }}</span>
-          {% if row.conv is not none %}<span class="funnel-conv" title="retained from the previous stage">{{ row.conv }}%</span>{% endif %}
+      <section class="rep-card" aria-label="Collected revenue, last 12 months">
+        <div class="rep-card-head">
+          <h2>Revenue <span class="muted">· last 12 months</span></h2>
         </div>
-        <div class="funnel-bar-track">
-          <div class="funnel-bar funnel-{{ row.status }}" style="width:{{ row.pct }}%">
-            <span class="funnel-n">{{ row.reach }}</span>
+        <div class="rev-chart">
+          {% for m in chart %}
+          <div class="rev-bar-wrap" title="{{ m.label }}: ${{ '%.2f' % (m.cents / 100) }}">
+            <span class="rev-val">{% if m.cents %}${{ (m.cents / 100)|round|int }}{% endif %}</span>
+            <div class="rev-bar{% if loop.last %} rev-bar-now{% endif %}" style="height:{{ (100 * m.cents / chart_max)|round(1) }}%"></div>
+            <span class="rev-label">{{ m.label }}</span>
           </div>
-        </div>
-        <div class="funnel-side">
-          <span class="funnel-val">{{ row.current }} here · ${{ "%.0f" % (row.cents / 100) }}</span>
-          {% if row.current and row.oldest_days %}<span class="funnel-age muted" title="longest a project here has sat in this stage">{{ row.oldest_days }}d in stage</span>{% endif %}
-        </div>
-      </div>
-      {% endfor %}
-    </div>
-    {% if archived.n %}
-    <p class="funnel-archived muted">Archived / lost: {{ archived.n }} project{{ "s" if archived.n != 1 }} · ${{ "%.0f" % (archived.cents / 100) }} booked</p>
-    {% endif %}
-    <p class="muted funnel-note">“Reached” counts projects currently at or beyond a stage — stage moves are forward-only, so this approximates how many ever hit each stage (archived projects' depth isn't tracked). The day count is the longest a current project has sat in that stage.</p>
-  </section>
-
-  <section class="report-block" aria-label="Top clients by lifetime value">
-    <h2>Top clients <span class="muted">· by cash collected, all time</span></h2>
-    {% if top_clients %}
-    <table class="report-table">
-      <thead>
-        <tr><th>Client</th><th class="num">Collected</th><th class="num">Bookings</th><th class="num">Last payment</th></tr>
-      </thead>
-      <tbody>
-        {% for r in top_clients %}
-        <tr>
-          <td><a href="/admin/studio/clients/{{ r.id }}">{{ r.company or r.name }}</a>
-            {% if r.n_paid_projects > 1 %}<span class="kind-badge kind-payment" title="paid for more than one project">repeat</span>{% endif %}</td>
-          <td class="num"><strong>${{ "%.2f" % (r.collected_cents / 100) }}</strong></td>
-          <td class="num">{{ r.n_paid_projects }}</td>
-          <td class="num">{{ r.last_paid[:10] if r.last_paid else "—" }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <p class="muted">No payments collected yet — paying clients rank here once Stripe records a payment.</p>
-    {% endif %}
-  </section>
-
-  <div class="report-cols">
-    <section class="report-block" aria-label="Leads and conversion">
-      <h2>Leads &amp; conversion <span class="muted">· all time</span></h2>
-      <p class="report-big">{{ conv_rate }}%
-        <span class="muted">— {{ leads_converted }} of {{ leads_total }} inquiries converted</span></p>
-      <table class="report-table">
-        <tbody>
-          {% for k in leads_by_kind %}
-          <tr><td>{{ k.kind }}</td><td class="num">{{ k.n }}</td></tr>
           {% endfor %}
-        </tbody>
-      </table>
-    </section>
+        </div>
+      </section>
 
-    <section class="report-block" aria-label="Delivery and engagement">
-      <h2>Delivery &amp; engagement <span class="muted">· all time</span></h2>
-      <table class="report-table">
-        <tbody>
-          <tr><td>Galleries</td><td class="num">{{ delivery.galleries }}</td></tr>
-          <tr><td>Delivered projects</td><td class="num">{{ delivery.delivered }}</td></tr>
-          <tr><td>Downloads</td><td class="num">{{ delivery.downloads }}</td></tr>
-          <tr><td>Emails captured</td><td class="num">{{ delivery.emails }}</td></tr>
-          <tr><td>Form submissions</td><td class="num">{{ delivery.submissions }}</td></tr>
-        </tbody>
-      </table>
-    </section>
+      {% set stage_label = {"inquiry_received": "Inquiry Received",
+        "consultation_call": "Consultation Call", "proposal_sent": "Proposal Sent",
+        "contract_signed": "Contract Signed", "retainer_paid": "Retainer Paid",
+        "session_planning": "Session Planning", "project_closed": "Project Closed",
+        "archived": "Archived"} %}
+      <section class="rep-card" aria-label="Conversion funnel">
+        <div class="rep-card-head">
+          <h2>Conversion funnel</h2>
+          <span class="rep-card-meta clay">{{ win_rate }}% lead → paid</span>
+        </div>
+        <div class="funnel">
+          {% for row in funnel %}
+          <div class="funnel-row">
+            <div class="funnel-meta">
+              <span class="stage-tag stage-{{ row.status }}">{{ stage_label.get(row.status, row.status) }}</span>
+              {% if row.conv is not none %}<span class="funnel-conv" title="retained from the previous stage">{{ row.conv }}%</span>{% endif %}
+            </div>
+            <div class="funnel-bar-track">
+              <div class="funnel-bar funnel-{{ row.status }}" style="width:{{ row.pct }}%">
+                <span class="funnel-n">{{ row.reach }}</span>
+              </div>
+            </div>
+            <div class="funnel-side">
+              <span class="funnel-val">{{ row.current }} here · ${{ "%.0f" % (row.cents / 100) }}</span>
+              {% if row.current and row.oldest_days %}<span class="funnel-age muted" title="longest a project here has sat in this stage">{{ row.oldest_days }}d in stage</span>{% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% if archived.n %}
+        <p class="funnel-archived muted">Archived / lost: {{ archived.n }} project{{ "s" if archived.n != 1 }} · ${{ "%.0f" % (archived.cents / 100) }} booked</p>
+        {% endif %}
+        <p class="muted funnel-note">“Reached” counts projects currently at or beyond a stage — stage moves are forward-only, so this approximates how many ever hit each stage (archived projects' depth isn't tracked). The day count is the longest a current project has sat in that stage.</p>
+      </section>
+    </div>
+
+    <div class="rep-col">
+
+      <section class="tc-card" aria-label="Top clients by lifetime value">
+        <h2>Top clients <span class="tc-sub">· by cash collected, all time</span></h2>
+        {% if top_clients %}
+        {% for r in top_clients %}
+        <a class="tc-row" href="/admin/studio/clients/{{ r.id }}">
+          <span class="tc-rank">{{ loop.index }}</span>
+          <span class="tc-name">{{ r.company or r.name }}{% if r.n_paid_projects > 1 %} <span class="tc-repeat">repeat</span>{% endif %}</span>
+          <span class="tc-amt">${{ "{:,.0f}".format(r.collected_cents / 100) }}</span>
+        </a>
+        {% endfor %}
+        {% else %}
+        <p class="tc-empty">No payments collected yet — paying clients rank here once Stripe records a payment.</p>
+        {% endif %}
+      </section>
+
+      <section class="rep-card" aria-label="Leads and conversion">
+        <div class="rep-card-head"><h2>Leads &amp; conversion <span class="muted">· all time</span></h2></div>
+        <p class="report-big">{{ conv_rate }}%
+          <span class="muted">— {{ leads_converted }} of {{ leads_total }} inquiries converted</span></p>
+        <table class="report-table">
+          <tbody>
+            {% for k in leads_by_kind %}
+            <tr><td>{{ k.kind }}</td><td class="num">{{ k.n }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+
+      <section class="rep-card" aria-label="Delivery and engagement">
+        <div class="rep-card-head"><h2>Delivery &amp; engagement <span class="muted">· all time</span></h2></div>
+        <table class="report-table">
+          <tbody>
+            <tr><td>Galleries</td><td class="num">{{ delivery.galleries }}</td></tr>
+            <tr><td>Delivered projects</td><td class="num">{{ delivery.delivered }}</td></tr>
+            <tr><td>Downloads</td><td class="num">{{ delivery.downloads }}</td></tr>
+            <tr><td>Emails captured</td><td class="num">{{ delivery.emails }}</td></tr>
+            <tr><td>Form submissions</td><td class="num">{{ delivery.submissions }}</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </div>
   </div>
 </main>
 {% endblock %}

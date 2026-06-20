@@ -1513,6 +1513,65 @@ tr.inquiry-dismissed td:nth-child(2) { text-decoration: line-through; }
   .funnel-side { align-items: flex-start; }
 }
 
+/* reports — strict 1:1 (KPI strip + 2-col grid + dark-green Top clients) */
+.admin-shell .rep-top-actions { display: inline-flex; align-items: center; gap: 0.8rem; }
+.admin-shell .rep-seg { flex-wrap: nowrap; background: #F1ECE0; border-radius: 999px; padding: 3px; }
+.admin-shell .rep-seg .fin-range-pill { border: 0; }
+
+.admin-shell .kpi-strip { display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 16px; margin-bottom: 1.6rem; }
+.admin-shell .kpi-card { background: #FFFEF8; border: 1px solid var(--line);
+  border-radius: 14px; padding: 16px 18px; }
+.admin-shell .kpi-label { font: 600 0.7rem/1 var(--font-ui); letter-spacing: 0.04em;
+  text-transform: uppercase; color: #8A9183; }
+.admin-shell .kpi-val { font-family: var(--font-display); font-weight: 500;
+  font-size: 2rem; line-height: 1; color: var(--ink); margin: 9px 0 7px; }
+.admin-shell .kpi-trend { font: 600 0.74rem/1 var(--font-ui); }
+.admin-shell .kpi-trend-up { color: #2f7d57; }
+.admin-shell .kpi-trend-down { color: var(--clay); }
+.admin-shell .kpi-trend-flat { color: #8A9183; }
+.admin-shell .kpi-trend-cap { color: #8A9183; font-weight: 500; }
+
+.admin-shell .rep-grid { display: grid; grid-template-columns: 1.5fr 1fr;
+  gap: 1.6rem; align-items: start; }
+.admin-shell .rep-col { display: flex; flex-direction: column; gap: 1.6rem; min-width: 0; }
+.admin-shell .rep-card { background: #FFFEF8; border: 1px solid var(--line);
+  border-radius: 16px; padding: 20px 22px; }
+.admin-shell .rep-card-head { display: flex; align-items: baseline;
+  justify-content: space-between; gap: 0.8rem; margin-bottom: 1rem; }
+.admin-shell .rep-card-head h2 { margin: 0; }
+.admin-shell .rep-card-meta { font: 600 0.78rem/1 var(--font-ui); }
+.admin-shell .rep-card-meta.clay { color: var(--clay); }
+.admin-shell .rep-card .report-big { margin-top: 0; }
+.admin-shell .rev-bar-now { background: var(--clay); }
+
+.admin-shell .tc-card { background: #143C2F; color: #e6efe7;
+  border-radius: 16px; padding: 20px 22px; }
+.admin-shell .tc-card h2 { margin: 0 0 0.4rem; color: #F3F0E2; }
+.admin-shell .tc-sub { font-family: var(--font-ui); font-size: 0.8rem;
+  font-weight: 500; color: #8fb09f; }
+.admin-shell .tc-row { display: flex; align-items: center; gap: 12px;
+  padding: 11px 0; border-top: 1px solid #1C4A3A; text-decoration: none; }
+.admin-shell .tc-row:hover .tc-name { text-decoration: underline; }
+.admin-shell .tc-rank { font-family: var(--font-display); font-size: 1rem;
+  color: #8fb09f; width: 18px; flex: none; }
+.admin-shell .tc-name { flex: 1; min-width: 0; font: 600 0.88rem/1.2 var(--font-ui);
+  color: #e6efe7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-shell .tc-repeat { font-size: 0.66rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.03em; color: #143C2F; background: #8fb09f; border-radius: 999px;
+  padding: 0.05rem 0.4rem; }
+.admin-shell .tc-amt { font: 700 0.86rem/1 var(--font-ui); color: var(--gold); flex: none; }
+.admin-shell .tc-empty { color: #b9cdc0; font-size: 0.85rem; line-height: 1.5; margin: 0.4rem 0 0; }
+
+@media (max-width: 1120px) {
+  .admin-shell .rep-grid { grid-template-columns: 1fr; }
+  .admin-shell .kpi-strip { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 560px) {
+  .admin-shell .kpi-strip { grid-template-columns: 1fr; }
+  .admin-shell .rep-top-actions { flex-wrap: wrap; }
+}
+
 /* pipeline aging — kanban stalled-deal cue (stage_changed_at, migration 032) */
 .kanban-card-stale { border-color: #c79a3e; box-shadow: inset 3px 0 0 #c79a3e; }
 .kanban-card-age { font-variant-numeric: tabular-nums; }
