@@ -420,12 +420,12 @@ tr.inquiry-converted td:nth-child(2) { text-decoration: line-through; }
   font-size: 0.75rem; transition: transform 0.15s ease; }
 .needs-attention[open] .needs-attention-sum::before { transform: rotate(90deg); }
 .needs-attention-sum .na-ico { color: var(--accent); }
-.needs-attention-sum.warn .na-ico { color: #c0392b; }
+.needs-attention-sum.warn .na-ico { color: var(--clay); }
 .na-count { display: inline-flex; align-items: center; justify-content: center;
   min-width: 1.4rem; height: 1.4rem; padding: 0 0.4rem; border-radius: 999px;
   background: var(--accent); color: #fff; font-size: 0.75rem; font-weight: 700; }
-.needs-attention-sum.warn .na-count { background: #c0392b; }
-.na-flag { color: #c0392b; font-weight: 600; }
+.needs-attention-sum.warn .na-count { background: var(--clay); }
+.na-flag { color: var(--clay); font-weight: 600; }
 .needs-attention-body { padding: 0 0.9rem 0.5rem; }
 .needs-attention-body .upcoming { margin: 0.6rem 0 0.8rem; }
 
@@ -447,8 +447,8 @@ tr.inquiry-converted td:nth-child(2) { text-decoration: line-through; }
   color: var(--muted); margin-left: 0.4rem; }
 .upcoming-today { border-color: var(--accent); }
 .upcoming-today .upcoming-when { color: var(--accent); font-weight: 600; }
-.upcoming-overdue { border-color: #c0392b; }
-.upcoming-overdue .upcoming-when { color: #c0392b; font-weight: 600; }
+.upcoming-overdue { border-color: var(--clay); }
+.upcoming-overdue .upcoming-when { color: var(--clay); font-weight: 600; }
 
 /* Testimonials (shared partial — home, services, work-detail) */
 .testimonials { margin: 3rem 0 2rem; }
@@ -1039,7 +1039,7 @@ progress { width: 100%; }
 }
 
 /* inquiries (admin studio) */
-.warn { color: #c0392b; margin-left: 0.3rem; }
+.warn { color: var(--clay); margin-left: 0.3rem; }
 .inquiry-msg { white-space: pre-wrap; font-size: 0.85rem; max-width: 40rem;
   background: #f6f4f0; padding: 0.6rem; border-radius: 4px; }
 .expiring { color: #b9770e; margin-left: 0.3rem; }
@@ -1076,33 +1076,34 @@ progress { width: 100%; }
 /* Projects kanban (studio pipeline board) */
 .kanban { display: flex; gap: 12px; overflow-x: auto; padding: 0.4rem 0 1rem;
   align-items: flex-start; }
-.kanban-col { flex: 0 0 230px; background: var(--bg);
-  border: 1px solid var(--line); border-radius: 12px; padding: 0.6rem 0.6rem 0.8rem; }
+.kanban-col { flex: 0 0 258px; background: var(--surface-sunk);
+  border: 1px solid var(--line-strong); border-radius: var(--r-lg); padding: 0.6rem 0.6rem 0.8rem; }
 .kanban-col-head { display: flex; align-items: baseline; gap: 0.4rem;
   padding: 0.2rem 0.3rem 0.6rem; border-bottom: 2px solid var(--line);
   margin-bottom: 0.6rem; }
 .kanban-col-name { font-size: 0.8rem; font-weight: 600; text-transform: uppercase;
   letter-spacing: 0.05em; color: var(--ink); }
 .kanban-col-count { font-size: 0.8rem; color: var(--muted); margin-left: auto; }
-.kanban-col-head .pipeline-overdue { color: #c0392b; }
+.kanban-col-head .pipeline-overdue { color: var(--clay); }
 /* per-stage accent on the column header rule */
-.status-col-inquiry_received .kanban-col-head { border-bottom-color: #8a8378; }
-.status-col-consultation_call .kanban-col-head { border-bottom-color: #9a7bb0; }
-.status-col-proposal_sent .kanban-col-head { border-bottom-color: #c79a3e; }
-.status-col-contract_signed .kanban-col-head { border-bottom-color: #6a86b3; }
-.status-col-retainer_paid .kanban-col-head { border-bottom-color: var(--accent); }
-.status-col-session_planning .kanban-col-head { border-bottom-color: #6f9e6a; }
-.status-col-project_closed .kanban-col-head { border-bottom-color: #4a7a45; }
-.kanban-card { background: var(--card); border: 1px solid var(--line);
-  border-radius: 10px; padding: 0.6rem 0.7rem; margin-bottom: 0.55rem; }
+.status-col-inquiry_received .kanban-col-head { border-bottom-color: #5C6A5E; }
+.status-col-consultation_call .kanban-col-head { border-bottom-color: #2a5db0; }
+.status-col-proposal_sent .kanban-col-head { border-bottom-color: #9a7a2c; }
+.status-col-contract_signed .kanban-col-head { border-bottom-color: #7C2F38; }
+.status-col-retainer_paid .kanban-col-head { border-bottom-color: #2f7d57; }
+.status-col-session_planning .kanban-col-head { border-bottom-color: #1f6f6b; }
+.status-col-project_closed .kanban-col-head { border-bottom-color: #143C2F; }
+.kanban-card { background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r); padding: 0.6rem 0.7rem; margin-bottom: 0.55rem;
+  box-shadow: var(--shadow-sm); }
 .kanban-card:last-child { margin-bottom: 0; }
-.kanban-card-overdue { border-color: #c0392b; }
+.kanban-card-overdue { border-color: var(--clay); }
 .kanban-card-title { display: block; font-weight: 600; font-size: 0.92rem;
   color: var(--ink); }
 .kanban-card-title:hover { color: var(--accent); }
 .kanban-card-client { margin: 0.25rem 0 0; font-size: 0.82rem; color: var(--ink); }
 .kanban-card-meta { margin: 0.3rem 0 0; font-size: 0.78rem; color: var(--muted); }
-.kanban-card-meta.warn { color: #c0392b; }
+.kanban-card-meta.warn { color: var(--clay); }
 .kanban-move { margin-top: 0.5rem; display: flex; align-items: center; gap: 0.35rem; }
 .kanban-move-label { font-size: 0.7rem; text-transform: uppercase;
   letter-spacing: 0.06em; color: var(--muted); }
@@ -1121,12 +1122,12 @@ progress { width: 100%; }
 .home-tile-label { font-size: 0.78rem; color: var(--muted);
   text-transform: uppercase; letter-spacing: 0.05em; }
 .home-tile-money .home-tile-n, .home-tile-money:hover { color: var(--accent); }
-.home-tile-warn { border-color: #c0392b; }
-.home-tile-warn .home-tile-n { color: #c0392b; }
+.home-tile-warn { border-color: var(--clay); }
+.home-tile-warn .home-tile-n { color: var(--clay); }
 .home-tile-trend { margin-top: 0.15rem; font-size: 0.72rem; font-weight: 600;
   display: inline-flex; align-items: baseline; gap: 0.3rem; color: var(--muted); }
 .home-tile-trend.up { color: #2e7d32; }
-.home-tile-trend.down { color: #c0392b; }
+.home-tile-trend.down { color: var(--clay); }
 .home-tile-trend.flat { font-weight: 500; color: var(--muted); }
 .home-tile-trend-cap { font-weight: 400; color: var(--muted); }
 @container admin (max-width: 360px) { .home-tiles { grid-template-columns: 1fr; } }
@@ -1160,7 +1161,7 @@ progress { width: 100%; }
 .home-list strong { font-weight: 600; }
 .home-when { margin-left: auto; font-size: 0.78rem; color: var(--muted);
   white-space: nowrap; }
-.home-overdue .home-when { color: #c0392b; }
+.home-overdue .home-when { color: var(--clay); }
 .home-money-headline { font-size: 1.25rem; font-weight: 600; margin: 0 0 0.5rem;
   color: var(--accent); }
 .home-money-headline .muted { font-size: 0.85rem; font-weight: 400; }
@@ -1208,7 +1209,7 @@ progress { width: 100%; }
 .home-step:first-child { border-top: 0; }
 .home-step a { color: var(--ink); }
 .home-step a:hover { color: var(--accent); }
-.home-step-warn { border-left-color: #c0392b; }
+.home-step-warn { border-left-color: var(--clay); }
 .home-step-info { border-left-color: var(--accent); }
 
 /* ---- Home: schedule horizon toggle ---- */
@@ -1263,10 +1264,10 @@ progress { width: 100%; }
   border-radius: 999px; padding: 0.1rem 0.5rem; }
 .task-due { margin-left: auto; font-size: 0.8rem; color: var(--muted);
   white-space: nowrap; }
-.task-overdue .task-due { color: #c0392b; }
+.task-overdue .task-due { color: var(--clay); }
 .task-del { display: inline; margin: 0; }
 .task-del button { color: var(--muted); }
-.task-del button:hover { color: #c0392b; }
+.task-del button:hover { color: var(--clay); }
 .task-done .task-title { text-decoration: line-through; color: var(--muted); }
 .task-done-head { font-size: 0.9rem; text-transform: uppercase;
   letter-spacing: 0.06em; color: var(--muted); }
@@ -1279,7 +1280,7 @@ progress { width: 100%; }
   color: #fff; }
 .cal-tag.cal-shoot, .cal-event.cal-shoot { background: var(--accent); }
 .cal-tag.cal-task, .cal-event.cal-task { background: #4a7c59; }
-.cal-tag.cal-invoice, .cal-event.cal-invoice { background: #c0392b; }
+.cal-tag.cal-invoice, .cal-event.cal-invoice { background: var(--clay); }
 .cal-tag.cal-booking, .cal-event.cal-booking { background: #6a86b3; }
 .cal-tag.cal-expiry, .cal-event.cal-expiry { background: #c79a3e; }
 .cal-grid { width: 100%; border-collapse: collapse; table-layout: fixed; }
@@ -1329,7 +1330,7 @@ progress { width: 100%; }
 .cal-agenda-dot.cal-shoot { background: var(--accent); }
 .cal-agenda-dot.cal-booking { background: #6a86b3; }
 .cal-agenda-dot.cal-task { background: #4a7c59; }
-.cal-agenda-dot.cal-invoice { background: #c0392b; }
+.cal-agenda-dot.cal-invoice { background: var(--clay); }
 .cal-agenda-dot.cal-expiry { background: #c79a3e; }
 
 /* ---- Forms builder (Phase 4) ---- */
@@ -1414,13 +1415,13 @@ progress { width: 100%; }
 .stage-tag { display: inline-block; font-size: 0.74rem; font-weight: 600;
   padding: 0.1rem 0.5rem; border-radius: 999px; text-transform: capitalize;
   border-left: 3px solid var(--muted); background: var(--bg); }
-.stage-inquiry_received  { border-left-color: #8a8378; }
-.stage-consultation_call { border-left-color: #9a7bb0; }
-.stage-proposal_sent     { border-left-color: #c79a3e; }
-.stage-contract_signed   { border-left-color: #6a86b3; }
-.stage-retainer_paid     { border-left-color: var(--accent); }
-.stage-session_planning  { border-left-color: #6f9e6a; }
-.stage-project_closed    { border-left-color: #4a7a45; }
+.stage-inquiry_received  { border-left-color: #5C6A5E; }
+.stage-consultation_call { border-left-color: #2a5db0; }
+.stage-proposal_sent     { border-left-color: #9a7a2c; }
+.stage-contract_signed   { border-left-color: #7C2F38; }
+.stage-retainer_paid     { border-left-color: #2f7d57; }
+.stage-session_planning  { border-left-color: #1f6f6b; }
+.stage-project_closed    { border-left-color: #143C2F; }
 .stage-archived          { border-left-color: #b0a99e; }
 
 .inquiry-dismiss { color: var(--muted); }
@@ -1446,13 +1447,13 @@ tr.inquiry-dismissed td:nth-child(2) { text-decoration: line-through; }
 .funnel-age { font-size: 0.7rem; }
 .funnel-archived { margin: 0.9rem 0 0; font-size: 0.82rem; }
 .funnel-note { margin: 0.6rem 0 0; font-size: 0.72rem; line-height: 1.4; }
-.funnel-inquiry_received  { background: #8a8378; }
-.funnel-consultation_call { background: #9a7bb0; }
-.funnel-proposal_sent     { background: #c79a3e; }
-.funnel-contract_signed   { background: #6a86b3; }
-.funnel-retainer_paid     { background: var(--accent); }
-.funnel-session_planning  { background: #6f9e6a; }
-.funnel-project_closed    { background: #4a7a45; }
+.funnel-inquiry_received  { background: #5C6A5E; }
+.funnel-consultation_call { background: #2a5db0; }
+.funnel-proposal_sent     { background: #9a7a2c; }
+.funnel-contract_signed   { background: #7C2F38; }
+.funnel-retainer_paid     { background: #2f7d57; }
+.funnel-session_planning  { background: #1f6f6b; }
+.funnel-project_closed    { background: #143C2F; }
 @media (max-width: 720px) {
   .funnel-row { grid-template-columns: 1fr; gap: 0.25rem; }
   .funnel-side { align-items: flex-start; }
@@ -1522,11 +1523,11 @@ tr.inquiry-dismissed td:nth-child(2) { text-decoration: line-through; }
 .kanban-card-dragging { opacity: 0.5; cursor: grabbing; }
 .kanban-col-over { outline: 2px dashed var(--accent); outline-offset: -2px;
   background: var(--card); }
-.kanban-card-saveerr { border-color: #c0392b; }
+.kanban-card-saveerr { border-color: var(--clay); }
 
 /* list view */
 .studio-list .studio-list-stage { font-size: 0.8rem; color: var(--muted); }
-.studio-list tr.studio-row-overdue td:first-child { box-shadow: inset 3px 0 0 #c0392b; }
+.studio-list tr.studio-row-overdue td:first-child { box-shadow: inset 3px 0 0 var(--clay); }
 .studio-empty { padding: 0.6rem 0.2rem; }
 
 /* ── Galleries dashboard: summary + cover grid ───────────────────────── */
@@ -1551,7 +1552,7 @@ tr.inquiry-dismissed td:nth-child(2) { text-decoration: line-through; }
   background: rgba(0,0,0,0.55); }
 .gal-status-published { background: var(--accent); }
 .gal-status-draft { background: #8a8378; }
-.gal-badge-expired { left: auto; right: 8px; background: #c0392b; }
+.gal-badge-expired { left: auto; right: 8px; background: var(--clay); }
 .gal-card-body { padding: 0.55rem 0.7rem 0.7rem; display: flex;
   flex-direction: column; gap: 0.25rem; }
 .gal-card-title { font-weight: 600; font-size: 0.92rem; color: var(--ink); }
@@ -2867,7 +2868,7 @@ tr.inquiry-dismissed td:nth-child(2) { text-decoration: line-through; }
   gap: 0.4rem 1rem; margin: 0 0 0.7rem; font-size: 0.86rem;
   color: var(--muted); font-variant-numeric: tabular-nums; }
 .stat strong { font-size: 1.0rem; color: var(--ink); }
-.stat-warn strong { color: #c0392b; }
+.stat-warn strong { color: var(--clay); }
 
 /* Group-by-session headers in the tasks list */
 .task-group-head { list-style: none; margin: 0.8rem 0 0.2rem;
