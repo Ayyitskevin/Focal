@@ -2960,6 +2960,53 @@ tr.inquiry-dismissed td:nth-child(2) { text-decoration: line-through; }
 .transfer-meta { font-size: 0.83rem; margin-top: 0.25rem; }
 .transfer-act { display: flex; align-items: center; gap: 0.9rem; flex-shrink: 0; }
 
+/* Transfers — prototype 2-col compose + sent-cards (over real drop galleries) */
+.tr-grid { display: grid; grid-template-columns: 400px 1fr; gap: 28px;
+  align-items: start; margin-top: 0.6rem; }
+.tr-compose { background: var(--surface); border: 1px solid var(--line);
+  border-radius: 18px; padding: 22px; box-shadow: var(--shadow-sm); }
+.tr-compose h2 { margin: 0 0 14px; font-family: var(--font-display); font-weight: 500;
+  font-size: 1.3rem; color: var(--ink); }
+.tr-compose .stack-form { margin: 0; max-width: none; }
+.tr-compose-note { font-size: 0.8rem; line-height: 1.45; margin: 14px 0 0;
+  border-top: 1px solid var(--line-faint); padding-top: 14px; }
+.tr-sent { min-width: 0; }
+.tr-sent-head { display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: 14px; }
+.tr-sent-head h2 { margin: 0; font-family: var(--font-display); font-weight: 500;
+  font-size: 1.3rem; color: var(--ink); }
+.tr-cards { list-style: none; margin: 0; padding: 0; display: flex;
+  flex-direction: column; gap: 12px; }
+.tr-card { background: var(--surface); border: 1px solid var(--line);
+  border-radius: 14px; padding: 16px 18px; display: flex; align-items: center;
+  gap: 16px; box-shadow: var(--shadow-sm); }
+.tr-card-ico { width: 44px; height: 44px; flex: none; border-radius: 11px;
+  display: grid; place-items: center; font-size: 1.1rem; }
+.tr-ico-active { background: #e1f2e9; color: #2f7d57; }
+.tr-ico-expired { background: #ecefe6; color: #8A9183; }
+.tr-card-body { flex: 1; min-width: 0; }
+.tr-card-top { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.tr-card-top a { font-weight: 700; font-size: 0.92rem; color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tr-card-top a:hover { color: var(--terra); }
+.tr-badge { flex: none; font-size: 0.62rem; font-weight: 700; letter-spacing: 0.03em;
+  text-transform: uppercase; padding: 4px 8px; border-radius: 999px; }
+.tr-badge-active { color: #2f7d57; background: #e1f2e9; }
+.tr-badge-expired { color: #8A9183; background: #ecefe6; }
+.tr-card-meta { font-size: 0.8rem; margin-top: 4px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.tr-card-size { flex: none; text-align: right; }
+.tr-card-bytes { font-size: 0.82rem; font-weight: 600; color: var(--ink); }
+.tr-card-size .muted { font-size: 0.74rem; margin-top: 4px; }
+.tr-card-act { flex: none; display: flex; align-items: center; gap: 0.8rem; }
+.tr-empty { padding: 1.5rem 0; }
+@media (max-width: 1080px) { .tr-grid { grid-template-columns: 1fr; } }
+@media (max-width: 620px) {
+  .tr-card { flex-wrap: wrap; }
+  .tr-card-size { text-align: left; }
+  .tr-card-act { flex-wrap: wrap; }
+}
+
 /* Phone pass for the cream gallery / drop pages */
 @media (max-width: 560px) {
   .gallery-header { min-height: 30vh; }
