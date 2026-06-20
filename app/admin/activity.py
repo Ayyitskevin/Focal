@@ -467,61 +467,84 @@ async def favorites_export(gallery_id: int):
 
 # ---- Tasks (HoneyBook "Tasks" parity, Phase 3) -----------------------------
 
+def _task_due_label(due: str | None, today: dt.date) -> tuple[str, bool]:
+    """Return (label, urgent) for a task's due date relative to today.
+    Urgent (overdue or due today) drives the clay due-text color in the board."""
+    if not due:
+        return "", False
+    try:
+        dd = dt.date.fromisoformat(due[:10])
+    except (ValueError, TypeError):
+        return "", False
+    delta = (dd - today).days
+    if delta < 0:
+        n = -delta
+        return (f"Overdue {n}d" if n <= 9 else "Overdue"), True
+    if delta == 0:
+        return "Today", True
+    if delta == 1:
+        return "Tomorrow", False
+    if delta <= 6:
+        return dd.strftime("%a"), False
+    return dd.strftime("%b %-d"), False
+
+
 @router.get("/tasks", response_class=HTMLResponse)
 async def tasks_view(request: Request):
-    """Studio to-do list. Open tasks first (overdue at top), then a short tail
-    of recently completed ones. Each task can be pinned to a project; the
-    calendar pulls due_date from here."""
+    """Studio to-do board (strict-1:1 prototype): three columns — Today (due
+    today or overdue), This week (every other open task), Done (recently
+    completed). Each card toggles done via a POST form; due_date feeds the
+    calendar."""
+    today = dt.date.today()
+
+    def card(r) -> dict:
+        label, urgent = _task_due_label(r["due_date"], today)
+        return {"id": r["id"], "title": r["title"],
+                "project": r["project_title"] or "General",
+                "project_id": r["project_id"], "due": label, "urgent": urgent}
+
     open_rows = db.all_(
-        """SELECT t.id, t.title, t.due_date, t.project_id, p.title AS project_title,
-                  (t.due_date IS NOT NULL AND t.due_date < date('now', 'localtime'))
-                    AS overdue
+        """SELECT t.id, t.title, t.due_date, t.project_id, p.title AS project_title
            FROM tasks t LEFT JOIN projects p ON p.id=t.project_id
            WHERE t.done=0
            ORDER BY (t.due_date IS NULL), t.due_date ASC, t.id DESC""")
-    today = dt.date.today()
-    week_end = today + dt.timedelta(days=7)
-    open_tasks = []
-    summary = {"open": 0, "overdue": 0, "week": 0, "none": 0}
+    today_iso = today.isoformat()
+    today_col, week_col = [], []
     for r in open_rows:
-        d = dict(r)
-        due = d["due_date"]
-        if not due:
-            bucket = "none"
-        elif d["overdue"]:
-            bucket = "overdue"
+        due = r["due_date"]
+        if due and due[:10] <= today_iso:        # overdue or due today
+            today_col.append(card(r))
         else:
-            try:
-                dd = dt.date.fromisoformat(due[:10])
-            except (ValueError, TypeError):
-                dd = None
-            if dd == today:
-                bucket = "today"
-            elif dd is not None and dd <= week_end:
-                bucket = "week"
-            else:
-                bucket = "later"
-        d["bucket"] = bucket
-        open_tasks.append(d)
-        summary["open"] += 1
-        if bucket == "overdue":
-            summary["overdue"] += 1
-        elif bucket in ("today", "week"):
-            summary["week"] += 1
-        elif bucket == "none":
-            summary["none"] += 1
-    done_tasks = db.all_(
+            week_col.append(card(r))
+
+    done_rows = db.all_(
         """SELECT t.id, t.title, t.due_date, t.done_at, t.project_id,
                   p.title AS project_title
            FROM tasks t LEFT JOIN projects p ON p.id=t.project_id
-           WHERE t.done=1 ORDER BY t.done_at DESC LIMIT 20""")
+           WHERE t.done=1 ORDER BY t.done_at DESC LIMIT 12""")
+    done_col = []
+    for r in done_rows:
+        c = card(r)
+        c["due"] = ("done " + r["done_at"][:10]) if r["done_at"] else "done"
+        c["urgent"] = False
+        done_col.append(c)
+
+    week_ago = (today - dt.timedelta(days=7)).isoformat()
+    done_week = db.one(
+        "SELECT COUNT(*) n FROM tasks WHERE done=1 AND done_at >= ?", (week_ago,))["n"]
+
+    columns = [
+        {"key": "today", "label": "Today", "dot": "#7C2F38", "tasks": today_col},
+        {"key": "week", "label": "This week", "dot": "#EDB23C", "tasks": week_col},
+        {"key": "done", "label": "Done", "dot": "#2f7d57", "tasks": done_col},
+    ]
     projects = db.all_(
         """SELECT id, title FROM projects WHERE status != 'archived'
            ORDER BY title""")
     return templates.TemplateResponse(request, "admin/tasks.html",
-                                      {"open_tasks": open_tasks,
-                                       "done_tasks": done_tasks,
-                                       "summary": summary,
+                                      {"columns": columns,
+                                       "open_count": len(today_col) + len(week_col),
+                                       "done_week": done_week,
                                        "projects": projects})
 
 

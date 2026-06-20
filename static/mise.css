@@ -1312,36 +1312,47 @@ progress { width: 100%; }
   background: var(--accent); margin: 1px auto 0; }
 .home-empty { padding: 0.4rem 0; }
 
-/* ---- Tasks (Phase 3) ---- */
-.task-new { background: var(--card); border: 1px solid var(--line);
-  border-radius: 12px; padding: 0.9rem 1.1rem; margin-bottom: 1.2rem; }
-.task-new-form { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
-.task-new-form input[type=text] { flex: 1 1 240px; }
-.task-new-form input, .task-new-form select { border: 1px solid var(--line);
-  border-radius: 8px; padding: 0.45rem 0.6rem; font: inherit; background: var(--bg);
+/* ---- Tasks (strict 1:1 — 3-column board) ---- */
+.tk-add-form { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;
+  background: var(--surface); border: 1px solid var(--line-strong);
+  border-radius: 12px; padding: 0.8rem 1rem; margin-bottom: 16px; }
+.tk-add-form input[type=text] { flex: 1 1 240px; }
+.tk-add-form input, .tk-add-form select { border: 1px solid var(--line-strong);
+  border-radius: 8px; padding: 0.5rem 0.65rem; font: inherit; background: #fff;
   color: var(--ink); }
-.task-new-form button { background: var(--accent); color: #fff; border: 0;
-  border-radius: 8px; padding: 0.5rem 1rem; cursor: pointer; font: inherit; }
-.task-list { list-style: none; padding: 0; margin: 0 0 1.5rem; }
-.task-row { display: flex; align-items: center; gap: 0.55rem;
-  padding: 0.5rem 0; border-top: 1px solid var(--line); font-size: 0.92rem; }
-.task-row:first-child { border-top: 0; }
-.task-check { display: inline; margin: 0; }
-.task-check button { background: none; border: 0; cursor: pointer;
-  font-size: 1.15rem; line-height: 1; color: var(--muted); padding: 0; }
-.task-check button:hover { color: var(--accent); }
-.task-title { font-weight: 500; }
-.task-project { font-size: 0.78rem; color: var(--muted); border: 1px solid var(--line);
-  border-radius: 999px; padding: 0.1rem 0.5rem; }
-.task-due { margin-left: auto; font-size: 0.8rem; color: var(--muted);
-  white-space: nowrap; }
-.task-overdue .task-due { color: var(--clay); }
-.task-del { display: inline; margin: 0; }
-.task-del button { color: var(--muted); }
-.task-del button:hover { color: var(--clay); }
-.task-done .task-title { text-decoration: line-through; color: var(--muted); }
-.task-done-head { font-size: 0.9rem; text-transform: uppercase;
-  letter-spacing: 0.06em; color: var(--muted); }
+.tk-add-form button { background: var(--clay); color: #F3F0E2; border: 0;
+  border-radius: 999px; padding: 0.55rem 1.2rem; cursor: pointer;
+  font: 600 0.82rem/1 var(--font-ui); }
+.tk-add-form button:hover { background: #6a2830; }
+.tk-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
+  align-items: start; }
+.tk-col { background: #EFEADF; border: 1px solid #E4DDCD; border-radius: 14px;
+  padding: 14px; }
+.tk-col-head { display: flex; align-items: center; gap: 8px; padding: 2px 4px 12px; }
+.tk-col-dot { width: 9px; height: 9px; border-radius: 999px; flex: none; }
+.tk-col-label { font: 700 0.8rem/1 var(--font-ui); color: var(--ink); }
+.tk-col-n { font: 600 0.74rem/1 var(--font-ui); color: var(--muted); }
+.tk-col-cards { display: flex; flex-direction: column; gap: 9px; }
+.tk-col-empty { font-size: 0.82rem; margin: 0.2rem 0 0; padding: 0 4px; }
+.tk-card { display: flex; gap: 11px; background: var(--surface);
+  border: 1px solid var(--line-strong); border-radius: 11px; padding: 13px;
+  width: 100%; text-align: left; }
+.tk-card.is-done { opacity: 0.55; }
+.tk-check { flex: none; width: 20px; height: 20px; margin-top: 1px; border-radius: 6px;
+  border: 1.5px solid #cdd4c4; background: transparent; color: #fff; cursor: pointer;
+  display: grid; place-items: center; font-size: 0.7rem; padding: 0; line-height: 1; }
+.tk-card.is-done .tk-check { background: #2f7d57; border-color: #2f7d57; }
+.tk-card-body { flex: 1; min-width: 0; }
+.tk-card-title { font: 600 0.88rem/1.3 var(--font-ui); color: var(--ink); }
+.tk-card.is-done .tk-card-title { text-decoration: line-through; }
+.tk-card-meta { display: flex; align-items: center; gap: 8px; margin-top: 7px;
+  flex-wrap: wrap; }
+.tk-chip { font: 600 0.68rem/1 var(--font-ui); color: var(--ink-soft);
+  background: #F1ECE0; padding: 4px 7px; border-radius: 6px; }
+a.tk-chip:hover { color: var(--ink); background: #e7e0d0; }
+.tk-due { font: 600 0.72rem/1 var(--font-ui); color: var(--muted); }
+.tk-due.is-urgent { color: var(--clay); }
+@media (max-width: 980px) { .tk-grid { grid-template-columns: 1fr; } }
 
 /* ---- Calendar (strict 1:1 — month grid, 3-bucket legend) ---- */
 .cal-top { gap: 16px; flex-wrap: wrap; }
@@ -3078,31 +3089,6 @@ tr.inquiry-dismissed td:nth-child(2) { text-decoration: line-through; }
   color: var(--muted); font-variant-numeric: tabular-nums; }
 .stat strong { font-size: 1.0rem; color: var(--ink); }
 .stat-warn strong { color: var(--clay); }
-
-/* Group-by-session headers in the tasks list */
-.task-group-head { list-style: none; margin: 0.8rem 0 0.2rem;
-  font-size: 0.78rem; font-weight: 700; letter-spacing: 0.02em;
-  text-transform: uppercase; color: var(--muted); }
-.task-group-head:first-child { margin-top: 0; }
-
-/* Tasks board (kanban) — same rows redistributed into due-buckets */
-.task-board { display: grid; grid-template-columns: repeat(3, 1fr);
-  gap: 1rem; margin: 0 0 1.5rem; }
-.task-col { background: var(--card); border: 1px solid var(--line);
-  border-radius: 12px; padding: 0.7rem 0.8rem; }
-.task-col-head { display: flex; align-items: center; gap: 0.45rem;
-  font-size: 0.8rem; font-weight: 700; letter-spacing: 0.02em;
-  text-transform: uppercase; color: var(--muted); margin-bottom: 0.6rem; }
-.task-col-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-.tcd-today { background: var(--clay); }
-.tcd-week  { background: var(--honey); }
-.tcd-later { background: var(--muted); }
-.task-col-n { margin-left: auto; font-weight: 700; color: var(--ink); }
-.task-col-list { list-style: none; padding: 0; margin: 0;
-  display: flex; flex-direction: column; gap: 0.4rem; }
-.task-col-list .task-row { margin: 0; }
-.task-col-empty { font-size: 0.85rem; margin: 0.3rem 0 0; }
-@media (max-width: 720px) { .task-board { grid-template-columns: 1fr; } }
 
 /* Transfers (WeTransfer-style drops) — admin list */
 .summary-strip { display: flex; flex-wrap: wrap; gap: 1.2rem; margin: 1rem 0;

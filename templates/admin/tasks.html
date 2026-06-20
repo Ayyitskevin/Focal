@@ -4,242 +4,68 @@
 <header class="admin-topbar pgtop">
   <div class="pgtop-lead">
     <h1>Tasks</h1>
-    <p class="pgtop-sub">
-      <b>{{ summary.open }}</b> open
-      {% if summary.overdue %}· <a class="neg" href="#task-toolbar">{{ summary.overdue }} overdue</a>{% endif %}
-      · {{ summary.week }} due this week
-    </p>
+    <p class="pgtop-sub"><b class="pos">{{ open_count }} open</b> · {{ done_week }} done this week</p>
   </div>
   <div class="pgtop-actions">
-    <a class="pgtop-new" href="#add-task"><span class="qc-plus" aria-hidden="true">+</span> Add task</a>
+    <button type="button" class="pgtop-new" id="tk-add-btn" aria-expanded="false">
+      <span class="qc-plus" aria-hidden="true">+</span> Add task</button>
   </div>
 </header>
 {% endblock %}
 {% block admin_body %}
 <main class="admin-main">
-  <section class="task-new" id="add-task" aria-label="Add a task">
-    <form method="post" action="/admin/tasks" class="task-new-form">
-      <input type="text" name="title" placeholder="What needs doing?" required maxlength="200" autofocus>
-      <input type="date" name="due_date" aria-label="Due date">
-      <select name="project_id" aria-label="Session">
-        <option value="">No session</option>
-        {% for p in projects %}<option value="{{ p.id }}">{{ p.title }}</option>{% endfor %}
-      </select>
-      <button type="submit">Add task</button>
-    </form>
-  </section>
+  <form method="post" action="/admin/tasks" class="tk-add-form" id="tk-add" hidden>
+    <input type="text" name="title" placeholder="What needs doing?" required maxlength="200">
+    <input type="date" name="due_date" aria-label="Due date">
+    <select name="project_id" aria-label="Session">
+      <option value="">No session</option>
+      {% for p in projects %}<option value="{{ p.id }}">{{ p.title }}</option>{% endfor %}
+    </select>
+    <button type="submit">Add</button>
+  </form>
 
-  {% if open_tasks %}
-  <div class="stat-strip" aria-label="Task summary">
-    <span class="stat"><strong>{{ summary.open }}</strong> open</span>
-    <span class="stat{% if summary.overdue %} stat-warn{% endif %}"><strong>{{ summary.overdue }}</strong> overdue</span>
-    <span class="stat"><strong>{{ summary.week }}</strong> due this week</span>
-    <span class="stat"><strong>{{ summary.none }}</strong> no due date</span>
+  <div class="tk-grid">
+    {% for col in columns %}
+    <div class="tk-col">
+      <div class="tk-col-head">
+        <span class="tk-col-dot" style="background: {{ col.dot }};"></span>
+        <span class="tk-col-label">{{ col.label }}</span>
+        <span class="tk-col-n">{{ col.tasks|length }}</span>
+      </div>
+      <div class="tk-col-cards">
+        {% for t in col.tasks %}
+        <form method="post" action="/admin/tasks/{{ t.id }}/toggle"
+              class="tk-card{% if col.key == 'done' %} is-done{% endif %}">
+          <button type="submit" class="tk-check"
+                  aria-label="{{ 'Reopen' if col.key == 'done' else 'Mark done' }}">{{ '✓' if col.key == 'done' }}</button>
+          <div class="tk-card-body">
+            <div class="tk-card-title">{{ t.title }}</div>
+            <div class="tk-card-meta">
+              {% if t.project_id %}<a class="tk-chip" href="/admin/studio/projects/{{ t.project_id }}">{{ t.project }}</a>
+              {% else %}<span class="tk-chip">{{ t.project }}</span>{% endif %}
+              {% if t.due %}<span class="tk-due{% if t.urgent %} is-urgent{% endif %}">{{ t.due }}</span>{% endif %}
+            </div>
+          </div>
+        </form>
+        {% else %}
+        <p class="tk-col-empty muted">Nothing here.</p>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
   </div>
-  {% endif %}
-
-  <section aria-label="Open tasks">
-    <h2>Open <span class="muted">({{ open_tasks|length }})</span></h2>
-    {% if open_tasks %}
-    <div class="studio-toolbar" id="task-toolbar">
-      <input type="search" class="studio-search" id="task-search" placeholder="Search tasks…" aria-label="Search tasks">
-      <select class="studio-filter" id="task-project" aria-label="Filter by session">
-        <option value="">All sessions</option>
-        {% for p in projects %}<option value="{{ p.id }}">{{ p.title }}</option>{% endfor %}
-      </select>
-      <select class="studio-filter" id="task-due" aria-label="Filter by due date">
-        <option value="">Any due date</option>
-        <option value="overdue">Overdue</option>
-        <option value="today">Due today</option>
-        <option value="week">Due this week</option>
-        <option value="none">No due date</option>
-      </select>
-      <select class="studio-filter" id="task-sort" aria-label="Sort tasks">
-        <option value="due">Sort: due date</option>
-        <option value="created">Sort: newest</option>
-        <option value="project">Sort: session</option>
-      </select>
-      <div class="studio-view-toggle" role="group" aria-label="Grouping">
-        <button type="button" data-group="flat" class="is-active" aria-pressed="true">List</button>
-        <button type="button" data-group="project" aria-pressed="false">By session</button>
-        <button type="button" data-group="board" aria-pressed="false">Board</button>
-      </div>
-    </div>
-    <ul class="task-list" id="task-list">
-      {% for t in open_tasks %}
-      <li class="task-row{% if t.overdue %} task-overdue{% endif %}" data-task
-          data-idx="{{ loop.index0 }}" data-id="{{ t.id }}"
-          data-search="{{ (t.title ~ ' ' ~ (t.project_title or ''))|lower }}"
-          data-project="{{ t.project_id or '' }}"
-          data-project-title="{{ t.project_title or 'No session' }}"
-          data-bucket="{{ t.bucket }}" data-due="{{ t.due_date or '' }}">
-        <form method="post" action="/admin/tasks/{{ t.id }}/toggle" class="task-check">
-          <button type="submit" title="Mark done">&#9744;</button></form>
-        <span class="task-title">{{ t.title }}</span>
-        {% if t.project_title %}
-        <a class="task-project" href="/admin/studio/projects/{{ t.project_id }}">{{ t.project_title }}</a>{% endif %}
-        {% if t.due_date %}<span class="task-due">due {{ t.due_date }}{% if t.overdue %} · overdue{% endif %}</span>{% endif %}
-        <form method="post" action="/admin/tasks/{{ t.id }}/delete" class="task-del"
-              onsubmit="return confirm('Delete this task?')">
-          <button type="submit" title="Delete" class="link">&times;</button></form>
-      </li>
-      {% endfor %}
-    </ul>
-    <p class="studio-empty" id="task-empty" hidden>No tasks match.</p>
-
-    {# Board view — same task rows redistributed into due-buckets (kanban). JS
-       moves the existing <li> nodes between #task-list and these columns; no
-       markup is duplicated, so search/filter still apply. #}
-    <div class="task-board" id="task-board" hidden>
-      <div class="task-col">
-        <div class="task-col-head"><span class="task-col-dot tcd-today"></span>Today
-          <span class="task-col-n" data-col-n="today"></span></div>
-        <ul class="task-col-list" data-col="today"></ul>
-        <p class="task-col-empty muted" hidden>Nothing due today.</p>
-      </div>
-      <div class="task-col">
-        <div class="task-col-head"><span class="task-col-dot tcd-week"></span>This week
-          <span class="task-col-n" data-col-n="week"></span></div>
-        <ul class="task-col-list" data-col="week"></ul>
-        <p class="task-col-empty muted" hidden>Nothing this week.</p>
-      </div>
-      <div class="task-col">
-        <div class="task-col-head"><span class="task-col-dot tcd-later"></span>No due date
-          <span class="task-col-n" data-col-n="later"></span></div>
-        <ul class="task-col-list" data-col="later"></ul>
-        <p class="task-col-empty muted" hidden>Nothing here.</p>
-      </div>
-    </div>
-    {% else %}<p class="muted">All clear — nothing open.</p>{% endif %}
-  </section>
-
-  {% if done_tasks %}
-  <section aria-label="Completed tasks">
-    <h2 class="task-done-head">Recently completed</h2>
-    <ul class="task-list">
-      {% for t in done_tasks %}
-      <li class="task-row task-done">
-        <form method="post" action="/admin/tasks/{{ t.id }}/toggle" class="task-check">
-          <button type="submit" title="Reopen">&#9745;</button></form>
-        <span class="task-title">{{ t.title }}</span>
-        {% if t.project_title %}<span class="task-project">{{ t.project_title }}</span>{% endif %}
-        {% if t.done_at %}<span class="task-due">done {{ t.done_at[:10] }}</span>{% endif %}
-        <form method="post" action="/admin/tasks/{{ t.id }}/delete" class="task-del"
-              onsubmit="return confirm('Delete this task?')">
-          <button type="submit" title="Delete" class="link">&times;</button></form>
-      </li>
-      {% endfor %}
-    </ul>
-  </section>
-  {% endif %}
 
   <script>
   (function () {
-    var list = document.getElementById('task-list');
-    if (!list) return;
-    var rows = Array.prototype.slice.call(list.querySelectorAll('[data-task]'));
-    var search = document.getElementById('task-search');
-    var fProject = document.getElementById('task-project');
-    var fDue = document.getElementById('task-due');
-    var fSort = document.getElementById('task-sort');
-    var empty = document.getElementById('task-empty');
-    var board = document.getElementById('task-board');
-    var cols = {
-      today: board.querySelector('[data-col="today"]'),
-      week: board.querySelector('[data-col="week"]'),
-      later: board.querySelector('[data-col="later"]')
-    };
-    var bucketCol = { overdue: 'today', today: 'today', week: 'week', none: 'later' };
-    var group = 'flat';
-
-    function visible(r) {
-      var q = (search.value || '').trim().toLowerCase();
-      if (q && r.dataset.search.indexOf(q) === -1) return false;
-      if (fProject.value && r.dataset.project !== fProject.value) return false;
-      var d = fDue.value, b = r.dataset.bucket;
-      if (d === 'overdue' && b !== 'overdue') return false;
-      if (d === 'today' && b !== 'today') return false;
-      if (d === 'week' && !(b === 'today' || b === 'week')) return false;
-      if (d === 'none' && b !== 'none') return false;
-      return true;
-    }
-    function ordered() {
-      var arr = rows.slice();
-      var key = group === 'project' ? 'project' : fSort.value;
-      arr.sort(function (a, b) {
-        if (key === 'created')
-          return (+b.dataset.id) - (+a.dataset.id);
-        if (key === 'project') {
-          var pa = a.dataset.projectTitle.toLowerCase(),
-              pb = b.dataset.projectTitle.toLowerCase();
-          if (pa !== pb) return pa < pb ? -1 : 1;
-        }
-        return (+a.dataset.idx) - (+b.dataset.idx);
-      });
-      return arr;
-    }
-    function renderList() {
-      list.querySelectorAll('.task-group-head').forEach(function (h) { h.remove(); });
-      var arr = ordered();
-      var vis = arr.filter(visible), hid = arr.filter(function (r) { return !visible(r); });
-      var last = null;
-      vis.forEach(function (r) {
-        if (group === 'project' && r.dataset.projectTitle !== last) {
-          last = r.dataset.projectTitle;
-          var h = document.createElement('li');
-          h.className = 'task-group-head';
-          h.textContent = last;
-          list.appendChild(h);
-        }
-        r.classList.remove('studio-hidden');
-        list.appendChild(r);
-      });
-      hid.forEach(function (r) { r.classList.add('studio-hidden'); list.appendChild(r); });
-      empty.hidden = vis.length !== 0;
-    }
-    function renderBoard() {
-      var counts = { today: 0, week: 0, later: 0 };
-      ordered().forEach(function (r) {
-        if (!visible(r)) { r.classList.add('studio-hidden'); return; }
-        r.classList.remove('studio-hidden');
-        var col = bucketCol[r.dataset.bucket] || 'later';
-        cols[col].appendChild(r);
-        counts[col]++;
-      });
-      Object.keys(cols).forEach(function (k) {
-        board.querySelector('[data-col-n="' + k + '"]').textContent = counts[k] || '';
-        cols[k].nextElementSibling.hidden = counts[k] !== 0;
-      });
-    }
-    function render() {
-      if (group === 'board') {
-        list.hidden = true;
-        empty.hidden = true;
-        board.hidden = false;
-        renderBoard();
-      } else {
-        board.hidden = true;
-        list.hidden = false;
-        renderList();
-      }
-    }
-
-    [search, fProject, fDue, fSort].forEach(function (el) {
-      el.addEventListener('input', render);
-      el.addEventListener('change', render);
+    var btn = document.getElementById('tk-add-btn');
+    var form = document.getElementById('tk-add');
+    if (!btn || !form) return;
+    btn.addEventListener('click', function () {
+      var open = form.hidden;
+      form.hidden = !open;
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) { var i = form.querySelector('input[name=title]'); if (i) i.focus(); }
     });
-    document.querySelectorAll('#task-toolbar [data-group]').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        group = btn.dataset.group;
-        document.querySelectorAll('#task-toolbar [data-group]').forEach(function (b) {
-          var sel = b === btn;
-          b.classList.toggle('is-active', sel);
-          b.setAttribute('aria-pressed', sel ? 'true' : 'false');
-        });
-        render();
-      });
-    });
-    render();
   })();
   </script>
 </main>

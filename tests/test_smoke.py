@@ -1113,19 +1113,26 @@ def test_reports_range_toggle(admin):
 
 
 def test_tasks_board_view(admin):
-    # The open-tasks toolbar must offer a Board (kanban) grouping alongside
-    # List / By session, and the three due-bucket columns must exist for the JS
-    # to redistribute rows into. The rows are moved, not duplicated, so search/
-    # filter keep working — guard the markup the JS depends on.
-    admin.post("/admin/tasks", data={"title": "Board-view smoke task"},
+    # The strict-1:1 Tasks page is a 3-column board (Today / This week / Done),
+    # bucketed server-side from due_date. Encodes WHY the buckets matter: a task
+    # due today (or overdue) belongs in Today; an open task with no/later due
+    # date belongs in This week. Guard the column labels and the bucketing.
+    import datetime as _dt
+    today_iso = _dt.date.today().isoformat()
+    admin.post("/admin/tasks",
+               data={"title": "Due-today board task", "due_date": today_iso},
+               follow_redirects=False)
+    admin.post("/admin/tasks", data={"title": "Undated board task"},
                follow_redirects=False)
     page = admin.get("/admin/tasks").text
-    assert 'data-group="board"' in page
-    assert 'id="task-board"' in page
-    for col in ("today", "week", "later"):
-        assert f'data-col="{col}"' in page
-        assert f'data-col-n="{col}"' in page
-    db.run("DELETE FROM tasks WHERE title='Board-view smoke task'")
+    assert "tk-grid" in page
+    for label in (">Today<", ">This week<", ">Done<"):
+        assert label in page
+    # the due-today task sorts ahead of the undated one (Today column renders
+    # before This week) — both present, the urgent one first in document order.
+    assert page.index("Due-today board task") < page.index("Undated board task")
+    db.run("DELETE FROM tasks WHERE title IN "
+           "('Due-today board task','Undated board task')")
 
 
 def test_manage_nav_financials_expenses(admin):
