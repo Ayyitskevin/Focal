@@ -5193,3 +5193,95 @@ html[data-theme="dark"] .admin-shell .unlinked-warn {
 }
 html[data-theme="dark"] .admin-shell .unlinked-warn-head { color: var(--ink-soft); }
 html[data-theme="dark"] .admin-shell .unlinked-warn-head strong { color: var(--ink); }
+
+/* ============================================================================
+   PUBLIC SITE — DARK MODE  (additive, scoped to .site-body under
+   html[data-theme="dark"]). Same charcoal / jade / silver scheme as the admin
+   shell. The locked candlelit-editorial LIGHT design is byte-untouched — this
+   layer only adds higher-specificity dark overrides. The toggle + no-flash
+   pre-paint script live in templates/site/base_site.html and share the admin
+   localStorage key ("mise-theme") so the preference is one across the property.
+   ========================================================================== */
+html[data-theme="dark"] .site-body {
+  --bg: #131313;          /* page charcoal                                    */
+  --ink: #e8e6e2;         /* primary text → light                             */
+  --ink-soft: #c7c3bb;    /* secondary text                                   */
+  --muted: #9a958c;       /* tertiary / labels                                */
+  --card: #1c1c1c;        /* card surface                                     */
+  --line: #2c2c2c;        /* hairlines                                        */
+  --paper2: #1a1a1a;      /* light-panel sections (services/about) → dark     */
+  --accent: #23b487;      /* forest green → bright jade (links, eyebrows)     */
+  --accent-lt: #c8ced3;   /* gold → silver — the dark-mode metallic           */
+  --espresso: #0f1714;    /* dark sections (footer/delivery/stats) jade-black */
+  --espresso2: #16211c;   /* nested dark panels (proof-panel)                 */
+  background: #131313;
+}
+
+/* Buttons that use --ink as a FILL go light-on-light under the var-flip → give
+   them a bright-jade fill with DARK ink (the accessible jade-button pattern,
+   same as the admin inbox/gallery CTAs). */
+html[data-theme="dark"] .site-body .btn-pill,
+html[data-theme="dark"] .site-body .site-nav nav a.nav-cta {
+  background: var(--accent); color: #06231a;
+}
+html[data-theme="dark"] .site-body .btn-pill:hover,
+html[data-theme="dark"] .site-body .site-nav nav a.nav-cta:hover {
+  background: #2ec698; color: #06231a;
+}
+html[data-theme="dark"] .site-body .nav-mobile a.nav-cta { color: #06231a; }
+
+/* Translucent-cream scrolled nav backdrop → translucent charcoal. */
+html[data-theme="dark"] .site-body .site-nav.scrolled {
+  background: rgba(19, 19, 19, .86); border-bottom-color: var(--line);
+}
+/* Nav links are a hardcoded warm-dark on cream → lift to light. */
+html[data-theme="dark"] .site-body .site-nav nav a { color: #c7c3bb; }
+html[data-theme="dark"] .site-body .site-nav nav a:hover { color: var(--accent); }
+
+/* Light hairline borders the var-flip can't reach (hardcoded #e3dacb / #c8bfb1). */
+html[data-theme="dark"] .site-body .btn-ghost { border-bottom-color: rgba(200, 206, 211, .3); }
+html[data-theme="dark"] .site-body .svc-card,
+html[data-theme="dark"] .site-body .proc-card,
+html[data-theme="dark"] .site-body .testimonial { border-color: #2c2c2c; }
+
+/* Near-black testimonial quote (#2a241d) would vanish on the dark card. */
+html[data-theme="dark"] .site-body .testimonial blockquote { color: var(--ink); }
+
+/* Light image-placeholder backgrounds → dark, so an unloaded/missing image
+   never flashes a pale block on the charcoal page. */
+html[data-theme="dark"] .site-body .hero-photo,
+html[data-theme="dark"] .site-body .work-grid .tile,
+html[data-theme="dark"] .site-body .about-photo,
+html[data-theme="dark"] .site-body .ab-photo,
+html[data-theme="dark"] .site-body .contact-photo { background: #222; }
+
+/* Footer base rule was a bordeaux hairline. */
+html[data-theme="dark"] .site-body .footer-base { border-top-color: rgba(200, 206, 211, .14); }
+
+/* Footer theme toggle — a NEW element, styled for BOTH themes (it always sits
+   in the dark footer). Ghost pill that reads on the espresso footer. */
+.site-body .site-theme-toggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: 999px; cursor: pointer;
+  background: transparent; border: 1px solid rgba(200, 206, 211, .28);
+  color: inherit; font: 600 .68rem/1 var(--sans); letter-spacing: .12em;
+  text-transform: uppercase; transition: border-color .2s ease, color .2s ease;
+}
+.site-body .site-theme-toggle:hover { border-color: var(--accent-lt); color: var(--cream); }
+.site-body .site-theme-toggle-icon { font-size: .9rem; line-height: 1; }
+
+/* Form fields have no explicit background → default white box on the charcoal
+   page. Give the site's contact/lead forms a dark surface. */
+html[data-theme="dark"] .site-body .stack-form input,
+html[data-theme="dark"] .site-body .stack-form select,
+html[data-theme="dark"] .site-body .stack-form textarea {
+  background: #1c1c1c; color: var(--ink); border-color: #2c2c2c;
+}
+html[data-theme="dark"] .site-body .stack-form input::placeholder,
+html[data-theme="dark"] .site-body .stack-form textarea::placeholder { color: var(--muted); }
+/* The form submit uses the global `button` rule (--ink fill + #fff) → washed in
+   dark; give it the bright-jade + dark-ink treatment. */
+html[data-theme="dark"] .site-body .stack-form button[type=submit],
+html[data-theme="dark"] .site-body .stack-form button:not(.site-theme-toggle) {
+  background: var(--accent); color: #06231a;
+}
