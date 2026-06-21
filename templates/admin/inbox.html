@@ -156,10 +156,12 @@
            href="{% if active.converted_project_id %}/admin/studio/projects/{{ active.converted_project_id }}{% elif active.converted_client_id %}/admin/studio/clients/{{ active.converted_client_id }}{% else %}/admin/studio{% endif %}">
           <span aria-hidden="true">✦</span><span class="ib-act-t">Open converted record</span><span>→</span></a>
         <form method="post" action="/admin/studio/inquiries/{{ active.id }}/unconvert">
+          <input type="hidden" name="return_to" value="/admin/inbox?tab={{ tab }}&sel={{ active.id }}">
           <button class="ib-act" type="submit"><span aria-hidden="true">↩</span><span class="ib-act-t">Undo conversion</span></button>
         </form>
       {% elif active.is_dismissed %}
         <form method="post" action="/admin/studio/inquiries/{{ active.id }}/undismiss">
+          <input type="hidden" name="return_to" value="/admin/inbox?tab={{ tab }}&sel={{ active.id }}">
           <button class="ib-act ib-act-primary" type="submit"><span aria-hidden="true">↩</span><span class="ib-act-t">Restore to pipeline</span><span>→</span></button>
         </form>
       {% else %}

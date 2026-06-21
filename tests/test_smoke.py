@@ -6850,6 +6850,27 @@ def test_quo_inbound_call_creates_call_inquiry_and_is_idempotent(client, monkeyp
         db.run("DELETE FROM inquiries WHERE phone=?", (phone,))
 
 
+def test_inquiry_dismiss_returns_to_inbox_when_asked(admin):
+    """Triage actions invoked from the Inbox honor a safe return_to so Kevin stays
+    in the Inbox instead of being bounced to Studio. An unsafe/off-site return_to
+    falls back to the default Studio destination."""
+    iid = db.run("INSERT INTO inquiries (name, email, message, kind) VALUES (?,?,?,?)",
+                 ("Triage Lead", "t@x.com", "hi", "contact"))
+    try:
+        back = f"/admin/inbox?tab=all&sel={iid}"
+        r = admin.post(f"/admin/studio/inquiries/{iid}/dismiss",
+                       data={"return_to": back}, follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"] == back
+
+        # open-redirect guard: a non-/admin/ target is ignored
+        r2 = admin.post(f"/admin/studio/inquiries/{iid}/undismiss",
+                        data={"return_to": "https://evil.example.com"},
+                        follow_redirects=False)
+        assert r2.status_code == 303 and r2.headers["location"] == "/admin/studio"
+    finally:
+        db.run("DELETE FROM inquiries WHERE id=?", (iid,))
+
+
 def test_quo_inbound_reopens_dismissed_thread(client, monkeypatch):
     """A fresh inbound text on a thread the user had dismissed clears dismissed_at
     so it resurfaces in the active inbox instead of vanishing into the archive."""

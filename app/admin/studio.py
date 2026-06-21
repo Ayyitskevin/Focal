@@ -466,8 +466,17 @@ async def create_client(name: str = Form(...), company: str = Form(""),
     return RedirectResponse(f"/admin/studio/clients/{cid}", status_code=303)
 
 
+def _redirect(return_to: str, default: str) -> RedirectResponse:
+    """Honor a caller-supplied return_to (e.g. the Inbox passes its own URL so a
+    triage action keeps Kevin in place) when it's a safe local admin path;
+    otherwise fall back to the action's own destination. Same-origin only —
+    rejects anything that isn't a plain /admin/… path."""
+    safe = return_to.startswith("/admin/") and "//" not in return_to[1:]
+    return RedirectResponse(return_to if safe else default, status_code=303)
+
+
 @router.post("/inquiries/{inquiry_id}/unconvert")
-async def inquiry_unconvert(inquiry_id: int):
+async def inquiry_unconvert(inquiry_id: int, return_to: str = Form("")):
     """Clear the conversion stamps on an inquiry so it shows up as actionable
     again. INTENTIONALLY does NOT delete the spawned client/project — by the
     time Kevin clicks undo, those may already carry edits, brand assets, or
@@ -480,11 +489,11 @@ async def inquiry_unconvert(inquiry_id: int):
               WHERE id=?""", (inquiry_id,))
     log.info("inquiry %s unconverted (spawned client/project untouched)",
              inquiry_id)
-    return RedirectResponse("/admin/studio", status_code=303)
+    return _redirect(return_to, "/admin/studio")
 
 
 @router.post("/inquiries/{inquiry_id}/dismiss")
-async def inquiry_dismiss(inquiry_id: int):
+async def inquiry_dismiss(inquiry_id: int, return_to: str = Form("")):
     """Archive an unconverted inquiry — spam, test, or dead leads. Reversible:
     the row is kept and stamped dismissed_at, so it drops out of the active
     leads list and the home 'new inquiries' count but stays in the Inquiries
@@ -499,11 +508,11 @@ async def inquiry_dismiss(inquiry_id: int):
     db.run("UPDATE inquiries SET dismissed_at=datetime('now') WHERE id=?",
            (inquiry_id,))
     log.info("inquiry %s dismissed (archived)", inquiry_id)
-    return RedirectResponse("/admin/studio", status_code=303)
+    return _redirect(return_to, "/admin/studio")
 
 
 @router.post("/inquiries/{inquiry_id}/undismiss")
-async def inquiry_undismiss(inquiry_id: int):
+async def inquiry_undismiss(inquiry_id: int, return_to: str = Form("")):
     """Undo a dismiss — clears dismissed_at so the lead returns to the active
     pipeline."""
     inq = db.one("SELECT id FROM inquiries WHERE id=?", (inquiry_id,))
@@ -511,7 +520,7 @@ async def inquiry_undismiss(inquiry_id: int):
         raise HTTPException(status_code=404)
     db.run("UPDATE inquiries SET dismissed_at=NULL WHERE id=?", (inquiry_id,))
     log.info("inquiry %s undismissed (restored)", inquiry_id)
-    return RedirectResponse("/admin/studio", status_code=303)
+    return _redirect(return_to, "/admin/studio")
 
 
 @router.post("/inquiries/{inquiry_id}/client")
