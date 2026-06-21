@@ -4892,6 +4892,7 @@ html[data-theme="dark"] .admin-shell {
   --surface:       #1c1c1c;
   --surface-sunk:  #161616;
   --surface-rail:  #181818;
+  --card-bg:       #1c1c1c;
 
   --ink:           #e8e6e2;
   --ink-soft:      #bdbab4;
@@ -4949,6 +4950,25 @@ html[data-theme="dark"] .admin-shell .sch-type {
   background: var(--surface); border-color: var(--line);
 }
 html[data-theme="dark"] .admin-shell .stu-portal-muted { background: var(--surface-sunk); }
+
+/* ── 2b. Long-tail #FFFEF8 panels/pills/controls the var-flip can't reach
+        (they hardcode the near-white in their own light rule). Map bg→surface,
+        light borders→--line, and the muted forest text #5C6A5E→--ink-soft so it
+        stays legible on dark. ─────────────────────────────────────────────── */
+html[data-theme="dark"] .admin-shell .stu-newproj-pop,
+html[data-theme="dark"] .admin-shell .gd-manage-body,
+html[data-theme="dark"] .admin-shell .gd-btn-sm,
+html[data-theme="dark"] .admin-shell .dash-search input,
+html[data-theme="dark"] .admin-shell .cal-monthnav a,
+html[data-theme="dark"] .admin-shell .pgtop-link,
+html[data-theme="dark"] .admin-shell .audit-chip {
+  background: var(--surface); border-color: var(--line);
+}
+html[data-theme="dark"] .admin-shell .gx-pill,
+html[data-theme="dark"] .admin-shell .gd-pill,
+html[data-theme="dark"] .admin-shell .gd-back {
+  background: var(--surface); border-color: var(--line); color: var(--ink-soft);
+}
 
 /* ── 3. Studio board details with hardcoded greys/golds ─────────────────── */
 html[data-theme="dark"] .admin-shell .stu-col-count,
