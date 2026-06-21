@@ -524,7 +524,7 @@ async def inquiry_undismiss(inquiry_id: int, return_to: str = Form("")):
 
 
 @router.post("/inquiries/{inquiry_id}/client")
-async def inquiry_to_client(inquiry_id: int):
+async def inquiry_to_client(inquiry_id: int, return_to: str = Form("")):
     inq = db.one("SELECT * FROM inquiries WHERE id=?", (inquiry_id,))
     if not inq:
         raise HTTPException(status_code=404)
@@ -548,12 +548,12 @@ async def inquiry_to_client(inquiry_id: int):
               converted_client_id=?, converted_project_id=? WHERE id=?""",
            (cid, pid, inquiry_id))
     if pid:
-        return RedirectResponse(f"/admin/studio/projects/{pid}", status_code=303)
-    return RedirectResponse(f"/admin/studio/clients/{cid}", status_code=303)
+        return _redirect(return_to, f"/admin/studio/projects/{pid}")
+    return _redirect(return_to, f"/admin/studio/clients/{cid}")
 
 
 @router.post("/inquiries/{inquiry_id}/quote")
-async def inquiry_to_quote(inquiry_id: int):
+async def inquiry_to_quote(inquiry_id: int, return_to: str = Form("")):
     """One click from a lead to an editable draft quote: find/create the client,
     spawn an 'inquiry_received' project, and open a blank draft proposal seeded
     with the inquiry brief as the intro. Quoting-first flow — Kevin fills the
@@ -583,7 +583,7 @@ async def inquiry_to_quote(inquiry_id: int):
               converted_client_id=?, converted_project_id=? WHERE id=?""",
            (cid, pid, inquiry_id))
     log.info("inquiry %s → project %s + draft proposal %s", inquiry_id, pid, prop_id)
-    return RedirectResponse(f"/admin/studio/proposals/{prop_id}", status_code=303)
+    return _redirect(return_to, f"/admin/studio/proposals/{prop_id}")
 
 
 @router.get("/clients/{client_id}", response_class=HTMLResponse)

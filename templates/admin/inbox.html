@@ -166,12 +166,15 @@
         </form>
       {% else %}
         <form method="post" action="/admin/studio/inquiries/{{ active.id }}/quote">
+          <input type="hidden" name="return_to" value="/admin/inbox?tab={{ tab }}&sel={{ active.id }}">
           <button class="ib-act ib-act-primary" type="submit"><span aria-hidden="true">$</span><span class="ib-act-t">Send a quick quote</span><span>→</span></button>
         </form>
         <form method="post" action="/admin/studio/inquiries/{{ active.id }}/client">
+          <input type="hidden" name="return_to" value="/admin/inbox?tab={{ tab }}&sel={{ active.id }}">
           <button class="ib-act" type="submit"><span aria-hidden="true">⊞</span><span class="ib-act-t">Create client &amp; project</span></button>
         </form>
         <form method="post" action="/admin/studio/inquiries/{{ active.id }}/dismiss">
+          <input type="hidden" name="return_to" value="/admin/inbox?tab={{ tab }}&sel={{ active.id }}">
           <button class="ib-act" type="submit"><span aria-hidden="true">✕</span><span class="ib-act-t">Dismiss</span></button>
         </form>
       {% endif %}
