@@ -4899,10 +4899,10 @@ html[data-theme="dark"] .admin-shell {
   --ink-faint:     #8c8a85;
   --ink-ghost:     #66645f;
 
-  --terra:         #6dba9b;
-  --terra-deep:    #8fcfb1;
-  --terra-tint:    #1d2a23;
-  --terra-tint-2:  #25382e;
+  --terra:         #23b487;
+  --terra-deep:    #0e8f66;
+  --terra-tint:    #14271f;
+  --terra-tint-2:  #1c3a2d;
   --gold:          #E0A43B;
 
   --ok:      #9cc178;  --ok-bg:  #20271a;  --ok-line:  #354028;
@@ -4978,7 +4978,7 @@ html[data-theme="dark"] .admin-shell .kpi-trend-up,
 html[data-theme="dark"] .admin-shell .stu-card-val.is-won { color: #5fbf93; }
 html[data-theme="dark"] .admin-shell .stu-viewpill { background: var(--surface-sunk); }
 html[data-theme="dark"] .admin-shell .stu-viewpill button.is-active {
-  background: var(--terra-deep); color: #131313;
+  background: var(--terra-deep); color: #F3F0E2;
 }
 html[data-theme="dark"] .admin-shell .stu-step.tone-warn { background: var(--honey-bg); }
 
@@ -5102,3 +5102,9 @@ html[data-theme="dark"] .admin-shell .pt-pin,
 html[data-theme="dark"] .admin-shell .sch-up-chip {
   background: var(--neutral-bg); color: var(--neutral); border-color: var(--neutral-line);
 }
+
+/* ── 10. Receipts faux-paper thumb (cream gradient → dark recessed) ─────── */
+html[data-theme="dark"] .admin-shell .rc-thumb {
+  background: linear-gradient(160deg, #1a1a1a, #141414);
+}
+html[data-theme="dark"] .admin-shell .rc-line { background: var(--line-strong); }
