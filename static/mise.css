@@ -5144,11 +5144,11 @@ html[data-theme="dark"] .admin-shell .pgtop {
    dark ink so the email CTAs clearly read as jade green and stay legible. ── */
 html[data-theme="dark"] .admin-shell .ib-reply-btn,
 html[data-theme="dark"] .admin-shell .ib-reply-send,
-html[data-theme="dark"] .admin-shell .ib-act-primary {
+html[data-theme="dark"] .admin-shell .ib-act {
   background: var(--terra); border-color: var(--terra); color: #06231a;
 }
 html[data-theme="dark"] .admin-shell .ib-reply-btn:hover,
 html[data-theme="dark"] .admin-shell .ib-reply-send:hover,
-html[data-theme="dark"] .admin-shell .ib-act-primary:hover {
-  background: #2ec698; border-color: #2ec698;
+html[data-theme="dark"] .admin-shell .ib-act:hover {
+  background: #2ec698; border-color: #2ec698; color: #06231a;
 }
