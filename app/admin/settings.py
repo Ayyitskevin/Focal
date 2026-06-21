@@ -17,7 +17,7 @@ import shutil
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
-from .. import caption_ai, config, gcal, security
+from .. import caption_ai, config, gcal, security, sms
 from ..render import templates
 
 router = APIRouter(prefix="/admin/settings",
@@ -54,6 +54,9 @@ def _integrations() -> list[dict]:
         {"name": "Gmail", "mark": "M", "icon_bg": "#fae3e0", "icon_color": "#c5372c",
          "desc": "Send proposals & invoices from your address — manual send only",
          **_badge(bool(config.GMAIL_USER and config.GMAIL_APP_PASSWORD))},
+        {"name": "Quo SMS", "mark": "Q", "icon_bg": "#e3edfb", "icon_color": "#2f6d8a",
+         "desc": "Two-way texting in your unified inbox",
+         **_badge(sms.configured())},
         {"name": "Notion", "mark": "N", "icon_bg": "#e7ecdd", "icon_color": "#143C2F",
          "desc": notion_desc, **_badge(notion_on)},
         {"name": "Google Calendar", "mark": "GC", "icon_bg": "#e3edfb", "icon_color": "#2f6d8a",

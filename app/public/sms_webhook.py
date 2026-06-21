@@ -32,25 +32,27 @@ async def quo_webhook(request: Request):
     if not config.QUO_WEBHOOK_SECRET:
         raise HTTPException(status_code=503, detail="sms webhook not configured")
     raw = await request.body()
-    if not sms.verify_webhook(raw, request.headers.get("openphone-signature", "")):
+    h = request.headers
+    if not sms.verify_webhook(raw, h.get("webhook-id", ""),
+                              h.get("webhook-timestamp", ""),
+                              h.get("webhook-signature", "")):
         raise HTTPException(status_code=400, detail="bad signature")
     try:
         event = json.loads(raw.decode())
     except (ValueError, UnicodeDecodeError):
         raise HTTPException(status_code=400, detail="unreadable payload")
 
-    # Only inbound text events create a thread row. Quo nests the message under
-    # data.object; tolerate a flatter shape. Anything else (delivery receipts,
-    # outbound echoes) is acknowledged and ignored.
-    etype = event.get("type", "")
-    obj = (event.get("data") or {}).get("object") or event.get("data") or {}
-    direction = (obj.get("direction") or "").lower()
-    if "message" not in etype or direction not in ("incoming", "inbound", "in"):
-        return {"ok": True, "ignored": etype or "unknown"}
-
-    from_phone = (obj.get("from") or "").strip()
-    body = (obj.get("body") or obj.get("content") or obj.get("text") or "").strip()
-    provider_msg_id = (obj.get("id") or "").strip() or None
+    # Only inbound texts create a thread row. Quo (Standard Webhooks) nests the
+    # message under data.resource with the participant numbers in data.context.
+    # Anything else (message.delivered receipts, outbound echoes) is acked + ignored.
+    if event.get("type") != "message.received":
+        return {"ok": True, "ignored": event.get("type") or "unknown"}
+    data = event.get("data") or {}
+    resource = data.get("resource") or {}
+    context = data.get("context") or {}
+    from_phone = (context.get("senderIdentifier") or "").strip()
+    body = (resource.get("text") or "").strip()
+    provider_msg_id = (resource.get("id") or "").strip() or None
     if not from_phone:
         return {"ok": True, "ignored": "no from number"}
 
