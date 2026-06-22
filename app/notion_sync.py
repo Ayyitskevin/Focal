@@ -66,9 +66,16 @@ def sync_gallery(gallery_id: int) -> None:
                  gallery_id, bool(config.NOTION_TOKEN),
                  bool(d["notion_page_id"]), bool(d["published"]))
         return
-    _patch_page(d["notion_page_id"],
-                {"Gallery URL": {"url": f"{config.BASE_URL}/g/{d['slug']}"}})
-    log.info("notion session gallery URL set from gallery %s", gallery_id)
+    _patch_page(d["notion_page_id"], {
+        "Gallery URL": {"url": f"{config.BASE_URL}/g/{d['slug']}"},
+        # Publishing a gallery IS the delivery event. Flip the Session to
+        # "Delivered" (P_SESSION contract) so Odysseus post_delivery fires its
+        # review request off the real Mise event. Enqueued only on the publish
+        # transition (admin.galleries), and post_delivery is gated by its
+        # "Delivery Processed" checkbox, so the request still goes out once.
+        "Status": {"select": {"name": "Delivered"}},
+    })
+    log.info("notion session delivered + gallery URL set from gallery %s", gallery_id)
 
 
 _INTAKE_FIELDS = [

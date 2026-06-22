@@ -1953,7 +1953,8 @@ def test_gallery_notion_writeback(admin, monkeypatch):
     db.run("UPDATE projects SET notion_page_id='sess42' WHERE id=?", (project["id"],))
     notion_sync.sync_gallery(gid)
     assert calls == [("sess42",
-                      {"Gallery URL": {"url": f"{config.BASE_URL}/g/WritebackSlug1"}})]
+                      {"Gallery URL": {"url": f"{config.BASE_URL}/g/WritebackSlug1"},
+                       "Status": {"select": {"name": "Delivered"}}})]
 
     # unpublishing later → clean skip, no HTTP
     calls.clear()
