@@ -10,8 +10,13 @@ it to a Mise project via projects.notion_page_id, then read shot_list. An unmatc
 session is NOT an error: it returns {"matched": false, ...} so the caller can fall back
 to Notion cleanly. Only title/category/priority are returned — the three fields
 preshoot_pack actually formats into its LLM context.
+
+GET /api/galleries/expiring?days=7   — published galleries expiring within N days
+GET /api/press/recent?days=30        — press hits published in the last N days
+Both use the same bearer token and are read-only.
 """
 
+import datetime as dt
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -46,3 +51,39 @@ async def shots(session: str = ""):
             for r in rows
         ],
     }
+
+
+@router.get("/galleries/expiring")
+async def galleries_expiring(days: int = 7):
+    """Published galleries expiring within `days` days. For Odysseus gallery_expiration_warn."""
+    if days < 1 or days > 30:
+        raise HTTPException(status_code=400, detail="days must be 1-30")
+    today = dt.date.today().isoformat()
+    horizon = (dt.date.today() + dt.timedelta(days=days)).isoformat()
+    rows = db.all_(
+        "SELECT g.id, g.title, g.client_name, g.slug, g.expires_at "
+        "FROM galleries g "
+        "WHERE g.published=1 AND g.expires_at IS NOT NULL "
+        "  AND g.expires_at >= ? AND g.expires_at <= ? "
+        "ORDER BY g.expires_at",
+        (today, horizon),
+    )
+    return {"galleries": [dict(r) for r in rows], "horizon_days": days, "today": today}
+
+
+@router.get("/press/recent")
+async def press_recent(days: int = 30):
+    """Press hits with publish_date in the last `days` days. For Odysseus press_to_outreach."""
+    if days < 1 or days > 90:
+        raise HTTPException(status_code=400, detail="days must be 1-90")
+    since = (dt.date.today() - dt.timedelta(days=days)).isoformat()
+    rows = db.all_(
+        "SELECT p.outlet, p.title, p.url, p.publish_date, p.channel, "
+        "       c.name AS client_name, c.company "
+        "FROM press p LEFT JOIN clients c ON c.id=p.client_id "
+        "WHERE p.deleted_at IS NULL AND p.publish_date IS NOT NULL "
+        "  AND p.publish_date >= ? AND p.publish_date <= date('now', 'localtime') "
+        "ORDER BY p.publish_date DESC",
+        (since,),
+    )
+    return {"hits": [dict(r) for r in rows], "since": since}
