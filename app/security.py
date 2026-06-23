@@ -169,6 +169,19 @@ def check_admin_password(password: str) -> bool:
     return secrets.compare_digest(password, config.ADMIN_PASSWORD)
 
 
+def require_argus_token(request: Request) -> None:
+    """Bearer gate for the published-gallery index (config.ARGUS_TOKEN).
+
+    Token unset -> 503: disarmed until MISE_ARGUS_TOKEN is provisioned on flow.
+    """
+    if not config.ARGUS_TOKEN:
+        raise HTTPException(status_code=503, detail="galleries api disarmed")
+    header = request.headers.get("Authorization", "")
+    expected = f"Bearer {config.ARGUS_TOKEN}"
+    if not secrets.compare_digest(header, expected):
+        raise HTTPException(status_code=401, detail="bad token")
+
+
 def require_shots_token(request: Request) -> None:
     """Bearer gate for the shot-list read API (config.SHOTS_TOKEN).
 

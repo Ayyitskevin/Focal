@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
-from .. import audit, config, db, jobs, mailer, security
+from .. import argus_analyze, audit, config, db, jobs, mailer, security
 from ..public.gallery import _cascade_status, resolve_comment_parent
 from ..render import templates
 from . import common
@@ -334,6 +334,8 @@ async def gallery_detail(request: Request, gallery_id: int):
             "n_views": n_views,
             "n_downloads": n_downloads,
             "video_comments": video_comments,
+            "argus_enabled": argus_analyze.is_enabled(),
+            "argus_url": config.ARGUS_URL,
         },
     )
 
@@ -396,6 +398,24 @@ async def update_gallery(
     )
     if published and project_id and (not old["published"] or old["project_id"] != project_id):
         jobs.enqueue("notion_sync_gallery", {"gallery_id": gallery_id})
+    if (published and old["type"] != "drop"
+            and (not old["published"] or old["project_id"] != project_id)):
+        jobs.enqueue("argus_analyze_gallery", {"gallery_id": gallery_id})
+    return RedirectResponse(f"/admin/galleries/{gallery_id}", status_code=303)
+
+
+@router.post("/galleries/{gallery_id}/argus-analyze")
+async def argus_analyze_now(gallery_id: int):
+    """Manual re-trigger of Argus folder analyze for a published gallery."""
+    g = get_gallery(gallery_id)
+    if not g["published"]:
+        raise HTTPException(status_code=400, detail="publish the gallery first")
+    if g["type"] == "drop":
+        raise HTTPException(status_code=400, detail="transfers are not analyzed")
+    if not argus_analyze.is_enabled():
+        raise HTTPException(status_code=503, detail="Argus is not configured")
+    jobs.enqueue("argus_analyze_gallery", {"gallery_id": gallery_id})
+    log.info("argus analyze manually queued for gallery %s", gallery_id)
     return RedirectResponse(f"/admin/galleries/{gallery_id}", status_code=303)
 
 

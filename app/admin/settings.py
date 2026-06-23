@@ -17,7 +17,7 @@ import shutil
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
-from .. import caption_ai, config, features, gcal, security
+from .. import argus_analyze, caption_ai, config, features, gcal, security
 from ..render import templates
 
 router = APIRouter(prefix="/admin/settings", dependencies=[Depends(security.require_admin)])
@@ -101,6 +101,14 @@ def _integrations() -> list[dict]:
             "icon_color": "#7C2F38",
             "desc": "Draft captions with your local model — never auto-posts",
             **_badge(caption_ai.is_enabled()),
+        },
+        {
+            "name": "Argus vision",
+            "mark": "AV",
+            "icon_bg": "#e8e4f0",
+            "icon_color": "#5b4a8a",
+            "desc": "Analyze gallery originals on publish — one-way POST to homelab Argus",
+            **_badge(argus_analyze.is_enabled()),
         },
         {
             "name": "Telegram alerts",

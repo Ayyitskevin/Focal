@@ -7,7 +7,7 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from . import brand_kits, config, db, imaging, notion_sync, presets, video
+from . import argus_analyze, brand_kits, config, db, imaging, notion_sync, presets, video
 
 log = logging.getLogger("mise.jobs")
 
@@ -124,6 +124,7 @@ HANDLERS = {
     "zip_build": _h_zip,
     "notion_sync_invoice": lambda p: notion_sync.sync_invoice(p["invoice_id"]),
     "notion_sync_gallery": lambda p: notion_sync.sync_gallery(p["gallery_id"]),
+    "argus_analyze_gallery": lambda p: argus_analyze.run_for_gallery(p["gallery_id"]),
 }
 
 

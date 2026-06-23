@@ -245,6 +245,35 @@
         </a>
       </section>
 
+      {% if argus_enabled and g.published and not is_drop %}
+      <section class="gd-argus" style="margin-top:1rem;padding:1rem;border:1px solid #e8e4f0;border-radius:8px;background:#faf9fc">
+        <div class="gd-proof-head" style="margin-bottom:0.5rem">
+          <h3 style="margin:0">Argus vision</h3>
+          {% if g.argus_last_status %}
+          <span class="gd-proof-n">{{ g.argus_last_status }}</span>
+          {% endif %}
+        </div>
+        {% if g.argus_last_status == 'error' and g.argus_last_error %}
+        <p class="muted" style="margin:0 0 0.6rem;color:#7C2F38">{{ g.argus_last_error }}
+          {% if g.argus_last_at %}<span> · {{ g.argus_last_at }}</span>{% endif %}
+        </p>
+        {% elif g.argus_last_at %}
+        <p class="muted" style="margin:0 0 0.6rem">Last run {{ g.argus_last_at }}
+          {% if g.argus_last_run_id %}
+          · <a href="{{ argus_url }}/runs/{{ g.argus_last_run_id }}" target="_blank" rel="noopener">view run</a>
+          {% elif g.argus_last_job_id %}
+          · <a href="{{ argus_url }}/ui/jobs/{{ g.argus_last_job_id }}" target="_blank" rel="noopener">view job</a>
+          {% endif %}
+        </p>
+        {% else %}
+        <p class="muted" style="margin:0 0 0.6rem">Queued automatically when you publish.</p>
+        {% endif %}
+        <form method="post" action="/admin/galleries/{{ g.id }}/argus-analyze" class="inline">
+          <button type="submit" class="link">Analyze now</button>
+        </form>
+      </section>
+      {% endif %}
+
       {% if not is_drop and assets %}
       {% set pct = (n_fav * 100 // (assets|length)) if assets else 0 %}
       <section class="gd-proof">

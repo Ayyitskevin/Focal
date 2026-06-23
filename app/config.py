@@ -103,6 +103,16 @@ ODYSSEUS_CAPTION_URL = os.environ.get("MISE_ODYSSEUS_CAPTION_URL", "")
 ODYSSEUS_CAPTION_TOKEN = os.environ.get("MISE_ODYSSEUS_CAPTION_TOKEN", "")
 ODYSSEUS_TIMEOUT = int(os.environ.get("MISE_ODYSSEUS_TIMEOUT", "210"))
 
+# Argus vision analyze (Phase 6). BOTH url+token must be set to arm publish hooks and
+# the gallery admin "Analyze now" button (see argus_analyze.is_enabled); either unset =
+# dormant, no outbound call. Mise POSTs mise_gallery_id to Argus /analyze-folder; Argus
+# resolves originals via ARGUS_MISE_MEDIA_ROOT on its side. The same bearer token also
+# arms GET /api/galleries for Argus to list published galleries (inbound read surface).
+ARGUS_URL = os.environ.get("MISE_ARGUS_URL", "").rstrip("/")
+ARGUS_TOKEN = os.environ.get("MISE_ARGUS_TOKEN", "")
+ARGUS_TIMEOUT = int(os.environ.get("MISE_ARGUS_TIMEOUT", "30"))
+ARGUS_ANALYZE_LIMIT = int(os.environ.get("MISE_ARGUS_ANALYZE_LIMIT", "20"))
+
 # studio-notify-on-reopen: best-effort push to Odysseus when a client reply
 # auto-reopens a resolved video-comment thread. Both unset -> dormant, no outbound
 # call. Timeout is SHORT (5s) — opposite of caption: a slow/down Odysseus must never

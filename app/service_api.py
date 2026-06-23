@@ -13,7 +13,8 @@ preshoot_pack actually formats into its LLM context.
 
 GET /api/galleries/expiring?days=7   — published galleries expiring within N days
 GET /api/press/recent?days=30        — press hits published in the last N days
-Both use the same bearer token and are read-only.
+GET /api/galleries                   — published gallery index for Argus (MISE_ARGUS_TOKEN)
+All are bearer-gated and read-only.
 """
 
 import datetime as dt
@@ -24,10 +25,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from . import db, security
 
 log = logging.getLogger("mise.service_api")
-router = APIRouter(prefix="/api", dependencies=[Depends(security.require_shots_token)])
+router = APIRouter(prefix="/api")
 
 
-@router.get("/shots")
+@router.get("/shots", dependencies=[Depends(security.require_shots_token)])
 async def shots(session: str = ""):
     session = (session or "").strip()
     if not session:
@@ -53,7 +54,7 @@ async def shots(session: str = ""):
     }
 
 
-@router.get("/galleries/expiring")
+@router.get("/galleries/expiring", dependencies=[Depends(security.require_shots_token)])
 async def galleries_expiring(days: int = 7):
     """Published galleries expiring within `days` days. For Odysseus gallery_expiration_warn."""
     if days < 1 or days > 30:
@@ -71,7 +72,7 @@ async def galleries_expiring(days: int = 7):
     return {"galleries": [dict(r) for r in rows], "horizon_days": days, "today": today}
 
 
-@router.get("/press/recent")
+@router.get("/press/recent", dependencies=[Depends(security.require_shots_token)])
 async def press_recent(days: int = 30):
     """Press hits with publish_date in the last `days` days. For Odysseus press_to_outreach."""
     if days < 1 or days > 90:
@@ -87,3 +88,35 @@ async def press_recent(days: int = 30):
         (since,),
     )
     return {"hits": [dict(r) for r in rows], "since": since}
+
+
+@router.get("/galleries", dependencies=[Depends(security.require_argus_token)])
+async def galleries(published: bool = True):
+    """Read-only published gallery index for Argus (Phase 6 slice 1)."""
+    if published:
+        rows = db.all_(
+            """SELECT id, slug, title, project_id, published, client_id,
+                      argus_last_run_id, argus_last_job_id, argus_last_status, argus_last_at
+               FROM galleries WHERE published=1 AND type='gallery'
+               ORDER BY id DESC""",
+        )
+    else:
+        rows = db.all_(
+            """SELECT id, slug, title, project_id, published, client_id,
+                      argus_last_run_id, argus_last_job_id, argus_last_status, argus_last_at
+               FROM galleries WHERE type='gallery' ORDER BY id DESC""",
+        )
+    return {
+        "galleries": [{
+            "id": r["id"],
+            "slug": r["slug"],
+            "title": r["title"],
+            "project_id": r["project_id"],
+            "published": bool(r["published"]),
+            "client_id": r["client_id"],
+            "argus_last_run_id": r["argus_last_run_id"],
+            "argus_last_job_id": r["argus_last_job_id"],
+            "argus_last_status": r["argus_last_status"],
+            "argus_last_at": r["argus_last_at"],
+        } for r in rows],
+    }
