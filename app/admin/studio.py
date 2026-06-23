@@ -954,6 +954,7 @@ async def update_client(
     notes: str = Form(""),
     usage_rights: str = Form(""),
     market: str = Form(pricing.DEFAULT_MARKET),
+    platekit_slug: str = Form(""),
 ):
     get_client(client_id)
     # The market drives which base rate card the license-fee suggestion reads;
@@ -963,7 +964,7 @@ async def update_client(
         raise HTTPException(status_code=400, detail=f"unknown market {market!r}")
     db.run(
         """UPDATE clients SET name=?, company=?, email=?, phone=?, notes=?,
-              usage_rights=?, market=? WHERE id=?""",
+              usage_rights=?, market=?, platekit_slug=? WHERE id=?""",
         (
             name.strip(),
             company.strip() or None,
@@ -972,6 +973,7 @@ async def update_client(
             notes.strip() or None,
             usage_rights.strip() or None,
             market,
+            platekit.normalize_slug(platekit_slug) or None,
             client_id,
         ),
     )

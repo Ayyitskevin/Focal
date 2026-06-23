@@ -24,9 +24,27 @@ def is_enabled() -> bool:
     return bool(config.PLATEKIT_API_BASE and config.PLATEKIT_API_TOKEN)
 
 
+def normalize_slug(value: str) -> str:
+    return _SLUG_CHARS.sub("-", (value or "").strip().lower()).strip("-")
+
+
 def slug_for_client(client) -> str:
-    base = (client["company"] or client["name"] or "").strip().lower()
-    return _SLUG_CHARS.sub("-", base).strip("-")
+    explicit = normalize_slug(client["platekit_slug"] or "") if "platekit_slug" in client.keys() else ""
+    if explicit:
+        return explicit
+    base = (client["company"] or client["name"] or "").strip()
+    return normalize_slug(base)
+
+
+def signup_url(client) -> str:
+    company = client["company"] or client["name"] or ""
+    params = urllib.parse.urlencode({
+        "company": company,
+        "name": client["name"] or "",
+        "email": client["email"] or "",
+        "audience": "restaurant",
+    })
+    return f"https://platekit.kleephotography.com/?{params}#signup"
 
 
 def _empty(*, slug: str, status: str, message: str, enabled: bool | None = None) -> dict:
@@ -36,17 +54,22 @@ def _empty(*, slug: str, status: str, message: str, enabled: bool | None = None)
         "status": status,
         "message": message,
         "packs": [],
+        "signup_url": "",
     }
 
 
 def packs_for_client(client, *, include_drafts: bool = False) -> dict:
     slug = slug_for_client(client)
     if not is_enabled():
-        return _empty(slug=slug, status="not_configured",
-                      message="Platekit bridge is not configured", enabled=False)
+        state = _empty(slug=slug, status="not_configured",
+                       message="Platekit bridge is not configured", enabled=False)
+        state["signup_url"] = signup_url(client)
+        return state
     if not slug:
-        return _empty(slug=slug, status="missing_slug",
-                      message="Client does not have a usable Platekit slug")
+        state = _empty(slug=slug, status="missing_slug",
+                       message="Client does not have a usable Platekit slug")
+        state["signup_url"] = signup_url(client)
+        return state
 
     base = config.PLATEKIT_API_BASE.rstrip("/")
     qs = urllib.parse.urlencode({"include_drafts": "true"}) if include_drafts else ""
@@ -62,18 +85,26 @@ def packs_for_client(client, *, include_drafts: bool = False) -> dict:
             payload = json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
         if e.code == 404:
-            return _empty(slug=slug, status="not_found",
-                          message="No matching Platekit organization")
+            state = _empty(slug=slug, status="not_found",
+                           message="No matching Platekit organization")
+            state["signup_url"] = signup_url(client)
+            return state
         log.warning("Platekit returned HTTP %s for slug=%s", e.code, slug)
-        return _empty(slug=slug, status="error",
-                      message=f"Platekit returned HTTP {e.code}")
+        state = _empty(slug=slug, status="error",
+                       message=f"Platekit returned HTTP {e.code}")
+        state["signup_url"] = signup_url(client)
+        return state
     except (urllib.error.URLError, TimeoutError) as e:
         log.warning("Platekit unreachable for slug=%s: %s", slug, e)
-        return _empty(slug=slug, status="error",
-                      message="Platekit is unreachable")
+        state = _empty(slug=slug, status="error",
+                       message="Platekit is unreachable")
+        state["signup_url"] = signup_url(client)
+        return state
     except (ValueError, json.JSONDecodeError):
-        return _empty(slug=slug, status="error",
-                      message="Platekit returned an unreadable response")
+        state = _empty(slug=slug, status="error",
+                       message="Platekit returned an unreadable response")
+        state["signup_url"] = signup_url(client)
+        return state
 
     return {
         "enabled": True,
@@ -81,4 +112,5 @@ def packs_for_client(client, *, include_drafts: bool = False) -> dict:
         "status": "ok",
         "message": "",
         "packs": payload.get("packs") or [],
+        "signup_url": signup_url(client),
     }

@@ -41,10 +41,14 @@
       {% endfor %}
     </table>
     {% else %}
-    <p class="muted">No approved Platekit packs matched this client yet.</p>
+    <p class="muted">No approved Platekit packs matched this client yet.
+      {% if platekit.signup_url %}<a href="{{ platekit.signup_url }}" target="_blank" rel="noopener">Create in Platekit</a>{% endif %}
+    </p>
     {% endif %}
   {% else %}
-    <p class="muted">Platekit bridge is not configured.</p>
+    <p class="muted">Platekit bridge is not configured.
+      {% if platekit.signup_url %}<a href="{{ platekit.signup_url }}" target="_blank" rel="noopener">Open Platekit signup</a>{% endif %}
+    </p>
   {% endif %}
 
   <form method="post" action="/admin/studio/clients/{{ c.id }}" class="stack-form">
@@ -55,6 +59,9 @@
     <label>Notes <textarea name="notes" rows="3">{{ c.notes or '' }}</textarea></label>
     <label>Usage rights <textarea name="usage_rights" rows="3"
            placeholder="e.g. Social + web use, 12 months, no paid ads">{{ c.usage_rights or '' }}</textarea></label>
+    <label>Platekit slug <input type="text" name="platekit_slug" value="{{ c.platekit_slug or '' }}" placeholder="blue-plate">
+      <span class="muted">Overrides name/company matching for the Platekit bridge.</span>
+    </label>
     <label>Market
       <select name="market">
         {% for m in markets %}
