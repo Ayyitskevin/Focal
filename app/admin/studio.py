@@ -12,7 +12,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
-from .. import clients, config, db, jobs, pricing, security, usage_vocab
+from .. import clients, config, db, jobs, platekit, pricing, security, usage_vocab
 from ..render import templates
 
 log = logging.getLogger("mise.admin.studio")
@@ -818,6 +818,7 @@ async def client_detail(request: Request, client_id: int):
         "n_invoices": inv["n_invoices"],
         "n_delivered": n_delivered,
     }
+    platekit_packs = platekit.packs_for_client(c)
     # Cross-session activity feed — the same per-doc events the project page
     # shows, but spanning every session this client has, newest first. Pure-read
     # narration of state already stored (reuses _build_timeline); no new state,
@@ -854,6 +855,7 @@ async def client_detail(request: Request, client_id: int):
             "covering": covering,
             "totals": totals,
             "money": money,
+            "platekit": platekit_packs,
             "blockers": _client_blockers(client_id),
             "markets": pricing.MARKETS,
             "base_url": config.BASE_URL,

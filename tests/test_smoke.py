@@ -18,7 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app import db
+from app import db, platekit
 from app.main import app
 
 
@@ -9261,3 +9261,13 @@ def test_db_ident_rejects_unlisted_identifier():
 
     with pytest.raises(ValueError):
         db.ident("bookings; DROP TABLE bookings", {"reminded_24h", "reminded_48h"})
+
+
+def test_platekit_bridge_disabled_is_dormant(monkeypatch):
+    from app import config
+    monkeypatch.setattr(config, "PLATEKIT_API_BASE", "")
+    monkeypatch.setattr(config, "PLATEKIT_API_TOKEN", "")
+    state = platekit.packs_for_client({"name": "Blue Plate", "company": "Blue Plate"})
+    assert state["enabled"] is False
+    assert state["slug"] == "blue-plate"
+    assert state["packs"] == []
