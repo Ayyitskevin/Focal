@@ -79,10 +79,10 @@ def _mp4_bytes(seconds=2, w=128, h=96) -> bytes:
             [
                 "ffmpeg",
                 "-y",
-                "-",
+                "-f",
                 "lavfi",
                 "-i",
-                "testsrc=duration={seconds}:size={w}x{h}:rate=10",
+                f"testsrc=duration={seconds}:size={w}x{h}:rate=10",
                 "-pix_fmt",
                 "yuv420p",
                 path,
@@ -94,6 +94,32 @@ def _mp4_bytes(seconds=2, w=128, h=96) -> bytes:
     finally:
         if os.path.exists(path):
             os.unlink(path)
+
+
+def _ready_photo_gallery(admin, title="Ready Photo Gallery", pin="1234"):
+    """Create one gallery with a ready photo asset through the real upload path."""
+    import time
+
+    r = admin.post(
+        "/admin/galleries",
+        data={"title": title, "client_name": "Chef"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    g = db.one("SELECT * FROM galleries ORDER BY id DESC LIMIT 1")
+    with TestClient(app):  # fresh lifespan: job pool may have been stopped upstream
+        r = admin.post(
+            f"/admin/galleries/{g['id']}/upload",
+            files=[("files", ("dish.jpg", _jpeg_bytes(), "image/jpeg"))],
+        )
+        assert r.status_code == 200 and r.json()["accepted"] == 1
+        for _ in range(50):
+            a = db.one("SELECT * FROM assets WHERE gallery_id=?", (g["id"],))
+            if a and a["status"] == "ready":
+                break
+            time.sleep(0.2)
+    assert a and a["status"] == "ready" and a["width"] == 800
+    return g, a
 
 
 def test_healthz(client):
@@ -261,7 +287,7 @@ def test_full_gallery_flow(admin):
 
     # upload a photo
     r = admin.post(
-        "/admin/galleries/{g['id']}/upload",
+        f"/admin/galleries/{g['id']}/upload",
         files=[("files", ("dish.jpg", _jpeg_bytes(), "image/jpeg"))],
     )
     assert r.status_code == 200 and r.json()["accepted"] == 1
@@ -278,13 +304,13 @@ def test_full_gallery_flow(admin):
 
     # publish with PIN
     admin.post(
-        "/admin/galleries/{g['id']}/settings",
+        f"/admin/galleries/{g['id']}/settings",
         data={"title": "Test Bistro", "pin": "1234", "published": "true"},
     )
 
     # set cover from the asset grid; nonexistent asset 404s
-    assert admin.post("/admin/galleries/{g['id']}/assets/999999/cover").status_code == 404
-    r = admin.post("/admin/galleries/{g['id']}/assets/{a['id']}/cover", follow_redirects=False)
+    assert admin.post(f"/admin/galleries/{g['id']}/assets/999999/cover").status_code == 404
+    r = admin.post(f"/admin/galleries/{g['id']}/assets/{a['id']}/cover", follow_redirects=False)
     assert r.status_code == 303
     assert (
         db.one("SELECT cover_asset_id FROM galleries WHERE id=?", (g["id"],))["cover_asset_id"]
@@ -292,7 +318,7 @@ def test_full_gallery_flow(admin):
     )
     # saving settings must NOT wipe the cover (field no longer in the form)
     admin.post(
-        "/admin/galleries/{g['id']}/settings",
+        f"/admin/galleries/{g['id']}/settings",
         data={"title": "Test Bistro", "pin": "1234", "published": "true"},
     )
     assert (
@@ -305,19 +331,19 @@ def test_full_gallery_flow(admin):
         # unpublished slug 404s — wrong slug
         assert pub.get("/g/nope12345678").status_code == 404
         # PIN page
-        r = pub.get("/g/{g['slug']}")
+        r = pub.get(f"/g/{g['slug']}")
         assert r.status_code == 200 and "PIN" in r.text
         # wrong PIN
-        r = pub.post("/g/{g['slug']}/pin", data={"pin": "0000"})
+        r = pub.post(f"/g/{g['slug']}/pin", data={"pin": "0000"})
         assert r.status_code == 401
         # right PIN
-        r = pub.post("/g/{g['slug']}/pin", data={"pin": "1234"}, follow_redirects=False)
+        r = pub.post(f"/g/{g['slug']}/pin", data={"pin": "1234"}, follow_redirects=False)
         assert r.status_code == 303
         # gallery renders with tile
-        r = pub.get("/g/{g['slug']}")
-        assert r.status_code == 200 and "/media/{g['slug']}/thumb/{a['id']}" in r.text
+        r = pub.get(f"/g/{g['slug']}")
+        assert r.status_code == 200 and f"/media/{g['slug']}/thumb/{a['id']}" in r.text
         # cover renders as the hero background
-        assert "background-image:url('/media/{g['slug']}/web/{a['id']}')" in r.text
+        assert f"background-image:url('/media/{g['slug']}/web/{a['id']}')" in r.text
         # tiles carry the endpoints the lightbox action bar drives via fetch()
         assert f'data-fav="/g/{g["slug"]}/fav/{a["id"]}"' in r.text
         assert f'data-dl="/g/{g["slug"]}/download?asset_id={a["id"]}"' in r.text
@@ -332,63 +358,63 @@ def test_full_gallery_flow(admin):
         # static URLs are cache-busted — CF edge caches /static/ for hours
         assert "/static/lightbox.js?v=" in r.text and "/static/mise.css?v=" in r.text
         # media serves
-        assert pub.get("/media/{g['slug']}/thumb/{a['id']}").status_code == 200
-        assert pub.get("/media/{g['slug']}/web/{a['id']}").status_code == 200
+        assert pub.get(f"/media/{g['slug']}/thumb/{a['id']}").status_code == 200
+        assert pub.get(f"/media/{g['slug']}/web/{a['id']}").status_code == 200
         # Range request honored
-        r = pub.get("/media/{g['slug']}/original/{a['id']}", headers={"Range": "bytes=0-99"})
+        r = pub.get(f"/media/{g['slug']}/original/{a['id']}", headers={"Range": "bytes=0-99"})
         assert r.status_code == 206 and len(r.content) == 100
         # favorite toggle
-        r = pub.post("/g/{g['slug']}/fav/{a['id']}")
+        r = pub.post(f"/g/{g['slug']}/fav/{a['id']}")
         assert r.status_code == 200 and "faved" in r.text
         # download requires email
-        r = pub.get("/g/{g['slug']}/download/asset/{a['id']}", follow_redirects=False)
+        r = pub.get(f"/g/{g['slug']}/download/asset/{a['id']}", follow_redirects=False)
         assert r.status_code == 303
         # email-gate page carries a "Have a question?" deep link to /contact
         # with the gallery name prefilled (ship #44)
-        gate = pub.get("/g/{g['slug']}/download", follow_redirects=True)
+        gate = pub.get(f"/g/{g['slug']}/download", follow_redirects=True)
         assert "Have a question" in gate.text
         assert "prefill=gallery_question" in gate.text
         # email gate
         r = pub.post(
-            "/g/{g['slug']}/email",
+            f"/g/{g['slug']}/email",
             data={"email": "chef@bistro.com", "asset_id": str(a["id"])},
             follow_redirects=False,
         )
         assert r.status_code == 303
         # single download works now
-        r = pub.get("/g/{g['slug']}/download/asset/{a['id']}")
+        r = pub.get(f"/g/{g['slug']}/download/asset/{a['id']}")
         assert r.status_code == 200 and r.headers["content-type"] == "application/octet-stream"
         # ZIP: first request enqueues, then becomes ready
-        r = pub.get("/g/{g['slug']}/download/zip")
+        r = pub.get(f"/g/{g['slug']}/download/zip")
         assert r.status_code == 200
         for _ in range(50):
-            if pub.get("/g/{g['slug']}/download/zip/status").json()["ready"]:
+            if pub.get(f"/g/{g['slug']}/download/zip/status").json()["ready"]:
                 break
             time.sleep(0.2)
-        r = pub.get("/g/{g['slug']}/download/zip")
+        r = pub.get(f"/g/{g['slug']}/download/zip")
         assert r.headers["content-type"] == "application/zip"
         zf = zipfile.ZipFile(io.BytesIO(r.content))
         assert zf.namelist() == ["dish.jpg"]
         # favorites ZIP: header button shows, bundle holds exactly the faved original
-        page = pub.get("/g/{g['slug']}").text
-        assert "/g/{g['slug']}/download/favorites" in page and "Favorites (1)" in page
-        r = pub.get("/g/{g['slug']}/download/favorites")
+        page = pub.get(f"/g/{g['slug']}").text
+        assert f"/g/{g['slug']}/download/favorites" in page and "Favorites (1)" in page
+        r = pub.get(f"/g/{g['slug']}/download/favorites")
         assert r.status_code == 200 and r.headers["content-type"] == "application/zip"
         assert zipfile.ZipFile(io.BytesIO(r.content)).namelist() == ["dish.jpg"]
         assert "favorites.zip" in r.headers["content-disposition"]
         # unfavoriting empties the bundle → 404, button gone
-        pub.post("/g/{g['slug']}/fav/{a['id']}")
-        assert pub.get("/g/{g['slug']}/download/favorites").status_code == 404
-        assert "Favorites (" not in pub.get("/g/{g['slug']}").text
+        pub.post(f"/g/{g['slug']}/fav/{a['id']}")
+        assert pub.get(f"/g/{g['slug']}/download/favorites").status_code == 404
+        assert "Favorites (" not in pub.get(f"/g/{g['slug']}").text
         # re-fav so downstream assertions (admin ♥ badge, crops) still hold
-        pub.post("/g/{g['slug']}/fav/{a['id']}")
+        pub.post(f"/g/{g['slug']}/fav/{a['id']}")
 
     # the client favorite surfaces on the admin grid (♥ tile badge + proofing count)
-    page = admin.get("/admin/galleries/{g['id']}").text
+    page = admin.get(f"/admin/galleries/{g['id']}").text
     assert "&#9829;" in page and "1 favorited" in page
 
     # second click toggles the cover off
-    admin.post("/admin/galleries/{g['id']}/assets/{a['id']}/cover")
+    admin.post(f"/admin/galleries/{g['id']}/assets/{a['id']}/cover")
     assert (
         db.one("SELECT cover_asset_id FROM galleries WHERE id=?", (g["id"],))["cover_asset_id"]
         is None
@@ -422,7 +448,7 @@ def test_video_pipeline_full_flow(admin):
     with TestClient(app):  # fresh lifespan: job pool may have been stopped upstream
         # upload routes a .mp4 to kind='video' (image extensions would be kind='photo')
         r = admin.post(
-            "/admin/galleries/{g['id']}/upload",
+            f"/admin/galleries/{g['id']}/upload",
             files=[("files", ("reel.mp4", _mp4_bytes(), "video/mp4"))],
         )
         assert r.status_code == 200 and r.json()["accepted"] == 1
@@ -443,20 +469,20 @@ def test_video_pipeline_full_flow(admin):
     # derivatives landed on disk: web mp4, poster jpg, and the grid thumb
     base = config.MEDIA_DIR / str(g["id"])
     stem = Path(a["stored"]).stem
-    assert (base / "web" / "{stem}.mp4").is_file()
-    assert (base / "web" / "{stem}_poster.jpg").is_file()
-    assert (base / "thumb" / "{stem}.jpg").is_file()
+    assert (base / "web" / f"{stem}.mp4").is_file()
+    assert (base / "web" / f"{stem}_poster.jpg").is_file()
+    assert (base / "thumb" / f"{stem}.jpg").is_file()
 
     # publish + PIN
     admin.post(
-        "/admin/galleries/{g['id']}/settings",
+        f"/admin/galleries/{g['id']}/settings",
         data={"title": "Test Kitchen Reel", "pin": "1234", "published": "true"},
     )
 
     with TestClient(app) as pub:
-        r = pub.post("/g/{g['slug']}/pin", data={"pin": "1234"}, follow_redirects=False)
+        r = pub.post(f"/g/{g['slug']}/pin", data={"pin": "1234"}, follow_redirects=False)
         assert r.status_code == 303
-        page = pub.get("/g/{g['slug']}").text
+        page = pub.get(f"/g/{g['slug']}").text
         # the video tile carries kind, the poster + web endpoints, and the play badge
         assert 'data-kind="video"' in page
         assert f'data-poster="/media/{g["slug"]}/poster/{a["id"]}"' in page
@@ -464,18 +490,18 @@ def test_video_pipeline_full_flow(admin):
         assert 'class="play-badge"' in page
 
         # web variant serves the transcoded mp4 (not a jpg) with the video mime type
-        r = pub.get("/media/{g['slug']}/web/{a['id']}")
+        r = pub.get(f"/media/{g['slug']}/web/{a['id']}")
         assert r.status_code == 200 and r.headers["content-type"] == "video/mp4"
         # Range honored — iOS scrubbing depends on 206 partial content
-        r = pub.get("/media/{g['slug']}/web/{a['id']}", headers={"Range": "bytes=0-99"})
+        r = pub.get(f"/media/{g['slug']}/web/{a['id']}", headers={"Range": "bytes=0-99"})
         assert r.status_code == 206 and len(r.content) == 100
         # grid thumb serves as a jpeg
-        r = pub.get("/media/{g['slug']}/thumb/{a['id']}")
+        r = pub.get(f"/media/{g['slug']}/thumb/{a['id']}")
         assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
         # poster frame serves as a jpeg; the poster route is video-only
-        r = pub.get("/media/{g['slug']}/poster/{a['id']}")
+        r = pub.get(f"/media/{g['slug']}/poster/{a['id']}")
         assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
-        assert pub.get("/media/{g['slug']}/poster/999999").status_code == 404
+        assert pub.get(f"/media/{g['slug']}/poster/999999").status_code == 404
 
 
 def _ready_video(admin, title="Reel Review", pin="1234"):
@@ -488,11 +514,11 @@ def _ready_video(admin, title="Reel Review", pin="1234"):
     g = db.one("SELECT * FROM galleries ORDER BY id DESC LIMIT 1")
     with TestClient(app):  # fresh lifespan: job pool may have been stopped upstream
         admin.post(
-            "/admin/galleries/{g['id']}/upload",
+            f"/admin/galleries/{g['id']}/upload",
             files=[("files", ("reel.mp4", _mp4_bytes(), "video/mp4"))],
         )
         admin.post(
-            "/admin/galleries/{g['id']}/upload",
+            f"/admin/galleries/{g['id']}/upload",
             files=[("files", ("dish.jpg", _jpeg_bytes(), "image/jpeg"))],
         )
         for _ in range(100):
@@ -504,7 +530,7 @@ def _ready_video(admin, title="Reel Review", pin="1234"):
     photo = db.one("SELECT * FROM assets WHERE gallery_id=? AND kind='photo'", (g["id"],))
     assert vid and vid["status"] == "ready" and photo
     admin.post(
-        "/admin/galleries/{g['id']}/settings",
+        f"/admin/galleries/{g['id']}/settings",
         data={"title": title, "pin": pin, "published": "true"},
     )
     return g, vid, photo
@@ -521,10 +547,12 @@ def test_video_comments_flow(admin):
     # the client gallery page ships the lightbox comment wiring
     with TestClient(app) as pub:
         assert (
-            pub.post("/g/{g['slug']}/pin", data={"pin": "1234"}, follow_redirects=False).status_code
+            pub.post(
+                f"/g/{g['slug']}/pin", data={"pin": "1234"}, follow_redirects=False
+            ).status_code
             == 303
         )
-        page = pub.get("/g/{g['slug']}").text
+        page = pub.get(f"/g/{g['slug']}").text
         assert f'data-slug="{g["slug"]}"' in page
         assert 'class="lb-comments"' in page
 
@@ -620,7 +648,7 @@ def test_video_comments_flow(admin):
     assert audit_after == audit_before + 1
     # hidden comments drop from the client-facing thread too
     with TestClient(app) as pub:
-        pub.post("/g/{g['slug']}/pin", data={"pin": "1234"}, follow_redirects=False)
+        pub.post(f"/g/{g['slug']}/pin", data={"pin": "1234"}, follow_redirects=False)
         got = pub.get("/g/{g['slug']}/comments/{vid['id']}").json()
         assert top["id"] not in {c["id"] for c in got}
 
@@ -639,9 +667,9 @@ def test_video_comment_resolve_flow(admin):
 
     # client builds a thread (root + reply) and a separate sibling thread
     with TestClient(app) as pub:
-        pub.post("/g/{g['slug']}/pin", data={"pin": "1234"}, follow_redirects=False)
+        pub.post(f"/g/{g['slug']}/pin", data={"pin": "1234"}, follow_redirects=False)
         # the wall ships the resolve filter/count UI
-        assert 'class="vc-filter"' in pub.get("/g/{g['slug']}").text
+        assert 'class="vc-filter"' in pub.get(f"/g/{g['slug']}").text
         root = pub.post(
             "/g/{g['slug']}/comments/{vid['id']}",
             data={"body": "Re-grade the intro", "timecode": 3},
@@ -690,7 +718,7 @@ def test_video_comment_resolve_flow(admin):
 
     # client thread reflects resolved status (render extends; server-proven)
     with TestClient(app) as pub:
-        pub.post("/g/{g['slug']}/pin", data={"pin": "1234"}, follow_redirects=False)
+        pub.post(f"/g/{g['slug']}/pin", data={"pin": "1234"}, follow_redirects=False)
         got = {c["id"]: c["status"] for c in pub.get("/g/{g['slug']}/comments/{vid['id']}").json()}
         assert got[root["id"]] == "resolved" and got[reply["id"]] == "resolved"
         assert got[sibling["id"]] == "open"
@@ -753,7 +781,7 @@ def test_video_comment_reply_reopen_flow(admin):
 
     # client builds a thread (root + reply) and a separate sibling thread
     with TestClient(app) as pub:
-        pub.post("/g/{g['slug']}/pin", data={"pin": "1234"}, follow_redirects=False)
+        pub.post(f"/g/{g['slug']}/pin", data={"pin": "1234"}, follow_redirects=False)
         root = pub.post(
             "/g/{g['slug']}/comments/{vid['id']}",
             data={"body": "Re-grade the intro", "timecode": 3},
@@ -785,7 +813,7 @@ def test_video_comment_reply_reopen_flow(admin):
         "AND action='open' AND actor='system'"
     )["n"]
     with TestClient(app) as pub:
-        pub.post("/g/{g['slug']}/pin", data={"pin": "1234"}, follow_redirects=False)
+        pub.post(f"/g/{g['slug']}/pin", data={"pin": "1234"}, follow_redirects=False)
         # reply to the CHILD (depth 2) — the upward walk must still reach the root
         thread = pub.post(
             "/g/{g['slug']}/comments/{vid['id']}",
@@ -827,7 +855,7 @@ def test_video_comment_reply_reopen_flow(admin):
         "AND action='open' AND actor='system'"
     )["n"]
     with TestClient(app) as pub:
-        pub.post("/g/{g['slug']}/pin", data={"pin": "1234"}, follow_redirects=False)
+        pub.post(f"/g/{g['slug']}/pin", data={"pin": "1234"}, follow_redirects=False)
         pub.post(
             "/g/{g['slug']}/comments/{vid['id']}",
             data={"body": "one more on audio", "parent_id": sibling["id"]},
@@ -875,7 +903,7 @@ def test_video_comment_reopen_notify_flow(admin, monkeypatch):
 
     # client builds a thread (root + reply), then admin resolves it
     with TestClient(app) as pub:
-        pub.post("/g/{g['slug']}/pin", data={"pin": "1234"}, follow_redirects=False)
+        pub.post(f"/g/{g['slug']}/pin", data={"pin": "1234"}, follow_redirects=False)
         root = pub.post(
             "/g/{g['slug']}/comments/{vid['id']}",
             data={"body": "Re-grade the intro", "timecode": 3},
@@ -893,7 +921,7 @@ def test_video_comment_reopen_notify_flow(admin, monkeypatch):
 
     # ── a client reply on the RESOLVED thread pushes exactly one notify ──────
     with TestClient(app) as pub:
-        pub.post("/g/{g['slug']}/pin", data={"pin": "1234"}, follow_redirects=False)
+        pub.post(f"/g/{g['slug']}/pin", data={"pin": "1234"}, follow_redirects=False)
         r = pub.post(
             "/g/{g['slug']}/comments/{vid['id']}",
             data={"body": "notify-reopen warm", "parent_id": child["id"]},
@@ -908,7 +936,7 @@ def test_video_comment_reopen_notify_flow(admin, monkeypatch):
 
     # ── a reply on an already-OPEN thread pushes nothing ─────────────────────
     with TestClient(app) as pub:
-        pub.post("/g/{g['slug']}/pin", data={"pin": "1234"}, follow_redirects=False)
+        pub.post(f"/g/{g['slug']}/pin", data={"pin": "1234"}, follow_redirects=False)
         pub.post(
             "/g/{g['slug']}/comments/{vid['id']}",
             data={"body": "one more", "parent_id": new_reply["id"]},
@@ -930,7 +958,7 @@ def test_video_comment_reopen_notify_flow(admin, monkeypatch):
         "AND action='open' AND actor='system'"
     )["n"]
     with TestClient(app) as pub:
-        pub.post("/g/{g['slug']}/pin", data={"pin": "1234"}, follow_redirects=False)
+        pub.post(f"/g/{g['slug']}/pin", data={"pin": "1234"}, follow_redirects=False)
         r = pub.post(
             "/g/{g['slug']}/comments/{vid['id']}",
             data={"body": "still warm again", "parent_id": child["id"]},
@@ -984,8 +1012,8 @@ def test_pin_lockout(admin):
     g = db.one("SELECT * FROM galleries ORDER BY id DESC LIMIT 1")
     with TestClient(app) as pub:
         for _ in range(5):
-            pub.post("/g/{g['slug']}/pin", data={"pin": "9999"})
-        r = pub.post("/g/{g['slug']}/pin", data={"pin": "1234"})
+            pub.post(f"/g/{g['slug']}/pin", data={"pin": "9999"})
+        r = pub.post(f"/g/{g['slug']}/pin", data={"pin": "1234"})
         assert r.status_code == 429
     db.run("DELETE FROM pin_attempts", ())
 
@@ -996,7 +1024,7 @@ def test_expired_gallery(admin):
     g = db.one("SELECT * FROM galleries ORDER BY id DESC LIMIT 1")
     db.run("UPDATE galleries SET expires_at='2000-01-01', published=1 WHERE id=?", (g["id"],))
     with TestClient(app) as pub:
-        assert pub.get("/g/{g['slug']}").status_code == 410
+        assert pub.get(f"/g/{g['slug']}").status_code == 410
 
     # the grid card derives an Expiring status from a real expiry so Kevin sees
     # lockouts before clients do. Anchor on the grid card (last href occurrence —
@@ -1021,7 +1049,7 @@ def test_expired_gallery(admin):
     assert ">Expiring<" not in card_of(g["id"])
 
     # delivery email prefill carries the expiry note (form renders when published)
-    assert "Available until {far}" in admin.get("/admin/galleries/{g['id']}").text
+    assert "Available until {far}" in admin.get(f"/admin/galleries/{g['id']}").text
     db.run(
         "UPDATE galleries SET expires_at=NULL, published=? WHERE id=?", (g["published"], g["id"])
     )
@@ -1069,7 +1097,7 @@ def test_studio_clients_projects(admin):
     assert db.one("SELECT status FROM projects WHERE id=?", (p["id"],))["status"] == "proposal_sent"
     for url in (
         "/admin/studio",
-        "/admin/studio/clients/{c['id']}",
+        f"/admin/studio/clients/{c['id']}",
         "/admin/studio/projects/{p['id']}",
     ):
         assert admin.get(url).status_code == 200
@@ -1109,7 +1137,7 @@ def test_client_activity_timeline(admin):
     p = db.one("SELECT * FROM projects ORDER BY id DESC LIMIT 1")
 
     # empty state before any document activity
-    page = admin.get("/admin/studio/clients/{c['id']}").text
+    page = admin.get(f"/admin/studio/clients/{c['id']}").text
     assert "Recent activity" in page
     assert "No document activity yet" in page
 
@@ -1123,7 +1151,7 @@ def test_client_activity_timeline(admin):
     d = db.one("SELECT * FROM proposals ORDER BY id DESC LIMIT 1")
     admin.post("/admin/studio/proposals/{d['id']}/send", follow_redirects=False)
 
-    page = admin.get("/admin/studio/clients/{c['id']}").text
+    page = admin.get(f"/admin/studio/clients/{c['id']}").text
     assert "No document activity yet" not in page
     assert 'class="timeline"' in page
     assert "Proposal “{d['title']}” sent" in page
@@ -1956,7 +1984,7 @@ def test_admin_global_search(admin):
 
     page = admin.get("/admin/search", params={"q": "zarzuela"}).text
     assert "Zarzuela Cantina" in page
-    assert "/admin/studio/clients/{c['id']}" in page
+    assert f"/admin/studio/clients/{c['id']}" in page
     assert "Zarzuela tasting menu shoot" in page
     assert "/admin/studio/projects/{p['id']}" in page
 
@@ -2691,13 +2719,16 @@ def test_portal_lifecycle(admin):
     from app import jobs, presets
 
     crop_slugs = [ps["slug"] for ps in presets.active()]
-    g = db.one("SELECT * FROM galleries ORDER BY id LIMIT 1")
-    c = db.one("SELECT * FROM clients ORDER BY id LIMIT 1")
-    a = db.one("SELECT * FROM assets WHERE gallery_id=?", (g["id"],))
+    g, a = _ready_photo_gallery(admin, title="Portal Bistro")
+    c_id = db.run(
+        "INSERT INTO clients (name, company, email) VALUES (?,?,?)",
+        ("Chef Portal", "Portal Bistro", "portal@example.test"),
+    )
+    c = db.one("SELECT * FROM clients WHERE id=?", (c_id,))
 
     # link gallery to the studio client, with captions
     r = admin.post(
-        "/admin/galleries/{g['id']}/settings",
+        f"/admin/galleries/{g['id']}/settings",
         data={
             "title": g["title"],
             "pin": "1234",
@@ -2712,7 +2743,7 @@ def test_portal_lifecycle(admin):
 
     # usage rights on the client
     admin.post(
-        "/admin/studio/clients/{c['id']}",
+        f"/admin/studio/clients/{c['id']}",
         data={
             "name": c["name"],
             "company": c["company"] or "",
@@ -2723,7 +2754,7 @@ def test_portal_lifecycle(admin):
 
     # brand asset upload — allowlist enforced
     r = admin.post(
-        "/admin/studio/clients/{c['id']}/brand",
+        f"/admin/studio/clients/{c['id']}/brand",
         files=[
             ("files", ("logo.png", _jpeg_bytes(64, 64), "image/png")),
             ("files", ("evil.exe", b"MZ", "application/octet-stream")),
@@ -2733,71 +2764,82 @@ def test_portal_lifecycle(admin):
     assert r.status_code == 303
     brand = db.all_("SELECT * FROM brand_assets WHERE client_id=?", (c["id"],))
     assert len(brand) == 1 and brand[0]["filename"] == "logo.png"
-    assert admin.get("/admin/studio/clients/{c['id']}/brand/{brand[0]['id']}").status_code == 200
+    assert admin.get(f"/admin/studio/clients/{c['id']}/brand/{brand[0]['id']}").status_code == 200
+
+    visitor_id = db.run(
+        "INSERT INTO visitors (gallery_id, token, email) VALUES (?,?,?)",
+        (g["id"], f"portal-fixture-{g['id']}", "chef@bistro.com"),
+    )
+    db.run(
+        "INSERT OR IGNORE INTO favorites (visitor_id, asset_id) VALUES (?,?)",
+        (visitor_id, a["id"]),
+    )
 
     # create portal (idempotent: second create rejected), backfills crop jobs
-    r = admin.post("/admin/studio/clients/{c['id']}/portal", follow_redirects=False)
+    r = admin.post(f"/admin/studio/clients/{c['id']}/portal", follow_redirects=False)
     assert r.status_code == 303
     assert (
-        admin.post("/admin/studio/clients/{c['id']}/portal", follow_redirects=False).status_code
+        admin.post(f"/admin/studio/clients/{c['id']}/portal", follow_redirects=False).status_code
         == 400
     )
     portal = db.one("SELECT * FROM portals WHERE client_id=?", (c["id"],))
     assert len(portal["slug"]) >= 12 and not portal["published"]
 
     # admin client page shows the portal link, no visits yet
-    page = admin.get("/admin/studio/clients/{c['id']}")
+    page = admin.get(f"/admin/studio/clients/{c['id']}")
     assert portal["slug"] in page.text
     # "Copy link + PIN" button is wired with URL + encoded-newline PIN payload
     assert "Copy link + PIN" in page.text
-    assert "/portal/{portal['slug']}&#10;PIN: {portal['pin']}" in page.text
+    assert f"/portal/{portal['slug']}&#10;PIN: {portal['pin']}" in page.text
     assert "never visited" in page.text
 
     # crops finish (favorite from the gallery flow + backfill)
     stem = a["stored"].rsplit(".", 1)[0]
-    for _ in range(50):
-        if all((jobs.crops_dir(g["id"]) / "{stem}_{n}.jpg").is_file() for n in crop_slugs):
-            break
-        time.sleep(0.2)
-    assert (jobs.crops_dir(g["id"]) / "{stem}_1x1.jpg").is_file()
+    with TestClient(app):  # fresh lifespan drains queued social-crop jobs
+        for _ in range(50):
+            if all((jobs.crops_dir(g["id"]) / f"{stem}_{n}.jpg").is_file() for n in crop_slugs):
+                break
+            time.sleep(0.2)
+    assert (jobs.crops_dir(g["id"]) / f"{stem}_1x1.jpg").is_file()
 
     with TestClient(app) as pub:
         # unpublished portal 404s
-        assert pub.get("/portal/{portal['slug']}").status_code == 404
+        assert pub.get(f"/portal/{portal['slug']}").status_code == 404
         admin.post(
-            "/admin/studio/clients/{c['id']}/portal/publish",
+            f"/admin/studio/clients/{c['id']}/portal/publish",
             data={"published": "true"},
             follow_redirects=False,
         )
 
         # PIN gate: page, wrong PIN, lockout uses negative ids (gallery untouched)
-        r = pub.get("/portal/{portal['slug']}")
+        r = pub.get(f"/portal/{portal['slug']}")
         assert r.status_code == 200 and "PIN" in r.text
-        assert pub.post("/portal/{portal['slug']}/pin", data={"pin": "0000"}).status_code == 401
+        assert pub.post(f"/portal/{portal['slug']}/pin", data={"pin": "0000"}).status_code == 401
         assert db.one("SELECT gallery_id FROM pin_attempts")["gallery_id"] == -portal["id"]
         for _ in range(4):
-            pub.post("/portal/{portal['slug']}/pin", data={"pin": "0000"})
+            pub.post(f"/portal/{portal['slug']}/pin", data={"pin": "0000"})
         assert (
-            pub.post("/portal/{portal['slug']}/pin", data={"pin": portal["pin"]}).status_code == 429
+            pub.post(f"/portal/{portal['slug']}/pin", data={"pin": portal["pin"]}).status_code
+            == 429
         )
         db.run("DELETE FROM pin_attempts", ())
 
         # no cookie → media gated
-        assert pub.get("/portal/{portal['slug']}/thumb/{a['id']}").status_code == 403
-        assert pub.get("/portal/{portal['slug']}/crops.zip").status_code == 403
+        assert pub.get(f"/portal/{portal['slug']}/thumb/{a['id']}").status_code == 403
+        assert pub.get(f"/portal/{portal['slug']}/crops.zip").status_code == 403
 
         # right PIN → portal renders all four sections
         r = pub.post(
-            "/portal/{portal['slug']}/pin", data={"pin": portal["pin"]}, follow_redirects=False
+            f"/portal/{portal['slug']}/pin", data={"pin": portal["pin"]}, follow_redirects=False
         )
         assert r.status_code == 303
-        r = pub.get("/portal/{portal['slug']}")
+        r = pub.get(f"/portal/{portal['slug']}")
         assert r.status_code == 200
-        assert "/g/{g['slug']}" in r.text  # gallery link
+        assert f"/g/{g['slug']}" in r.text  # gallery link
         assert "Golden hour plating shot" in r.text  # captions
         assert "Social + web, 12 months." in r.text  # usage rights
         assert "logo.png" in r.text  # brand asset
-        assert "/portal/{portal['slug']}/thumb/{a['id']}" in r.text  # crop tile
+        assert f"/portal/{portal['slug']}/thumb/{a['id']}" in r.text  # crop tile
         # section-count pills tell the client at a glance what's in each section
         n_gal = db.one(
             "SELECT COUNT(*) AS n FROM galleries WHERE client_id=? AND published=1", (c["id"],)
@@ -2837,22 +2879,22 @@ def test_portal_lifecycle(admin):
         )["n"]
         assert n_faves >= 1, "fixture chain should have left at least one favorite"
         # Re-fetch the portal so the summary reflects current state
-        r2 = pub.get("/portal/{portal['slug']}")
-        assert "{n_faves} favorited photo" in r2.text
+        r2 = pub.get(f"/portal/{portal['slug']}")
+        assert f"{n_faves} favorited photo" in r2.text
         assert "across 1 gallery" in r2.text
         # "request different formats" CTA deep-links to /contact with the
         # client's business prefilled + a canned message tailored to count
         assert "Need different formats" in r2.text
         assert "prefill=gallery_formats" in r2.text
-        assert "count={n_faves}" in r2.text
+        assert f"count={n_faves}" in r2.text
         # "Share this portal" mailto link with subject + body carrying the
         # portal URL + PIN (url-encoded). Useful for forwarding to a teammate.
         assert "Share this portal" in r2.text
         assert "mailto:?subject=" in r2.text
         # the PIN survives URL-encoding (digits are safe chars; colon + space encoded)
-        assert "PIN%3A%20{portal['pin']}" in r2.text
+        assert f"PIN%3A%20{portal['pin']}" in r2.text
         # the portal URL appears in the encoded body — quote() leaves '/' safe
-        assert "/portal/{portal['slug']}" in r2.text
+        assert f"/portal/{portal['slug']}" in r2.text
 
         # "NEW since last visit" pill: pin both the original gallery's
         # created_at AND the portal's last_visit to known offsets so the
@@ -2868,14 +2910,14 @@ def test_portal_lifecycle(admin):
             "INSERT INTO galleries (slug, title, pin, client_id, published) VALUES (?,?,?,?,1)",
             ("PortalNewPill01", "Fresh delivery", "1234", c["id"]),
         )
-        page = pub.get("/portal/{portal['slug']}").text
+        page = pub.get(f"/portal/{portal['slug']}").text
         # the fresh gallery carries a NEW pill; the original (created before
         # the rewound last_visit) does not. Anchor each row on its unique slug
         # since titles can appear elsewhere (e.g. in crop tile figcaptions).
         fresh_start = page.index("/g/PortalNewPill01")
         fresh_row = page[fresh_start : page.index("</li>", fresh_start)]
         assert 'class="new-pill"' in fresh_row
-        orig_start = page.index("/g/{g['slug']}")
+        orig_start = page.index(f"/g/{g['slug']}")
         orig_row = page[orig_start : page.index("</li>", orig_start)]
         assert "new-pill" not in orig_row
         # the what's-new header summarizes the same delta — "1 new gallery"
@@ -2886,7 +2928,7 @@ def test_portal_lifecycle(admin):
         # Subsequent visit (last_visit just got bumped to "now") → no NEW
         # pills until something new lands again. The header flips to the
         # muted "nothing new since" copy.
-        page = pub.get("/portal/{portal['slug']}").text
+        page = pub.get(f"/portal/{portal['slug']}").text
         assert "new-pill" not in page
         assert "Nothing new since you visited" in page
 
@@ -2894,18 +2936,18 @@ def test_portal_lifecycle(admin):
         db.run("DELETE FROM galleries WHERE id=?", (new_gid,))
 
         # crop + thumb + brand downloads
-        assert pub.get("/portal/{portal['slug']}/thumb/{a['id']}").status_code == 200
+        assert pub.get(f"/portal/{portal['slug']}/thumb/{a['id']}").status_code == 200
         for ratio in crop_slugs:
-            r = pub.get("/portal/{portal['slug']}/crop/{a['id']}/{ratio}")
+            r = pub.get(f"/portal/{portal['slug']}/crop/{a['id']}/{ratio}")
             assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
         # untrusted slug token: unknown ratio 404s
-        assert pub.get("/portal/{portal['slug']}/crop/{a['id']}/16x9").status_code == 404
+        assert pub.get(f"/portal/{portal['slug']}/crop/{a['id']}/16x9").status_code == 404
         # an inactive preset's slug also 404s — validation reads presets.active(),
         # so deactivating a preset immediately stops its token from resolving
         db.run("UPDATE crop_presets SET active=0 WHERE slug='9x16'")
-        assert pub.get("/portal/{portal['slug']}/crop/{a['id']}/9x16").status_code == 404
+        assert pub.get(f"/portal/{portal['slug']}/crop/{a['id']}/9x16").status_code == 404
         db.run("UPDATE crop_presets SET active=1 WHERE slug='9x16'")
-        assert pub.get("/portal/{portal['slug']}/brand/{brand[0]['id']}").status_code == 200
+        assert pub.get(f"/portal/{portal['slug']}/brand/{brand[0]['id']}").status_code == 200
 
         # crops ZIP: page links it, bundle has every ratio of the favorite,
         # second request reuses the cached file
@@ -2915,18 +2957,18 @@ def test_portal_lifecycle(admin):
 
         from app import config as cfg
 
-        page = pub.get("/portal/{portal['slug']}")
-        assert "/portal/{portal['slug']}/crops.zip" in page.text
-        z = pub.get("/portal/{portal['slug']}/crops.zip")
+        page = pub.get(f"/portal/{portal['slug']}")
+        assert f"/portal/{portal['slug']}/crops.zip" in page.text
+        z = pub.get(f"/portal/{portal['slug']}/crops.zip")
         assert z.status_code == 200
         assert z.headers["content-type"] == "application/zip"
         names = zipfile.ZipFile(io.BytesIO(z.content)).namelist()
         for ratio in crop_slugs:
-            assert "{P(a['filename']).stem}_{ratio}.jpg" in names
-        zips = list(cfg.ZIP_DIR.glob("p{portal['id']}-*.zip"))
+            assert f"{P(a['filename']).stem}_{ratio}.jpg" in names
+        zips = list(cfg.ZIP_DIR.glob(f"p{portal['id']}-*.zip"))
         assert len(zips) == 1
         mtime = zips[0].stat().st_mtime_ns
-        assert pub.get("/portal/{portal['slug']}/crops.zip").status_code == 200
+        assert pub.get(f"/portal/{portal['slug']}/crops.zip").status_code == 200
         assert zips[0].stat().st_mtime_ns == mtime  # served from cache, not rebuilt
 
         # visit tracking: authed page views count (PIN-gate + media fetches
@@ -2934,7 +2976,7 @@ def test_portal_lifecycle(admin):
         # +1 NEW-pill second visit; +1 fav-summary re-fetch. Total 5.
         v = db.one("SELECT visits, last_visit FROM portals WHERE id=?", (portal["id"],))
         assert v["visits"] == 5 and v["last_visit"]
-    page = admin.get("/admin/studio/clients/{c['id']}")
+    page = admin.get(f"/admin/studio/clients/{c['id']}")
     assert "5 visits" in page.text
     # portal-audit line summarizes everything for the client at a glance
     assert 'class="muted portal-audit"' in page.text
@@ -2952,9 +2994,11 @@ def test_portal_lifecycle(admin):
 
     stored = cfg.BRAND_DIR / str(c["id"]) / brand[0]["stored"]
     assert stored.is_file()
-    admin.post(
-        "/admin/studio/clients/{c['id']}/brand/{brand[0]['id']}/delete", follow_redirects=False
+    r = admin.post(
+        f"/admin/studio/clients/{c['id']}/brand/{brand[0]['id']}/delete",
+        follow_redirects=False,
     )
+    assert r.status_code == 303
     assert not db.one("SELECT 1 AS x FROM brand_assets WHERE id=?", (brand[0]["id"],))
     assert not stored.exists()
 
@@ -3034,7 +3078,7 @@ def test_marketing_site(admin):
             assert r.status_code == 200
             assert "x-robots-tag" not in r.headers, path
             assert 'content="index, follow"' in r.text
-        assert "x-robots-tag" in pub.get("/g/{g['slug']}").headers
+        assert "x-robots-tag" in pub.get(f"/g/{g['slug']}").headers
         r = pub.get("/robots.txt")
         assert r.status_code == 200 and "Disallow: /g/" in r.text
         assert "x-robots-tag" not in r.headers
@@ -3158,7 +3202,7 @@ def test_inquiries_admin_view(admin):
     c = db.one("SELECT * FROM clients WHERE email='robin@bistro.com'")
     assert c["name"] == "Robin Che" and c["company"] == "Bistro Vert"
     assert "Spring menu?" in c["notes"]
-    assert r.headers["location"] == "/admin/studio/clients/{c['id']}"
+    assert r.headers["location"] == f"/admin/studio/clients/{c['id']}"
     # the inquiry now carries a converted_at timestamp + client backref
     conv = db.one(
         "SELECT converted_at, converted_client_id, converted_project_id FROM inquiries WHERE id=?",
@@ -3175,7 +3219,7 @@ def test_inquiries_admin_view(admin):
 
     # idempotent: same email → redirect to the existing client, no duplicate
     r = admin.post("/admin/studio/inquiries/{iid}/client", follow_redirects=False)
-    assert r.headers["location"] == "/admin/studio/clients/{c['id']}"
+    assert r.headers["location"] == f"/admin/studio/clients/{c['id']}"
     assert db.one("SELECT COUNT(*) AS n FROM clients WHERE email='robin@bistro.com'")["n"] == 1
 
     # undo: clears the conversion stamps but LEAVES the spawned client alone
@@ -3367,11 +3411,11 @@ def test_details_persistence_wiring(admin):
 
     # gallery admin pages expose the Settings + Send delivery email details IDs
     g = db.one("SELECT id FROM galleries ORDER BY id LIMIT 1")
-    gpage = admin.get("/admin/galleries/{g['id']}").text
+    gpage = admin.get(f"/admin/galleries/{g['id']}").text
     assert 'id="g-settings"' in gpage
     # Send delivery email block only appears for published galleries
     db.run("UPDATE galleries SET published=1 WHERE id=?", (g["id"],))
-    gpage = admin.get("/admin/galleries/{g['id']}").text
+    gpage = admin.get(f"/admin/galleries/{g['id']}").text
     assert 'id="g-send-email"' in gpage
 
 
@@ -3531,7 +3575,7 @@ def test_gallery_delete(admin):
     )
     g = db.one("SELECT * FROM galleries ORDER BY id DESC LIMIT 1")
     admin.post(
-        "/admin/galleries/{g['id']}/upload",
+        f"/admin/galleries/{g['id']}/upload",
         files=[("files", ("bye.jpg", _jpeg_bytes(), "image/jpeg"))],
     )
     media_dir = cfg.MEDIA_DIR / str(g["id"])
@@ -3539,9 +3583,9 @@ def test_gallery_delete(admin):
 
     # delete button only offered while unpublished; published galleries refuse
     # (two-step on purpose — a live client link shouldn't vanish on one click)
-    assert "Delete gallery" in admin.get("/admin/galleries/{g['id']}").text
+    assert "Delete gallery" in admin.get(f"/admin/galleries/{g['id']}").text
     db.run("UPDATE galleries SET published=1 WHERE id=?", (g["id"],))
-    assert "Delete gallery" not in admin.get("/admin/galleries/{g['id']}").text
+    assert "Delete gallery" not in admin.get(f"/admin/galleries/{g['id']}").text
     assert (
         admin.post("/admin/galleries/{g['id']}/delete", follow_redirects=False).status_code == 400
     )
@@ -3549,7 +3593,7 @@ def test_gallery_delete(admin):
 
     # deleting the cover asset clears the dangling cover_asset_id
     a = db.one("SELECT id FROM assets WHERE gallery_id=?", (g["id"],))
-    admin.post("/admin/galleries/{g['id']}/assets/{a['id']}/cover")
+    admin.post(f"/admin/galleries/{g['id']}/assets/{a['id']}/cover")
     assert (
         db.one("SELECT cover_asset_id FROM galleries WHERE id=?", (g["id"],))["cover_asset_id"]
         == a["id"]
@@ -3617,7 +3661,7 @@ def test_asset_reorder(admin):
     )
     g = db.one("SELECT * FROM galleries ORDER BY id DESC LIMIT 1")
     admin.post(
-        "/admin/galleries/{g['id']}/upload",
+        f"/admin/galleries/{g['id']}/upload",
         files=[("files", ("{n}.jpg", _jpeg_bytes(), "image/jpeg")) for n in "abc"],
     )
 
@@ -3659,7 +3703,7 @@ def test_asset_reorder(admin):
         == 404
     )
     # arrows render on the admin grid
-    assert "Move earlier" in admin.get("/admin/galleries/{g['id']}").text
+    assert "Move earlier" in admin.get(f"/admin/galleries/{g['id']}").text
 
     # bulk section assignment: two at once, third untouched (stays in the section
     # it was uploaded into — the gallery's default first section)
@@ -3773,7 +3817,7 @@ def test_upload_defaults_to_first_section(admin):
 
     # no section_id given → lands in the first section, not unsectioned
     admin.post(
-        "/admin/galleries/{g['id']}/upload",
+        f"/admin/galleries/{g['id']}/upload",
         files=[("files", ("hero.jpg", _jpeg_bytes(), "image/jpeg"))],
     )
     a = db.one(
@@ -3794,7 +3838,7 @@ def test_upload_defaults_to_first_section(admin):
     # sectionless gallery → section_id stays None (current clean default preserved)
     db.run("DELETE FROM sections WHERE gallery_id=?", (g["id"],))
     admin.post(
-        "/admin/galleries/{g['id']}/upload",
+        f"/admin/galleries/{g['id']}/upload",
         files=[("files", ("loose.jpg", _jpeg_bytes(), "image/jpeg"))],
     )
     a = db.one(
@@ -3812,7 +3856,7 @@ def test_section_jump_nav(admin):
     g = db.one("SELECT * FROM galleries ORDER BY id DESC LIMIT 1")
     with TestClient(app):  # fresh lifespan: job pool may have been stopped upstream
         admin.post(
-            "/admin/galleries/{g['id']}/upload",
+            f"/admin/galleries/{g['id']}/upload",
             files=[("files", ("{n}.jpg", _jpeg_bytes(), "image/jpeg")) for n in "ab"],
         )
         for _ in range(50):
@@ -3836,14 +3880,14 @@ def test_section_jump_nav(admin):
         data={"section_id": "", "asset_ids": [str(a2)]},
     )
     admin.post(
-        "/admin/galleries/{g['id']}/settings",
+        f"/admin/galleries/{g['id']}/settings",
         data={"title": "Navved", "pin": "5151", "published": "true"},
     )
 
     with TestClient(app) as pub:
-        pub.post("/g/{g['slug']}/pin", data={"pin": "5151"})
+        pub.post(f"/g/{g['slug']}/pin", data={"pin": "5151"})
         # one populated section + unsectioned "More" = 2 targets → nav renders
-        r = pub.get("/g/{g['slug']}")
+        r = pub.get(f"/g/{g['slug']}")
         assert "section-nav" in r.text
         assert f'href="#sec-{hero["id"]}"' in r.text and 'id="sec-more"' in r.text
 
@@ -3856,7 +3900,7 @@ def test_section_jump_nav(admin):
         assert gate.status_code == 200 and 'name="section"' in gate.text
         assert f'value="{hero["id"]}"' in gate.text
         pub.post(
-            "/g/{g['slug']}/email",
+            f"/g/{g['slug']}/email",
             data={"email": "nav@bistro.com", "section": str(hero["id"])},
             follow_redirects=False,
         )
@@ -3872,7 +3916,7 @@ def test_section_jump_nav(admin):
         admin.post(
             "/admin/galleries/{g['id']}/assets/{a2}/section", data={"section_id": str(hero["id"])}
         )
-        r = pub.get("/g/{g['slug']}")
+        r = pub.get(f"/g/{g['slug']}")
         assert "section-nav" not in r.text and f'id="sec-{hero["id"]}"' in r.text
 
         # section content changed → new content-keyed bundle, old rev pruned
@@ -3935,7 +3979,7 @@ def test_case_studies(admin):
             "/admin/galleries/{g['id']}/assets/{photos[0]['id']}/portfolio", follow_redirects=False
         )
         admin.post(
-            "/admin/galleries/{g['id']}/settings",
+            f"/admin/galleries/{g['id']}/settings",
             data={
                 "title": g["title"],
                 "client_name": g["client_name"] or "",
@@ -3982,11 +4026,11 @@ def test_case_studies(admin):
         assert "<loc>{cfg.BASE_URL}/work</loc>" in sm
 
         # noindex on a non-/work prefix stays noindex (middleware is path-prefixed)
-        assert "x-robots-tag" in pub.get("/g/{g['slug']}").headers
+        assert "x-robots-tag" in pub.get(f"/g/{g['slug']}").headers
 
         # unpublishing the case study hides it again, without touching the client gallery
         admin.post(
-            "/admin/galleries/{g['id']}/settings",
+            f"/admin/galleries/{g['id']}/settings",
             data={
                 "title": g["title"],
                 "client_name": g["client_name"] or "",
@@ -4003,7 +4047,7 @@ def test_case_studies(admin):
         assert pub.get("/work/{g['slug']}").status_code == 404
         assert "New work is being curated" in pub.get("/work").text
         # client gallery still serves — the case-study flag is independent
-        assert pub.get("/g/{g['slug']}").status_code == 200
+        assert pub.get(f"/g/{g['slug']}").status_code == 200
 
 
 def test_share_debugger(admin):
@@ -4035,7 +4079,7 @@ def test_share_debugger(admin):
     # test already starred this asset)
     db.run("UPDATE assets SET portfolio=1 WHERE id=?", (a["id"],))
     admin.post(
-        "/admin/galleries/{g['id']}/settings",
+        f"/admin/galleries/{g['id']}/settings",
         data={
             "title": g["title"],
             "client_name": g["client_name"] or "",
@@ -4071,7 +4115,7 @@ def test_share_debugger(admin):
 
     # unpublish → case study drops off the debugger
     admin.post(
-        "/admin/galleries/{g['id']}/settings",
+        f"/admin/galleries/{g['id']}/settings",
         data={
             "title": g["title"],
             "client_name": g["client_name"] or "",
@@ -4106,8 +4150,8 @@ def test_section_captions(admin):
 
     with TestClient(app) as pub:
         # baseline: no caption → no <p class="section-caption"> rendered
-        pub.post("/g/{g['slug']}/pin", data={"pin": g["pin"]}, follow_redirects=False)
-        r = pub.get("/g/{g['slug']}")
+        pub.post(f"/g/{g['slug']}/pin", data={"pin": g["pin"]}, follow_redirects=False)
+        r = pub.get(f"/g/{g['slug']}")
         assert "section-caption" not in r.text
 
     # admin sets a caption
@@ -4122,14 +4166,14 @@ def test_section_captions(admin):
     )
 
     # admin gallery page shows the caption pre-filled in the form
-    r = admin.get("/admin/galleries/{g['id']}")
+    r = admin.get(f"/admin/galleries/{g['id']}")
     assert 'name="caption"' in r.text
     assert 'value="Hero dishes from the spring menu."' in r.text
 
     # public gallery renders the caption under the section heading
     with TestClient(app) as pub:
-        pub.post("/g/{g['slug']}/pin", data={"pin": g["pin"]}, follow_redirects=False)
-        r = pub.get("/g/{g['slug']}")
+        pub.post(f"/g/{g['slug']}/pin", data={"pin": g["pin"]}, follow_redirects=False)
+        r = pub.get(f"/g/{g['slug']}")
         assert 'class="section-caption"' in r.text
         assert "Hero dishes from the spring menu." in r.text
         # caption sits between the section h2 and the grid div
@@ -4145,8 +4189,8 @@ def test_section_captions(admin):
     )
     assert db.one("SELECT caption FROM sections WHERE id=?", (sec["id"],))["caption"] is None
     with TestClient(app) as pub:
-        pub.post("/g/{g['slug']}/pin", data={"pin": g["pin"]}, follow_redirects=False)
-        r = pub.get("/g/{g['slug']}")
+        pub.post(f"/g/{g['slug']}/pin", data={"pin": g["pin"]}, follow_redirects=False)
+        r = pub.get(f"/g/{g['slug']}")
         assert "section-caption" not in r.text
         assert "Hero dishes from the spring menu." not in r.text
 
@@ -4208,7 +4252,7 @@ def test_portfolio_tag_filter(admin):
 
     # admin gallery page: portfolio-starred tiles render a tag form pre-filled;
     # the datalist of suggestions is also present once
-    r = admin.get("/admin/galleries/{g['id']}")
+    r = admin.get(f"/admin/galleries/{g['id']}")
     assert 'list="tag-suggestions"' in r.text
     assert r.text.count('id="tag-suggestions"') == 1
     assert 'value="Dishes"' in r.text and 'value="Drinks"' in r.text
@@ -4259,7 +4303,7 @@ def test_proofing_mode(admin):
     )
     g = db.one("SELECT * FROM galleries ORDER BY id DESC LIMIT 1")
     admin.post(
-        "/admin/galleries/{g['id']}/settings",
+        f"/admin/galleries/{g['id']}/settings",
         data={"title": "Proofing", "pin": "7777", "published": "true"},
     )
     g = db.one("SELECT * FROM galleries WHERE id=?", (g["id"],))
@@ -4284,15 +4328,15 @@ def test_proofing_mode(admin):
     )
     assert db.one("SELECT proof_target FROM sections WHERE id=?", (sec["id"],))["proof_target"] == 2
     # admin gallery page reflects target + the live picks count badge
-    r = admin.get("/admin/galleries/{g['id']}")
+    r = admin.get(f"/admin/galleries/{g['id']}")
     assert 'name="proof_target"' in r.text and 'value="2"' in r.text
     assert "0 / 2 picked" in r.text
 
     # public visitor unlocks the gallery and starts picking
     with TestClient(app) as pub:
-        pub.post("/g/{g['slug']}/pin", data={"pin": g["pin"]}, follow_redirects=False)
+        pub.post(f"/g/{g['slug']}/pin", data={"pin": g["pin"]}, follow_redirects=False)
         # gallery page renders the per-visitor progress label
-        r = pub.get("/g/{g['slug']}")
+        r = pub.get(f"/g/{g['slug']}")
         assert 'id="proof-' + str(sec["id"]) + '"' in r.text
         assert "0 of 2 picked" in r.text
         # tile carries data-section so the lightbox can locate the live label
@@ -4332,7 +4376,7 @@ def test_proofing_mode(admin):
         assert r.status_code == 200 and "2 of 2 picked" in r.text
 
     # admin badge flips to "ready" once the target is hit
-    r = admin.get("/admin/galleries/{g['id']}")
+    r = admin.get(f"/admin/galleries/{g['id']}")
     assert "2 / 2 ready" in r.text
 
     # clearing the target unblocks unlimited faves and removes the label
@@ -4345,14 +4389,14 @@ def test_proofing_mode(admin):
         db.one("SELECT proof_target FROM sections WHERE id=?", (sec["id"],))["proof_target"] is None
     )
     with TestClient(app) as pub:
-        pub.post("/g/{g['slug']}/pin", data={"pin": g["pin"]}, follow_redirects=False)
+        pub.post(f"/g/{g['slug']}/pin", data={"pin": g["pin"]}, follow_redirects=False)
         # now we can fav the leftover asset[0] without trouble — target is gone
         r = pub.post("/g/{g['slug']}/fav/{assets[0]['id']}")
         assert r.status_code == 200
         # the response has no OOB progress fragment (no proof_target)
         assert 'id="proof-' not in r.text
         # public gallery page also drops the badge
-        r = pub.get("/g/{g['slug']}")
+        r = pub.get(f"/g/{g['slug']}")
         assert 'id="proof-' + str(sec["id"]) + '"' not in r.text
 
     # bad input: non-numeric target → 400
@@ -5291,7 +5335,7 @@ def test_testimonials(admin):
         follow_redirects=False,
     )
     admin.post(
-        "/admin/galleries/{g['id']}/settings",
+        f"/admin/galleries/{g['id']}/settings",
         data={
             "title": g["title"],
             "client_name": g["client_name"] or "",
@@ -5340,7 +5384,7 @@ def test_testimonials(admin):
     # deleting a gallery unbinds testimonials (FK ON DELETE SET NULL)
     # — first unpublish the gallery so delete_gallery accepts it
     admin.post(
-        "/admin/galleries/{g['id']}/settings",
+        f"/admin/galleries/{g['id']}/settings",
         data={
             "title": g["title"],
             "client_name": g["client_name"] or "",
