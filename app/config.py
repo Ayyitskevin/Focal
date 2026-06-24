@@ -49,7 +49,7 @@ ADMIN_PASSWORD = os.environ.get("MISE_ADMIN_PASSWORD", "")  # required in prod
 SITE_NAME = os.environ.get("MISE_SITE_NAME", "Kevin Lee Photography")
 
 # Public marketing (optional — empty = feature off / sensible default)
-INSTAGRAM_URL = os.environ.get("MISE_INSTAGRAM_URL", "https://www.instagram.com/kleephotography/")
+INSTAGRAM_URL = os.environ.get("MISE_INSTAGRAM_URL") or None
 CONTACT_EMAIL = os.environ.get("MISE_GMAIL_USER", "")  # public mailto when set
 PLAUSIBLE_DOMAIN = os.environ.get("MISE_PLAUSIBLE_DOMAIN", "")  # e.g. kleephotography.com
 # Sample client gallery for prospects (/g/{slug}). Slug auto-detected when unset.
