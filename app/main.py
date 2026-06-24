@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import alerts, config, csrf, db, jobs, ratelimit, scheduler, service_api
+from . import alerts, bootstrap, config, csrf, db, jobs, ratelimit, scheduler, service_api
 from .admin import (
     activity,
     audit,
@@ -56,6 +56,7 @@ log = logging.getLogger("mise.app")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.migrate()
+    bootstrap.ensure_public_showcase()
     jobs.start()
     scheduler.start()
     log.info("Mise up on :%s · data=%s", config.PORT, config.DATA_DIR)

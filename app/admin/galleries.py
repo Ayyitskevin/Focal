@@ -656,7 +656,7 @@ async def set_cover(gallery_id: int, asset_id: int):
 @router.post("/galleries/{gallery_id}/assets/{asset_id}/portfolio")
 async def toggle_portfolio(gallery_id: int, asset_id: int):
     db.run(
-        "UPDATE assets SET portfolio = 1 - portfolio WHERE id=? AND gallery_id=? AND kind='photo'",
+        "UPDATE assets SET portfolio = 1 - portfolio WHERE id=? AND gallery_id=? AND kind IN ('photo', 'video')",
         (asset_id, gallery_id),
     )
     return RedirectResponse(f"/admin/galleries/{gallery_id}", status_code=303)
@@ -665,7 +665,7 @@ async def toggle_portfolio(gallery_id: int, asset_id: int):
 @router.post("/galleries/{gallery_id}/assets/{asset_id}/tag")
 async def set_portfolio_tag(gallery_id: int, asset_id: int, portfolio_tag: str = Form("")):
     db.run(
-        "UPDATE assets SET portfolio_tag=? WHERE id=? AND gallery_id=? AND kind='photo'",
+        "UPDATE assets SET portfolio_tag=? WHERE id=? AND gallery_id=? AND kind IN ('photo', 'video')",
         (portfolio_tag.strip() or None, asset_id, gallery_id),
     )
     return RedirectResponse(f"/admin/galleries/{gallery_id}", status_code=303)

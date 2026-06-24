@@ -153,11 +153,13 @@
                   <button class="link" name="dir" value="right" title="Move later">&rarr;</button>
                 </form>
               </div>
-              {% if a.kind == 'photo' and not is_drop %}
+              {% if a.kind in ('photo', 'video') and not is_drop %}
               <div class="gd-mrow">
+                {% if a.kind == 'photo' %}
                 <form method="post" action="/admin/galleries/{{ g.id }}/assets/{{ a.id }}/cover" class="inline">
                   <button class="link" title="Toggle cover photo">{% if g.cover_asset_id == a.id %}&#10022; cover{% else %}&#10023; cover{% endif %}</button>
                 </form>
+                {% endif %}
                 <form method="post" action="/admin/galleries/{{ g.id }}/assets/{{ a.id }}/portfolio" class="inline">
                   <button class="link" title="Toggle portfolio">{% if a.portfolio %}&#9733; portfolio{% else %}&#9734; portfolio{% endif %}</button>
                 </form>
