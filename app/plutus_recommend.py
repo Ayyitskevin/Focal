@@ -33,20 +33,39 @@ def _record(
     error: str | None = None,
     review_url: str | None = None,
     pitch_url: str | None = None,
+    bundle_count: int | None = None,
+    estimated_total_cents: int | None = None,
 ) -> None:
     # plutus_last_offer_url stores review_url for backward-compatible schema
     db.run(
         """UPDATE galleries SET plutus_last_run_id=?, plutus_last_status=?,
-              plutus_last_error=?, plutus_last_offer_url=?, plutus_last_at=datetime('now')
+              plutus_last_error=?, plutus_last_offer_url=?, plutus_last_pitch_url=?,
+              plutus_last_bundle_count=?, plutus_last_estimated_cents=?,
+              plutus_last_at=datetime('now')
               WHERE id=?""",
         (
             run_id,
             status,
             (error or None)[:500] if error else None,
             (review_url or None)[:500] if review_url else None,
+            (pitch_url or None)[:500] if pitch_url else None,
+            bundle_count,
+            estimated_total_cents,
             gallery_id,
         ),
     )
+
+
+def _bundle_meta(payload: dict) -> tuple[int | None, int | None]:
+    bundles = payload.get("bundles")
+    if bundles is not None:
+        count = len(bundles)
+    elif payload.get("bundle_count") is not None:
+        count = int(payload["bundle_count"])
+    else:
+        count = None
+    cents = payload.get("estimated_total_cents")
+    return count, int(cents) if cents is not None else None
 
 
 
@@ -114,6 +133,7 @@ def apply_callback(gallery_id: int, payload: dict) -> None:
     error = payload.get("error")
     review_url = payload.get("review_url") or payload.get("offer_url")
     pitch_url = payload.get("pitch_url")
+    bundle_count, estimated_cents = _bundle_meta(payload)
     if status == "done" and run_id is not None:
         _record(
             gallery_id,
@@ -121,6 +141,8 @@ def apply_callback(gallery_id: int, payload: dict) -> None:
             run_id=int(run_id),
             review_url=str(review_url) if review_url else None,
             pitch_url=str(pitch_url) if pitch_url else None,
+            bundle_count=bundle_count,
+            estimated_total_cents=estimated_cents,
         )
         return
     _record(
@@ -130,6 +152,8 @@ def apply_callback(gallery_id: int, payload: dict) -> None:
         error=str(error) if error else None,
         review_url=str(review_url) if review_url else None,
         pitch_url=str(pitch_url) if pitch_url else None,
+        bundle_count=bundle_count,
+        estimated_total_cents=estimated_cents,
     )
 
 
@@ -148,10 +172,13 @@ def run_for_gallery(gallery_id: int) -> None:
         _record(gallery_id, status="error", error=str(e)[:500])
         return
 
+    bundle_count, estimated_cents = _bundle_meta(result)
     _record(
         gallery_id,
         status="done",
         run_id=int(result["run_id"]),
         review_url=result.get("review_url"),
         pitch_url=result.get("pitch_url"),
+        bundle_count=bundle_count,
+        estimated_total_cents=estimated_cents,
     )

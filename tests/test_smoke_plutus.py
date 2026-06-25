@@ -40,7 +40,9 @@ def test_run_for_gallery_records_done(tmp_path, monkeypatch):
     )
     payload = {
         "run_id": 12,
-        "bundles": [{"id": "wall-hero"}],
+        "bundles": [{"id": "wall-hero"}, {"id": "album"}],
+        "bundle_count": 2,
+        "estimated_total_cents": 12500,
         "review_url": "https://plutus.test/runs/12",
         "pitch_url": "https://plutus.test/runs/12/pitch.txt",
     }
@@ -58,12 +60,17 @@ def test_run_for_gallery_records_done(tmp_path, monkeypatch):
     monkeypatch.setattr(plutus_recommend.urllib.request, "urlopen", lambda req, timeout: _Resp())
     plutus_recommend.run_for_gallery(gid)
     row = db.one(
-        "SELECT plutus_last_run_id, plutus_last_status, plutus_last_offer_url FROM galleries WHERE id=?",
+        """SELECT plutus_last_run_id, plutus_last_status, plutus_last_offer_url,
+                  plutus_last_pitch_url, plutus_last_bundle_count, plutus_last_estimated_cents
+           FROM galleries WHERE id=?""",
         (gid,),
     )
     assert row["plutus_last_run_id"] == 12
     assert row["plutus_last_status"] == "done"
     assert row["plutus_last_offer_url"] == payload["review_url"]
+    assert row["plutus_last_pitch_url"] == payload["pitch_url"]
+    assert row["plutus_last_bundle_count"] == 2
+    assert row["plutus_last_estimated_cents"] == 12500
 
 
 def test_apply_callback_records_review_url(tmp_path, monkeypatch):

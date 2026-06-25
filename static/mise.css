@@ -2480,6 +2480,30 @@ tr.inquiry-dismissed td:nth-child(2) { text-decoration: line-through; }
 .admin-shell .gd-proof-fill { height: 100%; background: #EDB23C; border-radius: 999px; }
 .admin-shell .gd-proof-note { margin: 0; font: 500 0.8rem/1.5 var(--font-ui); color: #5C6A5E; }
 
+.admin-shell .gd-studio-pipeline { background: #FFFEF8; border: 1px solid #E1DDCE; border-radius: 14px;
+  padding: 16px 18px; }
+.admin-shell .gd-pipeline-intro { margin: 0 0 12px; font: 500 0.8rem/1.45 var(--font-ui); }
+.admin-shell .gd-pipeline-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.admin-shell .gd-pipeline-step { border: 1px solid #E8E4DC; border-radius: 10px; padding: 12px 14px;
+  background: #FAF9F5; }
+.admin-shell .gd-pipeline-step.is-done { border-color: #c8e6d4; background: #f4fbf7; }
+.admin-shell .gd-pipeline-step.is-active { border-color: #d4c8e8; background: #faf9fc; }
+.admin-shell .gd-pipeline-step.is-error { border-color: #e8c8cc; background: #fdf6f7; }
+.admin-shell .gd-pipeline-step-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.admin-shell .gd-pipeline-step-n { display: inline-flex; align-items: center; justify-content: center;
+  width: 1.35rem; height: 1.35rem; border-radius: 999px; background: #18241E; color: #fff;
+  font: 700 0.72rem/1 var(--font-ui); }
+.admin-shell .gd-pipeline-step.is-done .gd-pipeline-step-n { background: #2f7d57; }
+.admin-shell .gd-pipeline-step.is-error .gd-pipeline-step-n { background: #7C2F38; }
+.admin-shell .gd-pipeline-step-title { font: 600 0.88rem/1.2 var(--font-ui); color: #18241E; }
+.admin-shell .gd-pipeline-badge { font: 600 0.72rem/1 var(--font-ui); color: #5C6A5E;
+  text-transform: lowercase; margin-left: auto; }
+.admin-shell .gd-pipeline-step.is-done .gd-pipeline-badge { color: #2f7d57; }
+.admin-shell .gd-pipeline-step.is-error .gd-pipeline-badge { color: #7C2F38; }
+.admin-shell .gd-pipeline-detail { margin: 0 0 6px; font: 500 0.78rem/1.45 var(--font-ui); }
+.admin-shell .gd-pipeline-err { color: #7C2F38; }
+.admin-shell .gd-pipeline-links { margin: 0 0 6px; font: 500 0.78rem/1.45 var(--font-ui); }
+
 /* Management panels below the grid */
 .admin-shell .gd-panels { margin-top: clamp(22px, 3vw, 34px); display: flex; flex-direction: column; gap: 12px; }
 .admin-shell .gd-panel { background: #FFFEF8; border: 1px solid #E1DDCE; border-radius: 14px;
@@ -5508,6 +5532,7 @@ html[data-theme="dark"] .admin-shell .gd-stat,
 html[data-theme="dark"] .admin-shell .gd-favtoggle,
 html[data-theme="dark"] .admin-shell .gd-deliver,
 html[data-theme="dark"] .admin-shell .gd-proof,
+html[data-theme="dark"] .admin-shell .gd-studio-pipeline,
 html[data-theme="dark"] .admin-shell .gd-panel,
 html[data-theme="dark"] .admin-shell .sch-card,
 html[data-theme="dark"] .admin-shell .sch-type {

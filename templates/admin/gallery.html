@@ -247,62 +247,78 @@
         </a>
       </section>
 
-      {% if argus_enabled and g.published and not is_drop %}
-      <section class="gd-argus" style="margin-top:1rem;padding:1rem;border:1px solid #e8e4f0;border-radius:8px;background:#faf9fc">
-        <div class="gd-proof-head" style="margin-bottom:0.5rem">
-          <h3 style="margin:0">Argus vision</h3>
-          {% if g.argus_last_status %}
-          <span class="gd-proof-n">{{ g.argus_last_status }}</span>
-          {% endif %}
+      {% if (argus_enabled or plutus_enabled) and g.published and not is_drop %}
+      <section class="gd-studio-pipeline">
+        <div class="gd-proof-head">
+          <h3>Studio pipeline</h3>
         </div>
-        {% if g.argus_last_status == 'error' and g.argus_last_error %}
-        <p class="muted" style="margin:0 0 0.6rem;color:#7C2F38">{{ g.argus_last_error }}
-          {% if g.argus_last_at %}<span> · {{ g.argus_last_at }}</span>{% endif %}
-        </p>
-        {% elif g.argus_last_at %}
-        <p class="muted" style="margin:0 0 0.6rem">Last run {{ g.argus_last_at }}
-          {% if g.argus_last_run_id %}
-          · <a href="{{ argus_url }}/runs/{{ g.argus_last_run_id }}" target="_blank" rel="noopener">view run</a>
-          {% elif g.argus_last_job_id %}
-          · <a href="{{ argus_url }}/ui/jobs/{{ g.argus_last_job_id }}" target="_blank" rel="noopener">view job</a>
+        <p class="gd-pipeline-intro muted">Vision analysis, then print &amp; album bundles — queued on publish.</p>
+        <ol class="gd-pipeline-steps">
+          {% if argus_enabled %}
+          {% set argus_cls = 'is-error' if g.argus_last_status == 'error' else ('is-done' if g.argus_last_status == 'done' else ('is-active' if g.argus_last_status == 'queued' else 'is-pending')) %}
+          <li class="gd-pipeline-step {{ argus_cls }}">
+            <div class="gd-pipeline-step-head">
+              <span class="gd-pipeline-step-n">1</span>
+              <span class="gd-pipeline-step-title">Argus vision</span>
+              {% if g.argus_last_status %}<span class="gd-pipeline-badge">{{ g.argus_last_status }}</span>{% endif %}
+            </div>
+            {% if g.argus_last_status == 'error' and g.argus_last_error %}
+            <p class="gd-pipeline-detail gd-pipeline-err">{{ g.argus_last_error }}{% if g.argus_last_at %} · {{ g.argus_last_at }}{% endif %}</p>
+            {% elif g.argus_last_at %}
+            <p class="gd-pipeline-detail muted">
+              {{ g.argus_last_at }}
+              {% set argus_review = g.argus_last_review_url or (argus_url ~ '/runs/' ~ g.argus_last_run_id if g.argus_last_run_id else (argus_url ~ '/ui/jobs/' ~ g.argus_last_job_id if g.argus_last_job_id else '')) %}
+              {% if argus_review %}
+              · <a href="{{ argus_review }}" target="_blank" rel="noopener">view analysis</a>
+              {% endif %}
+            </p>
+            {% else %}
+            <p class="gd-pipeline-detail muted">Runs when you publish.</p>
+            {% endif %}
+            <form method="post" action="/admin/galleries/{{ g.id }}/argus-analyze" class="inline">
+              <button type="submit" class="link">Analyze now</button>
+            </form>
+          </li>
           {% endif %}
-        </p>
-        {% else %}
-        <p class="muted" style="margin:0 0 0.6rem">Queued automatically when you publish.</p>
-        {% endif %}
-        <form method="post" action="/admin/galleries/{{ g.id }}/argus-analyze" class="inline">
-          <button type="submit" class="link">Analyze now</button>
-        </form>
-      </section>
-      {% endif %}
-
-      {% if plutus_enabled and g.published and not is_drop %}
-      <section class="gd-argus" style="margin-top:1rem;padding:1rem;border:1px solid #e8e4d8;border-radius:8px;background:#faf8f4">
-        <div class="gd-proof-head" style="margin-bottom:0.5rem">
-          <h3 style="margin:0">Print &amp; album bundles</h3>
-          {% if g.plutus_last_status %}
-          <span class="gd-proof-n">{{ g.plutus_last_status }}</span>
+          {% if plutus_enabled %}
+          {% set plutus_cls = 'is-error' if g.plutus_last_status == 'error' else ('is-done' if g.plutus_last_status == 'done' else 'is-pending') %}
+          <li class="gd-pipeline-step {{ plutus_cls }}">
+            <div class="gd-pipeline-step-head">
+              <span class="gd-pipeline-step-n">{% if argus_enabled %}2{% else %}1{% endif %}</span>
+              <span class="gd-pipeline-step-title">Print &amp; album bundles</span>
+              {% if g.plutus_last_status %}<span class="gd-pipeline-badge">{{ g.plutus_last_status }}</span>{% endif %}
+            </div>
+            {% if g.plutus_last_status == 'error' and g.plutus_last_error %}
+            <p class="gd-pipeline-detail gd-pipeline-err">{{ g.plutus_last_error }}{% if g.plutus_last_at %} · {{ g.plutus_last_at }}{% endif %}</p>
+            {% elif g.plutus_last_at %}
+            <p class="gd-pipeline-detail muted">
+              {{ g.plutus_last_at }}
+              {% if g.plutus_last_bundle_count is not none %}
+              · {{ g.plutus_last_bundle_count }} bundle{{ '' if g.plutus_last_bundle_count == 1 else 's' }}
+              {% endif %}
+              {% if g.plutus_last_estimated_cents %}
+              · est. ${{ '%.2f'|format(g.plutus_last_estimated_cents / 100) }}
+              {% endif %}
+            </p>
+            <p class="gd-pipeline-links">
+              {% set plutus_review = g.plutus_last_offer_url or (plutus_url ~ '/runs/' ~ g.plutus_last_run_id if g.plutus_last_run_id else '') %}
+              {% set plutus_pitch = g.plutus_last_pitch_url or (plutus_url ~ '/runs/' ~ g.plutus_last_run_id ~ '/pitch.txt' if g.plutus_last_run_id else '') %}
+              {% if plutus_review %}
+              <a href="{{ plutus_review }}" target="_blank" rel="noopener">Review bundles</a>
+              {% endif %}
+              {% if plutus_pitch %}
+              · <a href="{{ plutus_pitch }}" target="_blank" rel="noopener">Client pitch</a>
+              {% endif %}
+            </p>
+            {% else %}
+            <p class="gd-pipeline-detail muted">{% if argus_enabled %}Runs after Argus completes.{% else %}Runs when you publish.{% endif %}</p>
+            {% endif %}
+            <form method="post" action="/admin/galleries/{{ g.id }}/plutus-recommend" class="inline">
+              <button type="submit" class="link">Recommend prints now</button>
+            </form>
+          </li>
           {% endif %}
-        </div>
-        {% if g.plutus_last_status == 'error' and g.plutus_last_error %}
-        <p class="muted" style="margin:0 0 0.6rem;color:#7C2F38">{{ g.plutus_last_error }}
-          {% if g.plutus_last_at %}<span> · {{ g.plutus_last_at }}</span>{% endif %}
-        </p>
-        {% elif g.plutus_last_at %}
-        <p class="muted" style="margin:0 0 0.6rem">Last run {{ g.plutus_last_at }}
-          {% if g.plutus_last_run_id %}
-          · <a href="{{ plutus_url }}/runs/{{ g.plutus_last_run_id }}" target="_blank" rel="noopener">review bundles</a>
-          · <a href="{{ plutus_url }}/runs/{{ g.plutus_last_run_id }}/pitch.txt" target="_blank" rel="noopener">copy client pitch</a>
-          {% elif g.plutus_last_offer_url %}
-          · <a href="{{ g.plutus_last_offer_url }}" target="_blank" rel="noopener">review bundles</a>
-          {% endif %}
-        </p>
-        {% else %}
-        <p class="muted" style="margin:0 0 0.6rem">Queued after Argus analyze completes (or on publish when Argus is off).</p>
-        {% endif %}
-        <form method="post" action="/admin/galleries/{{ g.id }}/plutus-recommend" class="inline">
-          <button type="submit" class="link">Recommend prints now</button>
-        </form>
+        </ol>
       </section>
       {% endif %}
 

@@ -41,8 +41,15 @@ def apply_callback(gallery_id: int, payload: dict) -> None:
     job_id = payload.get("job_id")
     error = payload.get("error")
 
+    review_url = payload.get("review_url")
     if status == "done" or run_id:
-        _record(gallery_id, status="done", run_id=run_id, job_id=job_id)
+        _record(
+            gallery_id,
+            status="done",
+            run_id=run_id,
+            job_id=job_id,
+            review_url=str(review_url) if review_url else None,
+        )
         if run_id:
             try:
                 platekit.notify_argus_complete(gallery_id, int(run_id))
@@ -73,13 +80,35 @@ def _record(
     run_id: int | None = None,
     job_id: str | None = None,
     error: str | None = None,
+    review_url: str | None = None,
 ) -> None:
     db.run(
         """UPDATE galleries SET argus_last_run_id=?, argus_last_job_id=?,
-              argus_last_status=?, argus_last_error=?, argus_last_at=datetime('now')
+              argus_last_status=?, argus_last_error=?, argus_last_review_url=?,
+              argus_last_at=datetime('now')
               WHERE id=?""",
-        (run_id, job_id, status, (error or None)[:500] if error else None, gallery_id),
+        (
+            run_id,
+            job_id,
+            status,
+            (error or None)[:500] if error else None,
+            (review_url or None)[:500] if review_url else None,
+            gallery_id,
+        ),
     )
+
+
+def _review_url_from_result(result: dict) -> str | None:
+    url = result.get("review_url")
+    if url:
+        return str(url)
+    run_id = result.get("run_id")
+    if run_id and config.ARGUS_URL:
+        return f"{config.ARGUS_URL.rstrip('/')}/runs/{run_id}"
+    job_id = result.get("job_id")
+    if job_id and config.ARGUS_URL:
+        return f"{config.ARGUS_URL.rstrip('/')}/ui/jobs/{job_id}"
+    return None
 
 
 def trigger_gallery_analyze(gallery_id: int, *, skip_dedup: bool = False) -> dict:
@@ -169,4 +198,14 @@ def run_for_gallery(gallery_id: int, *, skip_dedup: bool = False) -> None:
         status = "error"
         _record(gallery_id, status=status, error="missing run_id and job_id")
         return
-    _record(gallery_id, status=status, run_id=run_id, job_id=job_id)
+    _record(
+        gallery_id,
+        status=status,
+        run_id=run_id,
+        job_id=job_id,
+        review_url=_review_url_from_result(result),
+    )
+    if status == "done" and plutus_recommend.is_enabled():
+        from . import jobs
+
+        jobs.enqueue("plutus_recommend_gallery", {"gallery_id": gallery_id})

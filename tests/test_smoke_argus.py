@@ -154,6 +154,47 @@ def test_run_for_gallery_records_sync_run(tmp_path, monkeypatch):
     row = db.one("SELECT * FROM galleries WHERE id=?", (gid,))
     assert row["argus_last_run_id"] == 42
     assert row["argus_last_status"] == "done"
+    assert row["argus_last_review_url"] == "http://argus:8010/runs/42"
+
+
+def test_sync_argus_enqueues_plutus(tmp_path, monkeypatch):
+    from app import jobs, plutus_recommend
+
+    _configure_tmp_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "ARGUS_URL", "http://argus:8010")
+    monkeypatch.setattr(config, "ARGUS_TOKEN", "secret")
+    monkeypatch.setattr(config, "PLUTUS_URL", "http://plutus:8030")
+    monkeypatch.setattr(config, "PLUTUS_TOKEN", "secret")
+    gid = db.run(
+        "INSERT INTO galleries (slug, title, pin, published) VALUES (?,?,?,1)",
+        ("ArgusPlu01", "Chain", "1234"),
+    )
+    enqueued: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        jobs,
+        "enqueue",
+        lambda kind, payload: enqueued.append((kind, payload)) or 1,
+    )
+
+    class FakeResp:
+        def read(self):
+            return json.dumps(
+                {
+                    "mode": "sync",
+                    "run_id": 7,
+                    "review_url": "http://argus:8010/runs/7",
+                }
+            ).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+    monkeypatch.setattr(argus_analyze.urllib.request, "urlopen", lambda req, timeout: FakeResp())
+    argus_analyze.run_for_gallery(gid)
+    assert ("plutus_recommend_gallery", {"gallery_id": gid}) in enqueued
 
 
 def test_run_for_gallery_swallows_errors(tmp_path, monkeypatch):
