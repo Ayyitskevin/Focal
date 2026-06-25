@@ -12,7 +12,7 @@ _PHOTO_TAGS = ("dishes", "drinks", "pastry", "interiors", "dishes", "drinks")
 
 _DEMO_CS = {
     "title": "Seasonal Tasting Menu",
-    "client_name": "Cúrate",
+    "client_name": "Independent Restaurant",
     "cs_tagline": "A tasting menu, shot at its peak.",
     "cs_brief": (
         "A full menu refresh and brand library in a single service window — "
@@ -20,32 +20,32 @@ _DEMO_CS = {
         "with social crops baked in."
     ),
     "cs_credits": (
-        "Client: Cúrate\n"
+        "Client: Independent restaurant\n"
         "Scope: Menu refresh · brand library\n"
         "Deliverables: 6 finals · social crop pack\n"
         "Turnaround: Same-week gallery"
     ),
-    "cs_location": "Asheville, NC",
+    "cs_location": "Western North Carolina",
 }
 
 _TESTIMONIALS = (
     (
         "Our reservations jumped the week the new photos went live. Kevin made "
         "the food look exactly like the room feels.",
-        "Maria Solis",
-        "Cúrate",
+        "Restaurant owner",
+        "Independent restaurant",
     ),
     (
         "Fastest turnaround we have ever had, and the social crops mean our "
         "marketing person stopped re-cropping everything by hand.",
-        "Dev Carter",
-        "High Five Coffee",
+        "Marketing lead",
+        "Neighborhood cafe",
     ),
     (
         "He shot a full menu refresh between lunch and dinner service without "
         "ever getting in the way. Rare.",
-        "Jamie Booth",
-        "Bull & Beggar",
+        "Executive chef",
+        "Chef-owned dining room",
     ),
 )
 
@@ -100,7 +100,7 @@ def ensure_public_showcase() -> bool:
         changed = True
         log.info("demo case study published (gallery %s)", gallery["id"])
     elif gallery and (
-        (gallery["client_name"] or "").strip() in {"", "Mise Demo"}
+        (gallery["client_name"] or "").strip() in {"", "Mise Demo", "Cúrate"}
         or (gallery["title"] or "").strip() == "Sample Tasting Menu"
     ):
         db.run(
@@ -108,7 +108,7 @@ def ensure_public_showcase() -> bool:
                    cs_tagline=COALESCE(NULLIF(cs_tagline,''), ?),
                    cs_brief=COALESCE(NULLIF(cs_brief,''), ?),
                    cs_credits=CASE
-                       WHEN cs_credits IS NULL OR cs_credits='' OR cs_credits LIKE '%Mise Demo%'
+                       WHEN cs_credits IS NULL OR cs_credits='' OR cs_credits LIKE '%Mise Demo%' OR cs_credits LIKE '%Cúrate%'
                        THEN ? ELSE cs_credits END,
                    cs_location=COALESCE(NULLIF(cs_location,''), ?),
                    cs_published=1

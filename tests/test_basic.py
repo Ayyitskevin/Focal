@@ -152,12 +152,12 @@ def test_public_showcase_bootstrap_relabels_demo_gallery(client):
     )
 
     assert gallery["title"] == "Seasonal Tasting Menu"
-    assert gallery["client_name"] == "Cúrate"
+    assert gallery["client_name"] == "Independent Restaurant"
     assert gallery["cs_published"] == 1
     assert gallery["cs_tagline"] == "Old tagline"
     assert "same-week gallery" in gallery["cs_brief"]
-    assert "Client: Cúrate" in gallery["cs_credits"]
-    assert gallery["cs_location"] == "Asheville, NC"
+    assert "Client: Independent restaurant" in gallery["cs_credits"]
+    assert gallery["cs_location"] == "Western North Carolina"
 
 
 @pytest.mark.unit

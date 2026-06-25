@@ -40,23 +40,23 @@ run_on_flow "curl -sS -c /tmp/mise-seed-cookie -b /tmp/mise-seed-cookie -o /dev/
 echo "==> publish case study"
 run_on_flow "curl -sS -c /tmp/mise-seed-cookie -b /tmp/mise-seed-cookie -o /dev/null -X POST ${BASE}/admin/galleries/${GALLERY_ID}/settings \
   --data-urlencode title='Sample Tasting Menu' \
-  --data-urlencode client_name='Mise Demo' \
+  --data-urlencode client_name='Independent Restaurant' \
   --data-urlencode pin=2468 \
   --data-urlencode published=on \
   --data-urlencode cs_published=on \
   --data-urlencode cs_tagline='A tasting menu, shot at its peak.' \
   --data-urlencode cs_brief='A full menu refresh and brand library in a single service window — plating, pours, and the dining room, delivered as a same-week gallery with social crops baked in.' \
-  --data-urlencode cs_credits='Client: Mise Demo
+  --data-urlencode cs_credits='Client: Independent restaurant
 Scope: Menu refresh · brand library
 Deliverables: 6 finals · social crop pack
 Turnaround: Same-week gallery' \
-  --data-urlencode cs_location='Asheville, NC'"
+  --data-urlencode cs_location='Western North Carolina'"
 
 echo "==> seed testimonials (skip when already published)"
 for payload in \
-  "quote=Our+reservations+jumped+the+week+the+new+photos+went+live.+Kevin+made+the+food+look+exactly+like+the+room+feels.&attribution_name=Maria+Solis&business=C%C3%BArate&gallery_id=1&position=0&published=on" \
-  "quote=Fastest+turnaround+we+have+ever+had%2C+and+the+social+crops+mean+our+marketing+person+stopped+re-cropping+everything+by+hand.&attribution_name=Dev+Carter&business=High+Five+Coffee&position=1&published=on" \
-  "quote=He+shot+a+full+menu+refresh+between+lunch+and+dinner+service+without+ever+getting+in+the+way.+Rare.&attribution_name=Jamie+Booth&business=Bull+%26+Beggar&position=2&published=on"
+  "quote=Our+reservations+jumped+the+week+the+new+photos+went+live.+Kevin+made+the+food+look+exactly+like+the+room+feels.&attribution_name=Restaurant+owner&business=Independent+restaurant&gallery_id=1&position=0&published=on" \
+  "quote=Fastest+turnaround+we+have+ever+had%2C+and+the+social+crops+mean+our+marketing+person+stopped+re-cropping+everything+by+hand.&attribution_name=Marketing+lead&business=Neighborhood+cafe&position=1&published=on" \
+  "quote=He+shot+a+full+menu+refresh+between+lunch+and+dinner+service+without+ever+getting+in+the+way.+Rare.&attribution_name=Executive+chef&business=Chef-owned+dining+room&position=2&published=on"
 do
   run_on_flow "curl -sS -c /tmp/mise-seed-cookie -b /tmp/mise-seed-cookie -o /dev/null -X POST '$BASE/admin/studio/testimonials' -d '$payload' || true"
 done
