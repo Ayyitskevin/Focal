@@ -22,6 +22,12 @@ def odysseus_caption_enabled() -> bool:
     return bool(config.ODYSSEUS_CAPTION_URL and config.ODYSSEUS_CAPTION_TOKEN)
 
 
+def content_provider_facade_enabled() -> bool:
+    """Phase 1: route caption drafting through the app/providers facade and record
+    ai_runs provenance. Default off — the legacy caption_ai path stays production."""
+    return bool(config.PROVIDER_FACADE_CONTENT)
+
+
 def gmail_enabled() -> bool:
     return bool(config.GMAIL_USER and config.GMAIL_APP_PASSWORD)
 
