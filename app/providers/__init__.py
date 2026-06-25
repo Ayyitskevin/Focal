@@ -25,7 +25,8 @@ from .contracts import (
     ResultStatus,
     ReviewRequirement,
 )
-from .registry import reset, resolve, use
+from .registry import challenger, reset, resolve, use, use_challenger
+from .shadow import compare
 
 __all__ = [
     "Capability",
@@ -39,4 +40,7 @@ __all__ = [
     "resolve",
     "use",
     "reset",
+    "challenger",
+    "use_challenger",
+    "compare",
 ]

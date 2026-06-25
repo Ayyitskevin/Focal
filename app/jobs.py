@@ -18,6 +18,7 @@ from . import (
     plutus_recommend,
     presets,
     video,
+    vision_shadow,
 )
 
 log = logging.getLogger("mise.jobs")
@@ -152,6 +153,9 @@ HANDLERS = {
         p["gallery_id"], int(p["run_id"])
     ),
     "plutus_recommend_gallery": lambda p: plutus_recommend.run_for_gallery(p["gallery_id"]),
+    # Phase 2 vision shadow: ledger-only challenger comparison (no asset writes, inert
+    # unless MISE_VISION_SHADOW is armed and a challenger is registered).
+    "vision_shadow_gallery": lambda p: vision_shadow.run_for_gallery(p["gallery_id"]),
 }
 
 

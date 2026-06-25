@@ -36,6 +36,34 @@ class MockVisionAdapter:
         )
 
 
+class MockVisionChallengerAdapter:
+    """A deterministic VISION challenger (distinct provider/model/latency from the
+    legacy mock) so shadow-comparison tests see a real difference to report."""
+
+    capability = Capability.VISION
+    name = "mock-challenger"
+
+    def __init__(self, *, enabled: bool = True) -> None:
+        self.enabled = enabled
+
+    def is_enabled(self) -> bool:
+        return self.enabled
+
+    def analyze_gallery(self, gallery_id: int, *, skip_dedup: bool = False) -> ProviderResult:
+        if not self.enabled:
+            return ProviderResult.disabled(self.capability, self.name)
+        return ProviderResult(
+            capability=self.capability,
+            provider=self.name,
+            status=ResultStatus.OK,
+            review=ReviewRequirement.HUMAN_REVIEW,
+            output={"run_id": 9000 + gallery_id, "job_id": None, "mode": "sync"},
+            model="mock-vision-challenger",
+            latency_ms=5,
+            cost_usd=0.002,
+        )
+
+
 class MockOffersAdapter:
     capability = Capability.OFFERS
     name = "mock"
