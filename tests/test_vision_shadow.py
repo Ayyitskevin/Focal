@@ -160,3 +160,26 @@ def test_mock_vision_and_challenger_differ():
     chal = MockVisionChallengerAdapter().analyze_gallery(3)
     assert legacy.output["run_id"] != chal.output["run_id"]
     assert legacy.model != chal.model
+
+
+# ── auto-trigger (argus completion -> shadow enqueue, flag-gated) ───────────────
+
+
+def test_argus_enqueues_shadow_when_flag_on(monkeypatch):
+    from app import argus_analyze, jobs
+
+    monkeypatch.setattr(config, "VISION_SHADOW", True)
+    enq = []
+    monkeypatch.setattr(jobs, "enqueue", lambda kind, payload: enq.append((kind, payload)) or 1)
+    argus_analyze._enqueue_shadow(7)
+    assert ("vision_shadow_gallery", {"gallery_id": 7}) in enq
+
+
+def test_argus_no_shadow_when_flag_off(monkeypatch):
+    from app import argus_analyze, jobs
+
+    monkeypatch.setattr(config, "VISION_SHADOW", False)
+    enq = []
+    monkeypatch.setattr(jobs, "enqueue", lambda kind, payload: enq.append((kind, payload)) or 1)
+    argus_analyze._enqueue_shadow(7)
+    assert enq == []

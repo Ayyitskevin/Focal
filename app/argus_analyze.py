@@ -12,7 +12,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from . import argus_writeback, config, db, platekit, plutus_recommend
+from . import argus_writeback, config, db, features, platekit, plutus_recommend
 
 log = logging.getLogger("mise.argus")
 
@@ -57,6 +57,7 @@ def apply_callback(gallery_id: int, payload: dict) -> None:
                 log.exception("platekit argus hook failed for gallery %s", gallery_id)
         if run_id:
             _enqueue_writeback(gallery_id, int(run_id))
+            _enqueue_shadow(gallery_id)
         if plutus_recommend.is_enabled():
             from . import jobs
 
@@ -81,6 +82,17 @@ def _enqueue_writeback(gallery_id: int, run_id: int) -> None:
     from . import jobs
 
     jobs.enqueue("argus_writeback_gallery", {"gallery_id": gallery_id, "run_id": run_id})
+
+
+def _enqueue_shadow(gallery_id: int) -> None:
+    """Phase 2: after a completed Argus run, queue a ledger-only vision shadow compare.
+    Gated on MISE_VISION_SHADOW (default off); the job itself is a further no-op unless a
+    challenger is registered, so this never affects the gallery or the publish path."""
+    if not features.vision_shadow_enabled():
+        return
+    from . import jobs
+
+    jobs.enqueue("vision_shadow_gallery", {"gallery_id": gallery_id})
 
 
 def media_count_changed(gallery_id: int) -> bool:
@@ -230,6 +242,7 @@ def run_for_gallery(gallery_id: int, *, skip_dedup: bool = False) -> None:
     )
     if status == "done" and run_id:
         _enqueue_writeback(gallery_id, int(run_id))
+        _enqueue_shadow(gallery_id)
     if status == "done" and plutus_recommend.is_enabled():
         from . import jobs
 

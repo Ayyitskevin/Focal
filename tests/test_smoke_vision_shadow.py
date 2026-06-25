@@ -93,3 +93,59 @@ def test_shadow_noop_when_legacy_run_not_done(tmp_path, monkeypatch):
     with registry.use_challenger(Capability.VISION, MockVisionChallengerAdapter()):
         assert vision_shadow.run_for_gallery(gid) is None
     assert db.one("SELECT COUNT(*) AS n FROM ai_runs WHERE subject_id=?", (gid,))["n"] == 0
+
+
+def _fake_sync_argus(monkeypatch, run_id=7):
+    import json
+
+    from app import argus_analyze
+
+    class FakeResp:
+        def read(self):
+            return json.dumps(
+                {"mode": "sync", "run_id": run_id, "review_url": f"http://argus:8010/runs/{run_id}"}
+            ).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+    monkeypatch.setattr(argus_analyze.urllib.request, "urlopen", lambda req, timeout: FakeResp())
+
+
+def test_completed_argus_run_enqueues_shadow_when_flag_on(tmp_path, monkeypatch):
+    from app import argus_analyze
+
+    _configure_tmp_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "ARGUS_URL", "http://argus:8010")
+    monkeypatch.setattr(config, "ARGUS_TOKEN", "secret")
+    monkeypatch.setattr(config, "VISION_SHADOW", True)
+    gid = db.run(
+        "INSERT INTO galleries (slug, title, pin, published) VALUES (?,?,?,1)",
+        ("ShadowEnq01", "Enq", "1234"),
+    )
+    enq = []
+    monkeypatch.setattr(jobs, "enqueue", lambda kind, payload: enq.append((kind, payload)) or 1)
+    _fake_sync_argus(monkeypatch)
+    argus_analyze.run_for_gallery(gid)
+    assert ("vision_shadow_gallery", {"gallery_id": gid}) in enq
+
+
+def test_completed_argus_run_no_shadow_when_flag_off(tmp_path, monkeypatch):
+    from app import argus_analyze
+
+    _configure_tmp_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "ARGUS_URL", "http://argus:8010")
+    monkeypatch.setattr(config, "ARGUS_TOKEN", "secret")
+    monkeypatch.setattr(config, "VISION_SHADOW", False)
+    gid = db.run(
+        "INSERT INTO galleries (slug, title, pin, published) VALUES (?,?,?,1)",
+        ("ShadowEnq02", "Enq2", "1234"),
+    )
+    enq = []
+    monkeypatch.setattr(jobs, "enqueue", lambda kind, payload: enq.append((kind, payload)) or 1)
+    _fake_sync_argus(monkeypatch)
+    argus_analyze.run_for_gallery(gid)
+    assert ("vision_shadow_gallery", {"gallery_id": gid}) not in enq
