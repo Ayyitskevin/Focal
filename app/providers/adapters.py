@@ -157,12 +157,25 @@ class LegacyOdysseusCaptionAdapter:
                 str(exc),
                 latency_ms=_elapsed_ms(start),
             )
+        # caption_ai.draft_caption guarantees a non-empty caption (it raises
+        # CaptionDraftError otherwise), but guard defensively so the adapter always
+        # returns a ProviderResult and never raises for a future/mocked provider that
+        # returns a malformed dict.
+        caption = result.get("caption")
+        if not caption:
+            return ProviderResult.failure(
+                self.capability,
+                self.name,
+                ResultStatus.INVALID_RESPONSE,
+                "caption provider returned no caption",
+                latency_ms=_elapsed_ms(start),
+            )
         return ProviderResult(
             capability=self.capability,
             provider=self.name,
             status=ResultStatus.OK,
             review=ReviewRequirement.HUMAN_REVIEW,
-            output={"caption": result["caption"]},
+            output={"caption": caption},
             model=result.get("model"),
             latency_ms=_elapsed_ms(start),
         )
@@ -198,7 +211,12 @@ class LegacyDionysusPackAdapter:
                 model=self.name,
                 latency_ms=latency,
             )
-        if status == "not_configured":
+        if status in ("not_configured", "missing_slug"):
+            # No outbound call was made — the feature is dormant ("not_configured") or
+            # the client has no Platekit slug ("missing_slug", platekit.py). Both are
+            # config states, not provider/upstream failures, so they map to DISABLED
+            # (contract: DISABLED == "no outbound call made"). Genuine call failures
+            # ("not_found", "error") still fall through to PROVIDER_ERROR below.
             return ProviderResult.disabled(self.capability, self.name)
         return ProviderResult.failure(
             self.capability,

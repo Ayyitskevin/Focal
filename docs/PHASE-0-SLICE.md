@@ -23,7 +23,7 @@ migration**.
 | --- | --- |
 | `app/providers/__init__.py` | Public facade exports (`Capability`, `ProviderResult`, `ResultStatus`, `ReviewRequirement`, the legacy adapters, `resolve`/`use`/`reset`). |
 | `app/providers/contracts.py` | Typed contract: `Capability` (VISION/OFFERS/CONTENT), `ResultStatus` (OK/DISABLED/PROVIDER_ERROR/INVALID_RESPONSE), `ReviewRequirement` (NONE/HUMAN_REVIEW/EXPLICIT_COMMIT ≈ approval classes A0–A4), frozen `ProviderResult` dataclass with `ok`, `provenance()`, and `disabled()`/`failure()` factories. No I/O, no DB. |
-| `app/providers/adapters.py` | Legacy adapters wrapping the **non-mutating** trigger/draft functions: `LegacyArgusVisionAdapter.analyze_gallery` → `argus_analyze.trigger_gallery_analyze`; `LegacyPlutusOffersAdapter.recommend_gallery` → `plutus_recommend.trigger_gallery_recommend`; `LegacyOdysseusCaptionAdapter.draft` → `caption_ai.draft_caption`; `LegacyDionysusPackAdapter.packs` → `platekit.packs_for_client`. Each normalizes the return (or the module's typed error) into a `ProviderResult`. **No DB writes.** |
+| `app/providers/adapters.py` | Legacy adapters wrapping the **non-mutating** trigger/read functions: `LegacyArgusVisionAdapter.analyze_gallery` → `argus_analyze.trigger_gallery_analyze`; `LegacyPlutusOffersAdapter.recommend_gallery` → `plutus_recommend.trigger_gallery_recommend`; `LegacyOdysseusCaptionAdapter.draft` → `caption_ai.draft_caption`; `LegacyDionysusPackAdapter.packs` → `platekit.packs_for_client`. Argus/Plutus/Odysseus normalize the return **or the module's typed error** into a `ProviderResult`; the Dionysus pack reader never raises, so its adapter maps the returned status dict (`ok` → OK, `not_configured`/`missing_slug` → DISABLED, else → PROVIDER_ERROR). **No DB writes.** |
 | `app/providers/mocks.py` | Deterministic `MockVisionAdapter` / `MockOffersAdapter` / `MockCaptionAdapter` (input-derived fixed outputs) + a `FailingAdapter` usable for any capability. |
 | `app/providers/registry.py` | `resolve(capability)` → legacy adapter by default (the production path); `use(capability, adapter)` context manager + `reset()` for test/shadow injection. **The strangler switch point.** |
 
@@ -31,7 +31,7 @@ migration**.
 
 | File | Purpose |
 | --- | --- |
-| `tests/test_providers.py` | 25 pure-unit tests (`@pytest.mark.unit`, no DB/network). |
+| `tests/test_providers.py` | 30 pure-unit tests (`@pytest.mark.unit`, no DB/network). |
 
 ### Changed — none
 
@@ -56,8 +56,8 @@ Commands (from `AGENTS.md` gates):
 
 ```sh
 . .venv/bin/activate
-python -m pytest tests/test_providers.py -q                       # 25 passed
-python -m pytest tests/ --ignore=tests/test_smoke.py -q -m unit    # 61 passed (was 36)
+python -m pytest tests/test_providers.py -q                       # 30 passed
+python -m pytest tests/ --ignore=tests/test_smoke.py -q -m unit    # 66 passed (was 36)
 ruff check . && ruff format --check .                              # clean
 MISE_DATA_DIR=$(mktemp -d) MISE_SECRET_KEY=test MISE_ADMIN_PASSWORD=pw \
   python -m pytest tests/test_smoke.py -q                          # 152 passed, 6 failed*
@@ -76,12 +76,16 @@ What the unit tests prove:
 - **Failure mapping:** typed errors → `PROVIDER_ERROR`; missing run/job → `INVALID_RESPONSE`;
   unconfigured → `DISABLED`. All non-OK results carry `output=None`.
 - **Non-mutating-on-failure** (the audit invariant): drives the *real*
-  `trigger_gallery_analyze` with a timing-out `urlopen` and a `db.run` spy — asserts the
-  adapter returns `PROVIDER_ERROR` **and zero DB writes**. A companion test proves even a
-  *successful* facade call writes nothing (recording is the caller's job).
-- **Mocks:** deterministic; `FailingAdapter` non-OK for every capability.
+  `trigger_gallery_analyze` **and** `trigger_gallery_recommend` with a timing-out
+  `urlopen` and a `db.run` spy — asserts the adapter returns `PROVIDER_ERROR` **and zero
+  DB writes**. A companion test proves even a *successful* facade call writes nothing
+  (recording is the caller's job). `caption_ai` touches no DB, so its non-mutation is
+  structural.
+- **Mocks:** deterministic across repeated calls; `FailingAdapter` non-OK for every
+  capability.
 - **Registry:** defaults to legacy for all three capabilities; `use()` overrides then
-  restores; `reset()` clears.
+  restores (including a nested-override case); `reset()` clears; an autouse fixture
+  isolates overrides per test.
 
 ## Risks & mitigations
 

@@ -105,12 +105,20 @@ contract, not building integration from scratch.
 | **Content packs** (Dionysus) | `app/platekit.py` | GET approved packs; `notify_argus_complete` drafts a caption pack after vision | `MISE_PLATEKIT_API_BASE` + `MISE_PLATEKIT_API_TOKEN` (legacy `MISE_DIONYSUS_*` fallback) [CODE] |
 | Inbound read API for siblings | `app/service_api.py` | `GET /api/shots`, `/api/galleries`, `/api/galleries/expiring`, `/api/press/recent`; `POST /api/{argus,plutus}/callback` | bearer-gated [CODE] |
 
-**Consistent integration pattern [CODE]** — every one of these modules has:
-`is_enabled()` (armed only when *both* URL and token are set → dormant otherwise), a
-typed error class (`ArgusAnalyzeError`, `PlutusRecommendError`, `CaptionDraftError`), a
-**non-mutating** synchronous `trigger_*` / `draft_*` that raises on failure, and a
-background `run_for_gallery` that swallows and records last status. Persistence lives in
-the background/caller path, never in the trigger call.
+**Shared integration pattern [CODE]** — every module is **dormant-by-env**
+(`is_enabled()` true only when *both* URL and token are set) and **non-mutating on the
+provider call** (persistence lives in the background/caller path, never in the
+trigger/read call). The full shape differs by module, and the facade is designed around
+exactly these differences:
+
+- `argus_analyze` and `plutus_recommend` follow the full pattern: typed error
+  (`ArgusAnalyzeError` / `PlutusRecommendError`), a non-mutating synchronous `trigger_*`
+  that raises, and a background `run_for_gallery` that swallows and records last status.
+- `caption_ai` exposes `is_enabled()` + `draft_caption()` (raising `CaptionDraftError`)
+  with **no** `run_for_gallery` — the caller writes the accepted draft.
+- `platekit` (Dionysus) exposes `is_enabled()` + `packs_for_client()` — a read that
+  **never raises** and returns a status dict — with **no** typed error class and **no**
+  `run_for_gallery`.
 
 ### Notion and Odysseus boundaries (verified)
 
