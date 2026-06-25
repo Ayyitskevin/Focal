@@ -25,16 +25,13 @@ dies with the box it protects.
 their contents are captured in ORACLE. This file is the repo-side source of truth for
 the **topology**.
 
-## Not deployed (original flow-push design — superseded)
+## History
 
-These files are the earlier push-model design and are **not installed** anywhere
-(`systemctl list-unit-files mise-offsite*` on flow returns nothing). Kept for reference;
-the mickey-pull above replaced them. Candidates for pruning:
-
-- `ops/mise-offsite.service`, `ops/mise-offsite.timer` — flow-side push timer.
-- `ops/offsite-sync.sh` — flow pushes snapshot+media to mickey.
-- `ops/restore-test.sh` — flow-side restore gate (depends on flow's live media tree;
-  `mise-backup-verify` is the deployed, mickey-local equivalent).
+An earlier **flow-push** design (`mise-offsite.service`/`.timer`, `offsite-sync.sh`,
+`restore-test.sh`) was never installed and was **pruned 2026-06-25** in favour of the
+mickey-pull above — verifying the off-site copy on mickey survives flow being down, which
+is the whole point of a backup. `ops/` now holds only the deployed `backup.sh` +
+`mise-backup.service`/`.timer`; the pull/verify scripts are machine-local on mickey.
 
 ## Restore (manual)
 
