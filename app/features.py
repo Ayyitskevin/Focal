@@ -28,6 +28,12 @@ def content_provider_facade_enabled() -> bool:
     return bool(config.PROVIDER_FACADE_CONTENT)
 
 
+def vision_shadow_enabled() -> bool:
+    """Phase 2: shadow a completed Argus analysis with a registered vision challenger,
+    recording the comparison to ai_runs. Default off; also inert without a challenger."""
+    return bool(config.VISION_SHADOW)
+
+
 def gmail_enabled() -> bool:
     return bool(config.GMAIL_USER and config.GMAIL_APP_PASSWORD)
 

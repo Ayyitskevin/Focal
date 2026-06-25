@@ -70,12 +70,19 @@ no money/publication consequence.
 
 **Goal:** vision as the common upstream signal; prove a challenger before switching.
 
-| Slice | Deliverable | Acceptance | Rollback |
-| --- | --- | --- | --- |
-| 2.1 | Route gallery analyze + writeback through `providers` (`Capability.VISION`); legacy Argus adapter remains default. | Publish still enqueues exactly one idempotent job; writeback unchanged; `argus_last_*` + `ai_runs` both written. | Flag → legacy adapter. |
-| 2.2 | **Internal vision adapter** (direct cloud vision or local worker) behind flag. | Conforms to `Capability.VISION`; mock-tested; off by default. | Flag off. |
-| 2.3 | **Shadow mode:** run challenger alongside legacy on published galleries; write both `ai_runs`; **do not** write challenger output to `assets`. | Comparison report: schema validity, keyword/alt quality vs human reference, hero-pick agreement, latency, cost (audit §9.5). | N/A (shadow writes nothing authoritative). |
-| 2.4 | Switch one gallery type to challenger **only if** it matches/beats the validation set. | Human-scored parity on 100-image set; per-image cost/latency logged. | Flag → legacy Argus; assets re-writeable from legacy run. |
+The **shadow machinery shipped first, asset-safe and inert** (a draft PR): the
+comparison engine, the challenger seam, and a runner that records both sides to the
+ledger without ever touching the live publish/analyze path. The cost-incurring pieces (a
+real challenger backend + the auto-trigger) are deliberately separated so no live vision
+flow changes until a challenger is deliberately wired.
+
+| Slice | Deliverable | Acceptance | Rollback | Status |
+| --- | --- | --- | --- | --- |
+| 2.2-seam | **Vision challenger seam** — `providers.registry.challenger()`/`use_challenger()` (default None), `MockVisionChallengerAdapter`. | Conforms to `Capability.VISION`; default empty → shadow inert. | Remove challenger registration. | ✅ in PR |
+| 2.3-engine | **Shadow runner + comparison** — `app/providers/shadow.compare()` (pure) and `app/vision_shadow.run_for_gallery()`: snapshots the *completed* legacy run (no re-call), runs the challenger, records BOTH to `ai_runs` (linked by correlation id), compares. **Never writes assets/galleries; never raises; no-op unless `MISE_VISION_SHADOW` is armed AND a challenger is registered.** Job handler `vision_shadow_gallery`. | Two linked `ai_runs` rows; zero asset/gallery mutation; inert by default. | Flag off / drop challenger; ledger-only so nothing to revert. | ✅ in PR |
+| 2.2-backend | **Real internal vision adapter** (direct cloud vision or a local worker) registered as the challenger. | Conforms to contract; mock-tested first; off by default. | Drop challenger registration. | ⏳ next (may be red-light if it needs new provider config/keys) |
+| 2.1 | Auto-trigger: enqueue `vision_shadow_gallery` after a completed Argus run, behind the flag. | Publish unchanged; shadow fires only when armed + challenger present. | Flag off. | ⏳ next (with 2.2-backend) |
+| 2.4 | Switch one gallery type to challenger **only if** it matches/beats the validation set. | Human-scored parity on 100-image set; per-image cost/latency logged. | Flag → legacy Argus; assets re-writeable from legacy run. | ⏳ later |
 
 **Decommission gate (Argus service):** parity on validation set **+** 30-day cost ledger
 **+** restore test of the run store **+** observation period. Until then Argus stays the

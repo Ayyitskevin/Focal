@@ -125,6 +125,13 @@ ARGUS_TOKEN = os.environ.get("MISE_ARGUS_TOKEN", "")
 ARGUS_TIMEOUT = int(os.environ.get("MISE_ARGUS_TIMEOUT", "30"))
 ARGUS_ANALYZE_LIMIT = int(os.environ.get("MISE_ARGUS_ANALYZE_LIMIT", "0"))
 
+# Phase 2 vision shadow mode (Mise Solo Studio OS). When ON *and* a vision challenger
+# is registered (providers.registry), a completed Argus analysis can be shadowed by a
+# challenger whose result is recorded to the ai_runs ledger for comparison — never
+# written to assets/galleries. Default OFF; also inert with no challenger registered, so
+# arming the flag alone changes nothing. See docs/MISE-CONSOLIDATION-ROADMAP.md Phase 2.
+VISION_SHADOW = _b("MISE_VISION_SHADOW", "false")
+
 # Plutus print upsell (Phase 1). BOTH url+token arm post-Argus recommend hooks.
 PLUTUS_URL = os.environ.get("MISE_PLUTUS_URL", "").rstrip("/")
 PLUTUS_TOKEN = os.environ.get("MISE_PLUTUS_TOKEN", "")
