@@ -26,6 +26,15 @@ from app.providers.contracts import (
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def _reset_registry():
+    """Isolate registry overrides per test — no test leaks an override into the next,
+    even if it writes registry._overrides directly or fails mid-block."""
+    registry.reset()
+    yield
+    registry.reset()
+
+
 # ── contract ─────────────────────────────────────────────────────────────────
 
 
@@ -64,6 +73,12 @@ def test_disabled_and_failure_factories_are_not_ok():
     assert f.ok is False
     assert f.error == "boom"
     assert f.latency_ms == 3
+
+    # provenance must survive for non-OK results — error/latency are exactly what an
+    # operator inspects after a non-mutating failure.
+    fp = f.provenance()
+    assert fp["status"] == "provider_error" and fp["error"] == "boom" and fp["latency_ms"] == 3
+    assert d.provenance()["status"] == "disabled"
 
 
 def test_failure_rejects_ok_status():
@@ -240,6 +255,37 @@ def test_plutus_adapter_disabled(monkeypatch):
     assert r.status is ResultStatus.DISABLED
 
 
+def test_plutus_adapter_failure_writes_nothing(monkeypatch):
+    """Mirror of the Argus non-mutating proof for the offers path: drive the real
+    trigger_gallery_recommend with a timing-out urlopen + a db.run spy."""
+    from app import config
+
+    monkeypatch.setattr(config, "PLUTUS_URL", "http://plutus:8030")
+    monkeypatch.setattr(config, "PLUTUS_TOKEN", "secret")
+    monkeypatch.setattr(
+        plutus_recommend.db,
+        "one",
+        lambda sql, params=(): {
+            "id": 3,
+            "published": 1,
+            "type": "gallery",
+            "argus_last_run_id": None,
+        },
+    )
+    writes: list[tuple] = []
+    monkeypatch.setattr(
+        plutus_recommend.db, "run", lambda sql, params=(): writes.append((sql, params))
+    )
+
+    def timeout(req, timeout):
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(plutus_recommend.urllib.request, "urlopen", timeout)
+    r = adapters.LegacyPlutusOffersAdapter().recommend_gallery(3)
+    assert r.status is ResultStatus.PROVIDER_ERROR
+    assert writes == [], "provider failure must not write to the database"
+
+
 # ── legacy CONTENT adapters (Odysseus caption + Dionysus packs) ─────────────────
 
 
@@ -257,6 +303,9 @@ def test_caption_adapter_reproduces_legacy_output(monkeypatch):
 
 
 def test_caption_adapter_provider_error_is_non_mutating(monkeypatch):
+    # caption_ai imports no db module and the adapter never writes, so non-mutation is
+    # structural here (unlike Argus/Plutus there is no DB path to spy on); we assert
+    # the error is surfaced as a non-OK result with no output.
     monkeypatch.setattr(caption_ai, "is_enabled", lambda: True)
 
     def boom(ctx):
@@ -267,6 +316,15 @@ def test_caption_adapter_provider_error_is_non_mutating(monkeypatch):
     assert r.status is ResultStatus.PROVIDER_ERROR
     assert r.output is None
     assert "empty draft" in r.error
+
+
+def test_caption_adapter_malformed_response_is_invalid(monkeypatch):
+    """A provider that returns a dict without a caption -> INVALID_RESPONSE, never a raise."""
+    monkeypatch.setattr(caption_ai, "is_enabled", lambda: True)
+    monkeypatch.setattr(caption_ai, "draft_caption", lambda ctx: {"model": "x"})
+    r = adapters.LegacyOdysseusCaptionAdapter().draft({"label": "Hero"})
+    assert r.status is ResultStatus.INVALID_RESPONSE
+    assert r.output is None
 
 
 def test_caption_adapter_disabled(monkeypatch):
@@ -315,6 +373,37 @@ def test_dionysus_pack_adapter_disabled(monkeypatch):
     assert r.status is ResultStatus.DISABLED
 
 
+def test_dionysus_pack_adapter_missing_slug_is_disabled(monkeypatch):
+    # Enabled but the client has no slug -> packs_for_client returns 'missing_slug'
+    # WITHOUT an outbound call. That is a config state (DISABLED), not a provider error.
+    monkeypatch.setattr(platekit, "is_enabled", lambda: True)
+    monkeypatch.setattr(
+        platekit,
+        "packs_for_client",
+        lambda client, include_drafts=False: {
+            "status": "missing_slug",
+            "slug": "",
+            "message": "Set a Platekit slug on this client",
+            "packs": [],
+        },
+    )
+    r = adapters.LegacyDionysusPackAdapter().packs({"name": "x"})
+    assert r.status is ResultStatus.DISABLED
+
+
+def test_dionysus_pack_adapter_not_configured_is_disabled(monkeypatch):
+    # Defensive: if packs_for_client reports 'not_configured' past the is_enabled gate,
+    # it is still a no-call config state -> DISABLED, never PROVIDER_ERROR.
+    monkeypatch.setattr(platekit, "is_enabled", lambda: True)
+    monkeypatch.setattr(
+        platekit,
+        "packs_for_client",
+        lambda client, include_drafts=False: {"status": "not_configured", "packs": []},
+    )
+    r = adapters.LegacyDionysusPackAdapter().packs({"name": "x"})
+    assert r.status is ResultStatus.DISABLED
+
+
 # ── mock adapters ───────────────────────────────────────────────────────────
 
 
@@ -325,9 +414,11 @@ def test_mock_adapters_are_deterministic():
 
     o = mocks.MockOffersAdapter().recommend_gallery(7)
     assert o.ok and o.output["run_id"] == 2007 and o.output["bundle_count"] == 3
+    assert mocks.MockOffersAdapter().recommend_gallery(7).output == o.output
 
     c = mocks.MockCaptionAdapter().draft({"label": "Hero"})
     assert c.ok and c.output["caption"] == "[mock caption] Hero" and c.tokens == 12
+    assert mocks.MockCaptionAdapter().draft({"label": "Hero"}).output == c.output
 
 
 def test_mock_adapter_disabled():
@@ -356,11 +447,21 @@ def test_registry_defaults_to_legacy():
 
 
 def test_registry_use_overrides_then_restores():
-    registry.reset()
     mock = mocks.MockVisionAdapter()
     with providers.use(Capability.VISION, mock):
         assert registry.resolve(Capability.VISION) is mock
     # restored to legacy after the block
+    assert isinstance(registry.resolve(Capability.VISION), adapters.LegacyArgusVisionAdapter)
+
+
+def test_registry_use_nested_restores_prior_override():
+    # Nested use() on the same capability must restore the OUTER override, not the
+    # legacy default — the case a shadow-mode harness relies on.
+    outer, inner = mocks.MockVisionAdapter(), mocks.MockVisionAdapter()
+    with providers.use(Capability.VISION, outer):
+        with providers.use(Capability.VISION, inner):
+            assert registry.resolve(Capability.VISION) is inner
+        assert registry.resolve(Capability.VISION) is outer
     assert isinstance(registry.resolve(Capability.VISION), adapters.LegacyArgusVisionAdapter)
 
 
