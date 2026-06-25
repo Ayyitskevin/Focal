@@ -107,6 +107,14 @@ ODYSSEUS_CAPTION_URL = os.environ.get("MISE_ODYSSEUS_CAPTION_URL", "")
 ODYSSEUS_CAPTION_TOKEN = os.environ.get("MISE_ODYSSEUS_CAPTION_TOKEN", "")
 ODYSSEUS_TIMEOUT = int(os.environ.get("MISE_ODYSSEUS_TIMEOUT", "210"))
 
+# Phase 1 strangler flag (Mise Solo Studio OS). When ON, the caption-draft path routes
+# through the app/providers facade (which still resolves to the legacy Odysseus adapter
+# by default) and records provenance to the ai_runs ledger. Default OFF: production
+# keeps calling caption_ai directly, byte-for-byte the legacy behavior, and writes no
+# ai_runs rows. Flip per host once the ledger is observed (see docs/MISE-CONSOLIDATION-
+# ROADMAP.md Phase 1).
+PROVIDER_FACADE_CONTENT = _b("MISE_PROVIDER_FACADE_CONTENT", "false")
+
 # Argus vision analyze (Phase 6). BOTH url+token must be set to arm publish hooks and
 # the gallery admin "Analyze now" button (see argus_analyze.is_enabled); either unset =
 # dormant, no outbound call. Mise POSTs mise_gallery_id to Argus /analyze-folder; Argus

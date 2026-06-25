@@ -49,14 +49,16 @@ nothing in the running app imports `app/providers/`; no migration.
 ## Phase 1 — Provenance + provider seam in production (no authority change)
 
 **Goal:** make the `providers` facade *real* in production for the lowest-risk path,
-and persist unified provenance — **the first red-light migration**, designed here and
-PR'd separately.
+and persist unified provenance — **the first red-light migration**. **Implemented as a
+draft PR** (`migrations/065_ai_runs.sql`, `app/ai_runs.py`, the
+`MISE_PROVIDER_FACADE_CONTENT` flag, and the `admin/recurring.py` wiring); human-merged
+because it adds a migration.
 
-| Slice | Deliverable | Acceptance | Rollback |
-| --- | --- | --- | --- |
-| 1.1 | **`ai_runs` provenance table** (new migration) storing `ProviderResult.provenance()` per call: capability, provider, model, status, review, latency_ms, cost_usd, tokens, correlation/idempotency key, gallery/project ref. | Forward-only migration; written behind a flag; reads optional; existing `*_last_*` columns untouched. | Stop writing `ai_runs`; columns are additive, no destructive change. |
-| 1.2 | Route **caption drafting** (`admin/recurring.py`) through `providers.resolve(Capability.CONTENT)` instead of `caption_ai` directly. Lowest risk (already A1 draft, already non-mutating). | Same caption output & model recorded; `CaptionDraftError` UX preserved; provenance row written. | Flip flag → direct `caption_ai` call. |
-| 1.3 | Capability feature flags in `app/features.py` (`provider_backend(capability) → "legacy"`), defaulting legacy. | Disabled/legacy by default; flag documented. | Remove flag; default already legacy. |
+| Slice | Deliverable | Acceptance | Rollback | Status |
+| --- | --- | --- | --- | --- |
+| 1.1 | **`ai_runs` provenance table** (`migrations/065_ai_runs.sql`) storing `ProviderResult.provenance()` per call: capability, provider, model, status, review, latency_ms, cost_usd, tokens, correlation/idempotency key, subject ref. `app/ai_runs.record()` writes it (bound params). | Forward-only, additive (new table + 2 indexes); no existing table touched; `rollback/065_ai_runs.sql` drops it. | Stop writing `ai_runs`; run the rollback. | ✅ in PR |
+| 1.2 | Route **caption drafting** (`admin/recurring.py`) through `providers.resolve(Capability.CONTENT)` when the flag is on, recording provenance. Lowest risk (already A1 draft, already non-mutating). | Flag OFF (default) = byte-identical legacy `caption_ai` path, no `ai_runs` row; flag ON = facade + provenance row; `CaptionDraftError`/DISABLED stays non-mutating. | Flip `MISE_PROVIDER_FACADE_CONTENT` off → direct `caption_ai` call. | ✅ in PR |
+| 1.3 | Content-facade flag in `app/features.py` (`content_provider_facade_enabled()`), defaulting legacy/off; documented in `.env.example`. | Disabled by default; flag documented. | Remove flag; default already legacy. | ✅ in PR |
 
 **Shadow mode:** N/A (still one provider per capability). **Data migration:** 1.1 only —
 red-light, human-merged. **Why first:** caption path is already a reversible draft with

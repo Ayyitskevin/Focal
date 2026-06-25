@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from .. import audit, caption_ai, config, db, security
+from .. import audit, caption_ai, config, db, features, security
 from ..render import templates
 from .proposals import MAX_ITEM_ROWS, parse_items
 from .studio import get_project
@@ -555,17 +555,35 @@ async def draft_caption(plan_id: int, caption_id: int, replace: str = Form("")):
         "period": cap["period"],
         "plan_title": d["title"],
     }
-    try:
-        result = caption_ai.draft_caption(ctx)
-    except caption_ai.CaptionDraftError as e:
-        log.warning("caption %s draft failed: %s", caption_id, e)
-        return _back(str(e))
+    # Strangler seam (Phase 1): when the content facade flag is ON, route through
+    # app/providers (which still resolves to the legacy Odysseus adapter by default) and
+    # record provenance to ai_runs. When OFF (default), this is byte-for-byte the legacy
+    # caption_ai path and writes no ai_runs row. Either way the caption is a non-mutating
+    # draft on failure and a human-approved suggestion on success.
+    if features.content_provider_facade_enabled():
+        from .. import ai_runs, providers
+
+        pr = providers.resolve(providers.Capability.CONTENT).draft(ctx)
+        ai_runs.record(pr, subject_type="retainer_caption", subject_id=caption_id)
+        if not pr.ok:
+            log.warning("caption %s draft failed (facade): %s", caption_id, pr.error)
+            return _back(pr.error or "AI drafting is not available right now")
+        caption_text = pr.output["caption"]
+        model = pr.model or "unknown"
+    else:
+        try:
+            result = caption_ai.draft_caption(ctx)
+        except caption_ai.CaptionDraftError as e:
+            log.warning("caption %s draft failed: %s", caption_id, e)
+            return _back(str(e))
+        caption_text = result["caption"]
+        model = result["model"]
 
     with db.tx() as con:
         con.execute(
             "UPDATE retainer_captions SET body=?, ai_drafted=1, ai_model=?, "
             "ai_drafted_at=datetime('now'), ai_draft_original=? WHERE id=? AND plan_id=?",
-            (result["caption"], result["model"], result["caption"], caption_id, plan_id),
+            (caption_text, model, caption_text, caption_id, plan_id),
         )
         # Status is deliberately NOT touched — an AI draft is a suggestion, not a
         # delivery. Crediting stays the slice-4/6a human approve -> /deliveries path.
@@ -574,11 +592,9 @@ async def draft_caption(plan_id: int, caption_id: int, replace: str = Form("")):
             "recurring_plan",
             plan_id,
             "caption_ai_drafted",
-            diff={"caption_id": caption_id, "model": result["model"]},
+            diff={"caption_id": caption_id, "model": model},
         )
-    log.info(
-        "retainer plan %s caption %s AI-drafted (model=%s)", plan_id, caption_id, result["model"]
-    )
+    log.info("retainer plan %s caption %s AI-drafted (model=%s)", plan_id, caption_id, model)
     return _back()
 
 
