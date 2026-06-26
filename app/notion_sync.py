@@ -14,31 +14,43 @@ from . import config, db, hermes_arm
 log = logging.getLogger("mise.notion")
 
 
+def _headers() -> dict:
+    """Notion request headers. The API version is config-driven (config.NOTION_VERSION,
+    default the legacy 2022-06-28) so the upgrade is a validated config flip, not a code
+    edit — addressing the audit's hard-coded-version risk (§11.2)."""
+    return {
+        "Authorization": f"Bearer {config.NOTION_TOKEN}",
+        "Notion-Version": config.NOTION_VERSION,
+        "Content-Type": "application/json",
+    }
+
+
 def _patch_page(page_id: str, props: dict) -> None:
+    # PATCH addresses a page by id and is unaffected by the 2025-09-03 data-source model.
     req = urllib.request.Request(
         f"https://api.notion.com/v1/pages/{page_id}",
         method="PATCH",
         data=json.dumps({"properties": props}).encode(),
-        headers={
-            "Authorization": f"Bearer {config.NOTION_TOKEN}",
-            "Notion-Version": "2022-06-28",
-            "Content-Type": "application/json",
-        },
+        headers=_headers(),
     )
     with urllib.request.urlopen(req, timeout=15) as resp:
         resp.read()
 
 
-def _create_page(database_id: str, props: dict) -> str:
+def _create_page(database_id: str, props: dict, *, data_source_id: str | None = None) -> str:
+    # Under the 2025-09-03 multi-source model a page is created under a DATA SOURCE, not a
+    # database; when a data_source_id is configured we use that parent, else the legacy
+    # database_id parent (unchanged behavior). Endpoint is POST /v1/pages either way.
+    parent = (
+        {"type": "data_source_id", "data_source_id": data_source_id}
+        if data_source_id
+        else {"database_id": database_id}
+    )
     req = urllib.request.Request(
         "https://api.notion.com/v1/pages",
         method="POST",
-        data=json.dumps({"parent": {"database_id": database_id}, "properties": props}).encode(),
-        headers={
-            "Authorization": f"Bearer {config.NOTION_TOKEN}",
-            "Notion-Version": "2022-06-28",
-            "Content-Type": "application/json",
-        },
+        data=json.dumps({"parent": parent, "properties": props}).encode(),
+        headers=_headers(),
     )
     with urllib.request.urlopen(req, timeout=15) as resp:
         return json.loads(resp.read())["id"]
@@ -186,7 +198,9 @@ def sync_booking(booking_id: int) -> None:
         _patch_page(b["notion_page_id"], {"Status": props["Status"], "When": props["When"]})
         log.info("notion booking %s patched (%s)", booking_id, status)
     else:
-        page_id = _create_page(config.NOTION_BOOKINGS_DB, props)
+        page_id = _create_page(
+            config.NOTION_BOOKINGS_DB, props, data_source_id=config.NOTION_BOOKINGS_DS or None
+        )
         db.run("UPDATE bookings SET notion_page_id=? WHERE id=?", (page_id, booking_id))
         log.info("notion booking %s mirrored as page %s", booking_id, page_id)
 
@@ -273,6 +287,7 @@ def sync_session_for_booking(booking_id: int) -> None:
             "Auto-Spawned": {"checkbox": True},
             "Session Notes (Quick)": {"rich_text": [{"text": {"content": notes[:1900]}}]},
         },
+        data_source_id=config.NOTION_SESSIONS_DS or None,
     )
     db.run("UPDATE bookings SET notion_session_id=? WHERE id=?", (sid, booking_id))
     # Unify the auto-created Studio project with its Session page so the pipeline

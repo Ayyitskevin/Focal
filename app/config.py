@@ -71,16 +71,30 @@ STRIPE_WEBHOOK_SECRET = os.environ.get("MISE_STRIPE_WEBHOOK_SECRET", "")
 GMAIL_USER = os.environ.get("MISE_GMAIL_USER", "")
 GMAIL_APP_PASSWORD = os.environ.get("MISE_GMAIL_APP_PASSWORD", "")
 NOTION_TOKEN = os.environ.get("MISE_NOTION_TOKEN", "")
+# Notion API version sent on every request. Default is the legacy 2022-06-28 the adapter
+# shipped with; set to a current version (e.g. 2025-09-03) ONLY after validating against a
+# staging Notion workspace — the 2025-09-03 release introduced the multi-source-database
+# model where page CREATE must target a data_source_id (see NOTION_*_DS below and
+# docs/NOTION-MODERNIZATION.md). Page PATCH (by page_id) is unaffected by that change.
+NOTION_VERSION = os.environ.get("MISE_NOTION_VERSION", "2022-06-28")
 # One-way Notion "Bookings" calendar writeback (WINDOW doctrine). Empty = dormant:
 # the scheduler still works end-to-end, it just skips the Notion mirror. Arming
 # needs Kevin to create a Bookings database, share it with the Mise integration,
 # and drop its id here — same posture as Stripe/Telegram (off until provisioned).
 NOTION_BOOKINGS_DB = os.environ.get("MISE_NOTION_BOOKINGS_DB", "")
+# data_source_id of the Bookings database, required only when NOTION_VERSION is 2025-09-03+
+# (page CREATE targets a data source, not a database). Empty -> creates use the legacy
+# database_id parent. Obtain it from Notion: database settings -> Manage data sources ->
+# Copy data source ID.
+NOTION_BOOKINGS_DS = os.environ.get("MISE_NOTION_BOOKINGS_DS", "")
 # One-way booking→Notion Session spine. Empty = dormant: a flagged event type's
 # confirmed booking is a no-op until this holds the Sessions database id (Mise
 # integration must be shared on it). The per-event-type creates_notion_session
 # flag is the second gate. Sessions DB id: see the Notion "Sessions" database.
 NOTION_SESSIONS_DB = os.environ.get("MISE_NOTION_SESSIONS_DB", "")
+# data_source_id of the Sessions database — same role as NOTION_BOOKINGS_DS, for the
+# Session-spine page CREATE under the 2025-09-03+ data-source model.
+NOTION_SESSIONS_DS = os.environ.get("MISE_NOTION_SESSIONS_DS", "")
 
 # Google Calendar (Phase B) — OAuth web-app creds for the single business account.
 # Empty client id/secret = dormant: the scheduler works without calendar sync and
