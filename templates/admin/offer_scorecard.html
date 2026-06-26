@@ -1,0 +1,78 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Offer scorecard · Mise{% endblock %}
+{% block topbar %}
+<header class="admin-topbar pgtop">
+  <div class="pgtop-lead">
+    <h1>Offer scorecard</h1>
+    <p class="pgtop-sub">
+      Does the offers capability earn its keep? The proposed → approved → sent funnel and an
+      attribution-proxy view of revenue on offered projects. Read-only — it informs the
+      keep/retire call (audit §19.4), it doesn't decide it.
+    </p>
+  </div>
+  <div class="pgtop-actions">
+    <a class="pgtop-link" href="/admin/offers">&larr; Offers queue</a>
+  </div>
+</header>
+{% endblock %}
+{% block admin_body %}
+<main class="admin-main">
+  <section>
+    <div class="muted" style="font-size:.8rem; margin:.3rem 0">Offer funnel</div>
+    <table style="border-collapse:collapse; font-size:.9rem; width:100%; max-width:46rem">
+      <tr style="text-align:left; color:#5b6b73">
+        <th style="padding:.2rem .7rem .2rem 0">Window</th>
+        <th style="padding:.2rem .7rem">Proposed</th>
+        <th style="padding:.2rem .7rem">Approved</th>
+        <th style="padding:.2rem .7rem">Sent</th>
+        <th style="padding:.2rem .7rem">Approval</th>
+        <th style="padding:.2rem .7rem">Sent rate</th>
+      </tr>
+      {% for w in windows %}
+      <tr style="border-top:1px solid #eceff1">
+        <td style="padding:.25rem .7rem .25rem 0"><b>{{ w.label }}</b></td>
+        <td style="padding:.25rem .7rem">{{ w.proposed }} <span class="muted">· {{ w.proposed_value }}</span></td>
+        <td style="padding:.25rem .7rem">{{ w.approved }} <span class="muted">· {{ w.approved_value }}</span></td>
+        <td style="padding:.25rem .7rem">{{ w.sent }}</td>
+        <td style="padding:.25rem .7rem">{{ w.approval_rate }}</td>
+        <td style="padding:.25rem .7rem">{{ w.send_rate }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    <div class="muted" style="font-size:.78rem; margin:.3rem 0">
+      Approval = approved ÷ proposed (how often a proposed offer is worth pursuing).
+      Sent rate = sent ÷ approved (how often an approved offer reaches the client).
+      Windows are by proposal date.
+    </div>
+  </section>
+
+  <section style="margin-top:1.1rem">
+    <div class="muted" style="font-size:.8rem; margin:.3rem 0">Revenue on offered projects — attribution proxy</div>
+    <div style="display:flex; gap:.6rem; flex-wrap:wrap">
+      <div style="flex:1 1 150px; border:1px solid #e2e6e8; border-radius:8px; padding:.7rem .8rem">
+        <div style="font-size:1.5rem; font-weight:600">{{ revenue.revenue }}</div>
+        <div class="muted" style="font-size:.8rem">paid on offered projects after the offer was sent</div>
+      </div>
+      <div style="flex:1 1 150px; border:1px solid #e2e6e8; border-radius:8px; padding:.7rem .8rem">
+        <div style="font-size:1.5rem; font-weight:600">{{ revenue.converted }} / {{ revenue.projects }}</div>
+        <div class="muted" style="font-size:.8rem">offered projects with a payment after send ({{ revenue.conversion_rate }})</div>
+      </div>
+      <div style="flex:1 1 150px; border:1px solid #e2e6e8; border-radius:8px; padding:.7rem .8rem">
+        <div style="font-size:1.5rem; font-weight:600">{{ revenue.sent_total }}</div>
+        <div class="muted" style="font-size:.8rem">offers sent to clients</div>
+      </div>
+    </div>
+    <p class="muted" style="font-size:.78rem; margin:.4rem 0">
+      <b>Proxy, not a causal link.</b> There is no offer→sale relationship in the data, so this
+      attributes <em>all</em> payment revenue on a project recorded after its offer was sent —
+      not just incremental print/album upsell. Project-level aggregation avoids double-counting a
+      shared payment; offers on galleries with no linked project aren't attributable here. Read
+      it as a directional signal alongside the COGS in <a href="/admin/ai-cost">AI cost</a>.
+    </p>
+  </section>
+
+  <p class="audit-note muted">This scorecard only reports. Whether the offers capability is
+    kept or retired (audit §19.4) is a human call — a healthy approval rate and real pipeline
+    value argue keep; a long run of proposed-but-never-approved offers argues retire.</p>
+</main>
+{% endblock %}
