@@ -14,6 +14,7 @@ states context, the decision, consequences, measured reopen criteria, and altern
 | [0007](0007-vision-challenger-qwen3-vl-local.md) | Vision challenger: Qwen3-VL on a local OpenAI-compatible endpoint | Accepted |
 | [0008](0008-notion-api-modernization.md) | Notion API modernization — version-configurable + data-source create | Accepted |
 | [0009](0009-album-layout-deterministic-validator.md) | Mnemosyne albums: a deterministic layout validator owns correctness | Accepted |
+| [0010](0010-validation-scoring-promotion-gate.md) | Validation-scoring harness: a deterministic promotion gate | Accepted |
 
 See also [`../MISE-SOLO-STUDIO-OS.md`](../MISE-SOLO-STUDIO-OS.md),
 [`../REPO-CONSOLIDATION-MATRIX.md`](../REPO-CONSOLIDATION-MATRIX.md),
