@@ -16,6 +16,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from . import alerts, bootstrap, config, csrf, db, jobs, ratelimit, scheduler, service_api
 from .admin import (
     activity,
+    ai_runs,
     audit,
     auth,
     content,
@@ -202,6 +203,7 @@ for r in (
     share.router,
     forms.router,
     audit.router,
+    ai_runs.router,
     inbox.router,
     settings.router,
     financials.router,
