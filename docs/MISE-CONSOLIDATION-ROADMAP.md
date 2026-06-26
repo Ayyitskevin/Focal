@@ -191,7 +191,8 @@ Consolidation does not cut compute; it cuts **operational surface**:
 - **State authorities:** from per-service SQLite "second authorities" toward **one
   business spine** + disposable worker caches.
 - **Review surfaces:** from per-capability ad-hoc status columns toward one `ai_runs`
-  provenance ledger + one review queue.
+  provenance ledger + one review queue — now surfaced read-only to the operator at
+  `/admin/ai-runs` (capability filter, status badges so failures are visible, CSV export).
 
 Each retirement must show ≥30 days of "no time saved / no revenue / no risk reduced"
 before a service is paused (audit §15.4, §19.4) — the reduction is *earned per gate*,
