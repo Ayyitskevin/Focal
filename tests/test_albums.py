@@ -171,3 +171,36 @@ def test_registry_use_can_inject_album_adapter():
     with pytest.raises(ValueError):
         registry.resolve(Capability.ALBUMS)
     registry.reset()
+
+
+# ── deterministic baseline proposer (pure) ──────────────────────────────────────
+
+
+def test_propose_layout_sequences_into_spreads():
+    p = albums.propose_layout([3, 1, 2, 5, 4], per_spread=2)
+    # sorted ids, two slots per spread, sequential
+    assert [(x["asset_id"], x["spread"], x["slot"]) for x in p] == [
+        (1, 0, 0),
+        (2, 0, 1),
+        (3, 1, 0),
+        (4, 1, 1),
+        (5, 2, 0),
+    ]
+
+
+def test_propose_layout_is_validatable_and_complete():
+    # the baseline must itself pass the validator and omit nothing.
+    ids = {10, 11, 12, 13}
+    p = albums.propose_layout(ids, per_spread=2)
+    v = albums.validate_core(ids, p)
+    assert v.ok and v.omitted == ()
+
+
+def test_propose_layout_per_spread_one_is_one_photo_per_spread():
+    p = albums.propose_layout([7, 8], per_spread=1)
+    assert [(x["spread"], x["slot"]) for x in p] == [(0, 0), (1, 0)]
+
+
+def test_propose_layout_rejects_bad_per_spread():
+    with pytest.raises(ValueError):
+        albums.propose_layout([1, 2], per_spread=0)

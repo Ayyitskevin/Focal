@@ -1,0 +1,66 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Albums · Mise{% endblock %}
+{% block topbar %}
+<header class="admin-topbar pgtop">
+  <div class="pgtop-lead">
+    <h1>Album drafts</h1>
+    <p class="pgtop-sub">
+      {% if total %}<b>{{ total }}</b> draft{{ "s" if total != 1 }} · propose a layout, review the spreads, approve or reject
+      {% else %}Propose a baseline album layout for a gallery, review its spreads, then approve or reject — nothing prints until you do{% endif %}
+    </p>
+  </div>
+</header>
+{% endblock %}
+{% block admin_body %}
+<main class="admin-main">
+  {% if msg %}<div style="margin:.4rem 0; padding:.5rem .8rem; border-radius:6px; background:#e1f2e9; color:#2f7d57">{{ msg }}</div>{% endif %}
+  {% if err %}<div style="margin:.4rem 0; padding:.5rem .8rem; border-radius:6px; background:#f3e3e5; color:#7C2F38">{{ err }}</div>{% endif %}
+
+  <form method="post" action="/admin/albums/propose"
+        style="margin:.4rem 0 .8rem; display:flex; gap:.5rem; align-items:end; flex-wrap:wrap">
+    <label style="font-size:.8rem">Propose baseline album for gallery id<br>
+      <input name="gallery_id" type="number" min="1" required style="padding:.3rem; width:8rem"></label>
+    <button type="submit" style="padding:.35rem .8rem">Propose</button>
+  </form>
+
+  <div class="audit-filters">
+    {% for f in filters %}
+    <a class="audit-chip{% if f.active %} is-active{% endif %}"
+       href="/admin/albums{% if f.key != 'all' %}?status={{ f.key }}{% endif %}">
+      {{ f.label }} <span class="audit-chip-n">{{ f.n }}</span>
+    </a>
+    {% endfor %}
+  </div>
+
+  {% if drafts %}
+  <section class="audit-feed">
+    {% for d in drafts %}
+    <a class="audit-row" href="/admin/albums/{{ d.id }}" style="text-decoration:none; color:inherit">
+      <span class="audit-ic" aria-hidden="true"
+            style="background:{{ d.status_bg }};color:{{ d.status_color }}">A</span>
+      <div class="audit-body">
+        <div class="audit-head">
+          <span class="audit-title">{{ d.title }}</span>
+          <span class="audit-time">{{ d.created_at | localtime }}</span>
+        </div>
+        <div class="audit-detail">
+          <span class="audit-amount" style="background:{{ d.status_bg }};color:{{ d.status_color }}">{{ d.status_label }}</span>
+          {{ d.placement_count }} photo{{ "s" if d.placement_count != 1 }} · {{ d.spread_count }} spread{{ "s" if d.spread_count != 1 }}
+          {% if d.model %} · {{ d.model }}{% endif %}
+        </div>
+      </div>
+    </a>
+    {% endfor %}
+  </section>
+  {% else %}
+  <p class="muted">No album drafts{% if status != 'all' %} with this status{% endif %} yet.
+    Propose one for a gallery above — the deterministic baseline lays its ready photos into
+    spreads for you to review.</p>
+  {% endif %}
+
+  <p class="audit-note muted">An album draft is a proposal in HUMAN_REVIEW state. The
+    deterministic validator guarantees it never silently omits, duplicates, or misassigns a
+    photo; you decide whether to approve it. Approval records your decision — it does not
+    print or order anything.</p>
+</main>
+{% endblock %}

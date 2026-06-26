@@ -27,11 +27,15 @@ dormant: nothing in the running app calls it yet (see ADR 0009).
 
 from __future__ import annotations
 
+import logging
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import db
+from . import ai_runs, db
+from .providers import Capability, ProviderResult, ResultStatus, ReviewRequirement, registry
+
+log = logging.getLogger("mise.albums")
 
 # A photo is eligible for an album when it belongs to the gallery, is a photo (not a
 # video), and finished processing. Mirrors the assets CHECK constraints in 001_init.
@@ -216,3 +220,123 @@ def save_draft(
             ],
         )
     return draft_id
+
+
+# ── proposer + draft lifecycle (the Mnemosyne worker seam + human review) ─────────
+
+DRAFT_STATUSES = ("draft", "approved", "rejected")
+_INTERNAL_PROVIDER = "internal"
+_INTERNAL_MODEL = "album-baseline-1"
+
+
+def propose_layout(eligible_ids, *, per_spread: int = 2) -> list[dict]:
+    """Deterministic baseline layout: eligible photos in id order, ``per_spread`` slots per
+    spread. Pure — the safe default proposal a human then reviews/edits/approves. A future
+    Mnemosyne model can replace this as the proposer; the validator guards either source so
+    the baseline is never silently omitting/duplicating/misassigning a photo."""
+    if per_spread < 1:
+        raise ValueError("per_spread must be >= 1")
+    return [
+        {"asset_id": asset_id, "spread": i // per_spread, "slot": i % per_spread}
+        for i, asset_id in enumerate(sorted(eligible_ids))
+    ]
+
+
+def _provider_placements(
+    gallery_id: int, eligible: set[int], per_spread: int
+) -> tuple[list[dict], str, str]:
+    """Prefer a registered ALBUMS provider's proposal — the seam a future Mnemosyne backend
+    plugs into — and fall back to the deterministic internal baseline. Returns
+    ``(placements, provider, model)``. A registered provider's output is still handed to
+    ``save_draft``'s validator, so a bad model proposal cannot become a stored draft."""
+    try:
+        adapter = registry.resolve(Capability.ALBUMS)
+    except ValueError:
+        adapter = None
+    if adapter is not None and adapter.is_enabled():
+        result = adapter.propose_album(gallery_id, sorted(eligible))
+        if result.ok and result.output and result.output.get("placements"):
+            return result.output["placements"], result.provider, (result.model or "")
+    return propose_layout(eligible, per_spread=per_spread), _INTERNAL_PROVIDER, _INTERNAL_MODEL
+
+
+def propose_draft(gallery_id: int, *, per_spread: int = 2) -> int | None:
+    """Propose an album draft for ``gallery_id`` and persist it in HUMAN_REVIEW state.
+
+    Returns the new draft id, or None when the gallery has no eligible photos. The layout
+    is validated by :func:`save_draft` before it persists, so a bad proposal never becomes
+    a stored draft. ALBUMS provenance is recorded to ai_runs best-effort (a ledger failure
+    never blocks the draft). Nothing is printed or charged — a human still approves.
+    """
+    eligible = eligible_asset_ids(gallery_id)
+    if not eligible:
+        return None
+    placements, provider, model = _provider_placements(gallery_id, eligible, per_spread)
+    draft_id = save_draft(gallery_id, placements, provider=provider, model=model)
+    _record_provenance(gallery_id, draft_id, provider, model, len(placements))
+    return draft_id
+
+
+def _record_provenance(
+    gallery_id: int, draft_id: int, provider: str, model: str, placement_count: int
+) -> None:
+    try:
+        ai_runs.record(
+            ProviderResult(
+                capability=Capability.ALBUMS,
+                provider=provider,
+                status=ResultStatus.OK,
+                review=ReviewRequirement.HUMAN_REVIEW,
+                output={"draft_id": draft_id, "placement_count": placement_count},
+                model=model or None,
+            ),
+            subject_type="gallery",
+            subject_id=gallery_id,
+            correlation_id=f"album:gallery:{gallery_id}:{draft_id}",
+        )
+    except Exception:
+        log.exception("album provenance failed for gallery %s draft %s", gallery_id, draft_id)
+
+
+def get_draft(draft_id: int) -> dict | None:
+    row = db.one("SELECT * FROM album_drafts WHERE id=?", (draft_id,))
+    return dict(row) if row else None
+
+
+def draft_placements(draft_id: int) -> list[dict]:
+    """The draft's placements joined to their asset (filename + gallery for thumbnails),
+    ordered by spread then slot — the layout a reviewer sees."""
+    rows = db.all_(
+        """SELECT p.asset_id, p.spread, p.slot, a.filename, a.gallery_id
+           FROM album_placements p JOIN assets a ON a.id = p.asset_id
+           WHERE p.album_draft_id=? ORDER BY p.spread, p.slot, p.id""",
+        (draft_id,),
+    )
+    return [dict(r) for r in rows]
+
+
+def list_drafts(gallery_id: int | None = None, status: str | None = None) -> list[dict]:
+    sql = """SELECT d.*, g.slug, g.title,
+                    (SELECT COUNT(*) FROM album_placements p WHERE p.album_draft_id=d.id)
+                        AS placement_count
+             FROM album_drafts d JOIN galleries g ON g.id = d.gallery_id WHERE 1=1"""
+    params: list = []
+    if gallery_id is not None:
+        sql += " AND d.gallery_id=?"
+        params.append(gallery_id)
+    if status:
+        sql += " AND d.status=?"
+        params.append(status)
+    sql += " ORDER BY d.created_at DESC, d.id DESC"
+    return [dict(r) for r in db.all_(sql, tuple(params))]
+
+
+def set_status(draft_id: int, status: str) -> None:
+    """Transition a draft's review state (draft -> approved/rejected). A human action; it
+    records the decision and prints/charges nothing. Raises on an unknown status."""
+    if status not in DRAFT_STATUSES:
+        raise ValueError(f"invalid album draft status: {status!r}")
+    db.run(
+        "UPDATE album_drafts SET status=?, updated_at=datetime('now') WHERE id=?",
+        (status, draft_id),
+    )

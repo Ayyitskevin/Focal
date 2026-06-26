@@ -22,8 +22,8 @@ router = APIRouter(prefix="/admin/ai-runs", dependencies=[Depends(security.requi
 
 _LIMIT = 500  # newest N runs — a ledger viewer, not a full dump
 
-_FILTERS = ["all", "vision", "offers", "content"]
-_CAP_LABEL = {"vision": "Vision", "offers": "Offers", "content": "Content"}
+_FILTERS = ["all", "vision", "offers", "content", "albums"]
+_CAP_LABEL = {"vision": "Vision", "offers": "Offers", "content": "Content", "albums": "Albums"}
 
 # Status -> badge styling. Non-OK statuses use a warm/alert palette so a failed or
 # rejected run stands out in the feed.
@@ -122,7 +122,7 @@ def _counts() -> dict:
     raw = db.all_(
         "SELECT capability FROM ai_runs ORDER BY created_at DESC, id DESC LIMIT ?", (_LIMIT,)
     )
-    counts = {"all": len(raw), "vision": 0, "offers": 0, "content": 0}
+    counts = {"all": len(raw), "vision": 0, "offers": 0, "content": 0, "albums": 0}
     for r in raw:
         if r["capability"] in counts:
             counts[r["capability"]] += 1
