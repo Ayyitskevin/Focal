@@ -122,6 +122,38 @@ class MockCaptionAdapter:
         )
 
 
+class MockAlbumAdapter:
+    """A deterministic ALBUMS challenger: proposes a trivial layout (each photo in its own
+    spread, in id order) so a test can assert exact, input-derived provenance without a
+    real Mnemosyne backend. The proposal is metadata-shaped only — the deterministic
+    validator in app/albums still owns correctness; this never writes a draft."""
+
+    capability = Capability.ALBUMS
+    name = "mock"
+
+    def __init__(self, *, enabled: bool = True) -> None:
+        self.enabled = enabled
+
+    def is_enabled(self) -> bool:
+        return self.enabled
+
+    def propose_album(self, gallery_id: int, asset_ids: list[int] | None = None) -> ProviderResult:
+        if not self.enabled:
+            return ProviderResult.disabled(self.capability, self.name)
+        ids = sorted(asset_ids or [])
+        placements = [{"asset_id": a, "spread": i, "slot": 0} for i, a in enumerate(ids)]
+        return ProviderResult(
+            capability=self.capability,
+            provider=self.name,
+            status=ResultStatus.OK,
+            review=ReviewRequirement.HUMAN_REVIEW,
+            output={"placements": placements, "spread_count": len(placements)},
+            model="mock-albums-1",
+            latency_ms=0,
+            cost_usd=0.0,
+        )
+
+
 class FailingAdapter:
     """A provider that always fails — used to prove failures stay non-mutating.
 
@@ -150,4 +182,7 @@ class FailingAdapter:
         return self._fail()
 
     def draft(self, ctx: dict) -> ProviderResult:
+        return self._fail()
+
+    def propose_album(self, gallery_id: int, asset_ids: list[int] | None = None) -> ProviderResult:
         return self._fail()
