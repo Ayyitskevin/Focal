@@ -16,6 +16,7 @@ states context, the decision, consequences, measured reopen criteria, and altern
 | [0009](0009-album-layout-deterministic-validator.md) | Mnemosyne albums: a deterministic layout validator owns correctness | Accepted |
 | [0010](0010-validation-scoring-promotion-gate.md) | Validation-scoring harness: a deterministic promotion gate | Accepted |
 | [0011](0011-album-proposer-and-review-workflow.md) | Mnemosyne albums: deterministic baseline proposer + human review workflow | Accepted |
+| [0012](0012-offer-approval-state.md) | Plutus offers: persisted operator approve/reject state | Accepted |
 
 See also [`../MISE-SOLO-STUDIO-OS.md`](../MISE-SOLO-STUDIO-OS.md),
 [`../REPO-CONSOLIDATION-MATRIX.md`](../REPO-CONSOLIDATION-MATRIX.md),
