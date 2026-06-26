@@ -182,7 +182,7 @@ def test_csv_includes_decision_column(admin_client):
     done, _ = _seed_offers()
     admin_client.post(f"/admin/offers/{done}/approve")
     text = admin_client.get("/admin/offers.csv").text
-    assert "Status,Decision,Bundles" in text
+    assert "Status,Decision,Sent,Bundles" in text
     assert "approved" in text
 
 

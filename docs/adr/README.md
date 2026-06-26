@@ -22,6 +22,7 @@ states context, the decision, consequences, measured reopen criteria, and altern
 | [0015](0015-ai-cost-report.md) | AI cost & activity report: COGS monitoring over the ledger | Accepted |
 | [0016](0016-vision-cutover-seam.md) | Vision cutover seam: interlocked production-provider selection | Accepted |
 | [0017](0017-qwen-production-writeback-scaffold.md) | Qwen vision production-writeback (dormant scaffold) | Accepted |
+| [0018](0018-offer-send-money-path-boundary.md) | Offer send: deliver the link, never touch the money path | Accepted |
 
 See also the operator runbook [`../MISE-SOLO-STUDIO-OS-RUNBOOK.md`](../MISE-SOLO-STUDIO-OS-RUNBOOK.md)
 (how to run it day to day), [`../MISE-SOLO-STUDIO-OS.md`](../MISE-SOLO-STUDIO-OS.md),

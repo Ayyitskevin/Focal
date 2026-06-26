@@ -63,12 +63,21 @@ nothing until you set the relevant flag. Flags live in flow's `.env`
 - **Surface:** `/admin/offers` — a triage queue. Approve the offers worth pursuing, reject
   the rest (persisted; migration 068). Filter by status (ready/error) and by decision
   (undecided/approved/rejected). The header shows **proposed** vs **approved** pipeline value.
-- **Arm:** `MISE_PLUTUS_URL` + `MISE_PLUTUS_TOKEN`. Optional Phase-3 facade provenance into
-  the ledger: `MISE_PROVIDER_FACADE_OFFERS=true` (legacy path runs unchanged when off).
-- **Bounded:** approving records your call only — it never sends the offer, charges, or makes
-  an invoice. Edit the offer in Plutus and share the link deliberately.
+- **Send (approved offers):** an approved offer with a client email on file shows **Send to
+  client** → a compose page with an editable draft (a warm note + the offer link only;
+  pricing stays on the offer page). You review/edit and click Send; it goes out through the
+  same Gmail path as proposals/invoices, is recorded in the email log, and the offer is
+  marked **Sent** (migration 069). Nothing auto-sends — the button only appears for a ready,
+  approved offer, and the email is a draft until you send it. ADR 0018.
+- **Arm:** `MISE_PLUTUS_URL` + `MISE_PLUTUS_TOKEN` (proposals). Sending also needs Gmail
+  configured (`MISE_GMAIL_USER` / `MISE_GMAIL_APP_PASSWORD`). Optional Phase-3 facade
+  provenance into the ledger: `MISE_PROVIDER_FACADE_OFFERS=true` (legacy path runs unchanged
+  when off).
+- **Bounded:** approving records your call; sending emails the **link** only. Neither charges
+  the client nor creates an invoice — acceptance flows through your existing, human-initiated
+  invoice workflow. The money path is never touched by an AI proposal.
 - **Rollback:** `MISE_PROVIDER_FACADE_OFFERS=false` reverts to the legacy path; clearing the
-  Plutus URL/token makes offers dormant.
+  Plutus URL/token makes offers dormant. Migration 069 is additive (see §6).
 
 ### Albums (Mnemosyne) — ADRs 0009, 0011
 
@@ -180,6 +189,7 @@ feature dormant changes nothing. Run via the app's normal `db.migrate()` on boot
 | `066_album_drafts.sql` | `album_drafts` + `album_placements` | `rollback/066_album_drafts.sql` |
 | `067_validation_set.sql` | `validation_items` + `validation_scores` | `rollback/067_validation_set.sql` |
 | `068_plutus_offer_decision.sql` | `galleries.plutus_offer_decision` + `…_decided_at` | `rollback/068…` (DROP COLUMN; SQLite ≥3.35) |
+| `069_plutus_offer_sent.sql` | `galleries.plutus_offer_sent_at` + `…_sent_to` | `rollback/069…` (DROP COLUMN; SQLite ≥3.35) |
 
 Each rollback is safe because the tables/columns are dormant and referenced by no money,
 invoice, or business record. Rolling a feature back is normally a **flag**, not a migration —
