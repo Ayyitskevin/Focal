@@ -96,6 +96,10 @@ nothing until you set the relevant flag. Flags live in flow's `.env`
   record-only: it prints nothing, contacts no vendor, and charges nothing — you place the
   order with your lab however you do today, and this captures the decision + spec (and an
   audit row) for the record. ADR 0019.
+- **Export (approved albums):** the Order block also offers a print-ready **Order sheet**
+  (`/admin/albums/{id}/order-sheet` — a standalone page you print or Save-as-PDF for the lab,
+  spec + every photo in spread/slot order) and a **CSV manifest** (`…/order.csv` — the
+  ordered file list). Read-only; no PDF dependency (the browser does the PDF).
 - **Arm:** nothing to arm — the baseline proposer is always available. The deterministic
   validator guarantees a draft never silently omits, duplicates, or misassigns a photo, and
   refuses to store one that would.
