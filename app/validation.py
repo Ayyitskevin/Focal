@@ -270,7 +270,7 @@ def shadow_candidates(capability: str = "vision") -> list[dict]:
     """
     rows = db.all_(
         """SELECT r.subject_id AS gallery_id, g.slug, g.title,
-                  COUNT(*) AS runs, MAX(r.created_at) AS last_shadow
+                  COUNT(DISTINCT r.correlation_id) AS runs, MAX(r.created_at) AS last_shadow
            FROM ai_runs r JOIN galleries g ON g.id = r.subject_id
            WHERE r.capability = ? AND r.subject_type = 'gallery'
                  AND r.correlation_id LIKE 'shadow:%'

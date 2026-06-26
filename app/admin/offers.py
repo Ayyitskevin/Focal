@@ -132,10 +132,10 @@ def _rows(status: str, decision: str = "any") -> list[dict]:
 
 
 def _counts() -> dict:
+    # Count over the WHOLE offer set (no LIMIT) so the filter-tab counts and the pipeline
+    # totals describe the same population; only the listing in _rows is capped at _LIMIT.
     raw = db.all_(
-        "SELECT plutus_last_status AS s FROM galleries WHERE plutus_last_status IS NOT NULL "
-        "ORDER BY plutus_last_at DESC, id DESC LIMIT ?",
-        (_LIMIT,),
+        "SELECT plutus_last_status AS s FROM galleries WHERE plutus_last_status IS NOT NULL"
     )
     counts = {"all": len(raw), "done": 0, "error": 0}
     for r in raw:
@@ -146,9 +146,7 @@ def _counts() -> dict:
 
 def _decision_counts() -> dict:
     raw = db.all_(
-        "SELECT plutus_offer_decision AS d FROM galleries WHERE plutus_last_status IS NOT NULL "
-        "ORDER BY plutus_last_at DESC, id DESC LIMIT ?",
-        (_LIMIT,),
+        "SELECT plutus_offer_decision AS d FROM galleries WHERE plutus_last_status IS NOT NULL"
     )
     counts = {"any": len(raw), "undecided": 0, "approved": 0, "rejected": 0}
     for r in raw:

@@ -124,6 +124,42 @@ def test_argus_adapter_provider_error(monkeypatch):
     assert r.output is None
 
 
+def test_argus_adapter_maps_nontyped_exception_to_provider_error(monkeypatch):
+    # an unexpected (non-ArgusAnalyzeError) failure — e.g. a raw sqlite error from the
+    # trigger's unguarded DB read — must become a PROVIDER_ERROR result, never escape.
+    monkeypatch.setattr(argus_analyze, "is_enabled", lambda: True)
+
+    def boom(gid, skip_dedup=False):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(argus_analyze, "trigger_gallery_analyze", boom)
+    r = adapters.LegacyArgusVisionAdapter().analyze_gallery(5)
+    assert r.status is ResultStatus.PROVIDER_ERROR
+    assert "locked" in r.error and r.output is None
+
+
+def test_plutus_adapter_maps_nontyped_exception_to_provider_error(monkeypatch):
+    monkeypatch.setattr(plutus_recommend, "is_enabled", lambda: True)
+
+    def boom(gid):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(plutus_recommend, "trigger_gallery_recommend", boom)
+    r = adapters.LegacyPlutusOffersAdapter().recommend_gallery(3)
+    assert r.status is ResultStatus.PROVIDER_ERROR and "locked" in r.error
+
+
+def test_caption_adapter_maps_nontyped_exception_to_provider_error(monkeypatch):
+    monkeypatch.setattr(caption_ai, "is_enabled", lambda: True)
+
+    def boom(ctx):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(caption_ai, "draft_caption", boom)
+    r = adapters.LegacyOdysseusCaptionAdapter().draft({"label": "x"})
+    assert r.status is ResultStatus.PROVIDER_ERROR and "kaboom" in r.error
+
+
 def test_argus_adapter_invalid_response(monkeypatch):
     monkeypatch.setattr(argus_analyze, "is_enabled", lambda: True)
     monkeypatch.setattr(

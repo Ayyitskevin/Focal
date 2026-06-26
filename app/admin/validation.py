@@ -148,44 +148,45 @@ async def add_item(request: Request):
     return _redirect(msg="Added to the validation set.")
 
 
-def _maybe_score(item_id: int, raw, *, provider: str, model: str) -> bool:
-    """Record one score if a value was entered; returns True on a successful write. Raises
-    ValueError (incl. validation.ScoreError) on a malformed/out-of-range value."""
+def _parse_score(raw):
+    """Parse an optional score field: None if blank, else a float in [0, 1]. Raises
+    ValueError on a malformed/out-of-range value. Pure — does not write."""
     raw = (raw or "").strip()
     if raw == "":
-        return False
-    score = float(raw)  # ValueError -> caller surfaces it
-    validation.record_score(item_id, provider, model, score)
-    return True
+        return None
+    score = float(raw)  # ValueError on non-numeric
+    if not (validation.SCORE_MIN <= score <= validation.SCORE_MAX):
+        raise ValueError(f"score {score} out of range")
+    return score
 
 
 @router.post("/items/{item_id}/scores")
 async def record_scores(request: Request, item_id: int):
     """Record the human quality score for the baseline and/or challenger on one item.
 
-    Either field may be left blank (score only one side now, the other later). An
-    out-of-range or non-numeric value is rejected with a message — never silently stored.
+    Either field may be left blank (score only one side now, the other later). BOTH values
+    are parsed and range-checked up front, before any write — so a bad value on one side
+    rejects the whole submission and stores nothing, keeping the error message honest
+    (no partial write masked as a full failure).
     """
     db.get_or_404("SELECT id FROM validation_items WHERE id=?", (item_id,), detail="No such item")
     form = await request.form()
     try:
-        wrote = _maybe_score(
-            item_id,
-            form.get("baseline_score"),
-            provider=_VISION["baseline_provider"],
-            model=_VISION["baseline"],
-        )
-        wrote = (
-            _maybe_score(
-                item_id,
-                form.get("challenger_score"),
-                provider=_VISION["challenger_provider"],
-                model=_VISION["challenger"],
-            )
-            or wrote
-        )
+        baseline = _parse_score(form.get("baseline_score"))
+        challenger = _parse_score(form.get("challenger_score"))
     except (ValueError, validation.ScoreError):
         return _redirect(err="Scores must be numbers between 0.00 and 1.00.")
+    wrote = False
+    if baseline is not None:
+        validation.record_score(
+            item_id, _VISION["baseline_provider"], _VISION["baseline"], baseline
+        )
+        wrote = True
+    if challenger is not None:
+        validation.record_score(
+            item_id, _VISION["challenger_provider"], _VISION["challenger"], challenger
+        )
+        wrote = True
     return _redirect(msg="Score saved." if wrote else "No score entered.")
 
 

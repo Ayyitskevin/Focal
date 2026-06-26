@@ -117,6 +117,32 @@ def test_facade_off_is_legacy_with_no_provenance(tmp_path, monkeypatch):
     assert n == 0
 
 
+def test_facade_ledger_failure_is_isolated_from_business_write(tmp_path, monkeypatch):
+    """A ledger (ai_runs.record) failure must NOT break the offers job: the authoritative
+    plutus_last_* write still lands, and the exception is swallowed so the background job
+    does not retry and re-issue the Plutus call (which would duplicate offer drafts)."""
+    from app import ai_runs
+
+    _configure_tmp_db(tmp_path, monkeypatch)
+    _arm_plutus(monkeypatch)
+    monkeypatch.setattr(config, "PROVIDER_FACADE_OFFERS", True)
+    gid = _published_gallery()
+    _mock_plutus_response(monkeypatch, _PAYLOAD)
+
+    def boom(*a, **k):
+        raise RuntimeError("ledger down")
+
+    monkeypatch.setattr(ai_runs, "record", boom)
+    # must not raise
+    plutus_recommend.run_for_gallery(gid)
+
+    # business state still recorded from the same (successful) provider result
+    row = db.one("SELECT plutus_last_run_id, plutus_last_status FROM galleries WHERE id=?", (gid,))
+    assert row["plutus_last_run_id"] == 12 and row["plutus_last_status"] == "done"
+    # and the ledger row was simply skipped, not half-written
+    assert db.one("SELECT COUNT(*) AS n FROM ai_runs WHERE subject_id=?", (gid,))["n"] == 0
+
+
 def test_facade_on_provider_error_records_error_row(tmp_path, monkeypatch):
     _configure_tmp_db(tmp_path, monkeypatch)
     _arm_plutus(monkeypatch)

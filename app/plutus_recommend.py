@@ -164,21 +164,28 @@ def _run_via_facade(gallery_id: int) -> None:
     from . import ai_runs, providers
 
     pr = providers.resolve(providers.Capability.OFFERS).recommend_gallery(gallery_id)
-    ai_runs.record(pr, subject_type="gallery", subject_id=gallery_id)
+    # Record the authoritative business state FIRST (the adapter is non-mutating and never
+    # raises — see adapters.py). The ledger write comes after and is best-effort, so a
+    # provenance failure can neither skip the plutus_last_* write nor cause the background
+    # job to retry and re-issue the Plutus call (which would duplicate offer drafts).
     if not pr.ok:
         log.warning("plutus recommend failed for gallery %s (facade): %s", gallery_id, pr.error)
         _record(gallery_id, status="error", error=pr.error)
-        return
-    out = pr.output or {}
-    _record(
-        gallery_id,
-        status="done",
-        run_id=int(out["run_id"]) if out.get("run_id") is not None else None,
-        review_url=out.get("review_url"),
-        pitch_url=out.get("pitch_url"),
-        bundle_count=out.get("bundle_count"),
-        estimated_total_cents=out.get("estimated_total_cents"),
-    )
+    else:
+        out = pr.output or {}
+        _record(
+            gallery_id,
+            status="done",
+            run_id=int(out["run_id"]) if out.get("run_id") is not None else None,
+            review_url=out.get("review_url"),
+            pitch_url=out.get("pitch_url"),
+            bundle_count=out.get("bundle_count"),
+            estimated_total_cents=out.get("estimated_total_cents"),
+        )
+    try:
+        ai_runs.record(pr, subject_type="gallery", subject_id=gallery_id)
+    except Exception:
+        log.exception("plutus offer provenance failed for gallery %s", gallery_id)
 
 
 def run_for_gallery(gallery_id: int) -> None:
