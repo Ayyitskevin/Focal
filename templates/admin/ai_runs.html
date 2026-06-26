@@ -25,9 +25,7 @@
     {% endfor %}
   </div>
 
-  {% if events %}
-  <section class="audit-feed">
-    {% for e in events %}
+  {% macro run_row(e) %}
     <div class="audit-row">
       <span class="audit-ic" aria-hidden="true"
             style="background:{{ e.status_bg }};color:{{ e.status_color }}">{{ e.capability[0]|upper }}</span>
@@ -48,6 +46,19 @@
         </div>
       </div>
     </div>
+  {% endmacro %}
+
+  {% if items %}
+  <section class="audit-feed">
+    {% for it in items %}
+      {% if it.kind == 'group' %}
+      <div class="airuns-shadow" style="border-left:3px solid #2f6d8a; padding-left:.5rem; margin:.4rem 0">
+        <div class="muted" style="font-size:.8rem; margin:.15rem 0">⇄ Shadow comparison{% if it.runs[0].subject %} · {{ it.runs[0].subject }}{% endif %}</div>
+        {% for e in it.runs %}{{ run_row(e) }}{% endfor %}
+      </div>
+      {% else %}
+      {{ run_row(it.run) }}
+      {% endif %}
     {% endfor %}
   </section>
   {% else %}

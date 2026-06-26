@@ -61,14 +61,14 @@ def _rows(capability: str) -> list[dict]:
     if capability != "all":
         raw = db.all_(
             """SELECT capability, provider, status, review, model, latency_ms, cost_usd,
-                      tokens, error, subject_type, subject_id, created_at
+                      tokens, error, subject_type, subject_id, correlation_id, created_at
                FROM ai_runs WHERE capability=? ORDER BY created_at DESC, id DESC LIMIT ?""",
             (capability, _LIMIT),
         )
     else:
         raw = db.all_(
             """SELECT capability, provider, status, review, model, latency_ms, cost_usd,
-                      tokens, error, subject_type, subject_id, created_at
+                      tokens, error, subject_type, subject_id, correlation_id, created_at
                FROM ai_runs ORDER BY created_at DESC, id DESC LIMIT ?""",
             (_LIMIT,),
         )
@@ -89,10 +89,33 @@ def _rows(capability: str) -> list[dict]:
                 "metrics": _metrics(r["latency_ms"], r["cost_usd"], r["tokens"]),
                 "subject": _subject(r["subject_type"], r["subject_id"]),
                 "error": r["error"] or "",
+                "correlation_id": r["correlation_id"],
                 "created_at": r["created_at"],
             }
         )
     return out
+
+
+def _group(rows: list[dict]) -> list[dict]:
+    """Fold runs sharing a correlation_id into one comparison item (e.g. a vision shadow
+    pair: legacy Argus + the challenger), preserving newest-first order. Runs with no
+    correlation_id — or a lone correlated run — render as singles."""
+    items: list[dict] = []
+    index: dict[str, int] = {}
+    for r in rows:
+        cid = r.get("correlation_id")
+        if cid:
+            if cid in index:
+                items[index[cid]]["runs"].append(r)
+            else:
+                index[cid] = len(items)
+                items.append({"kind": "group", "correlation_id": cid, "runs": [r]})
+        else:
+            items.append({"kind": "single", "run": r})
+    for i, it in enumerate(items):
+        if it["kind"] == "group" and len(it["runs"]) == 1:
+            items[i] = {"kind": "single", "run": it["runs"][0]}
+    return items
 
 
 def _counts() -> dict:
@@ -123,7 +146,7 @@ async def ai_runs_view(request: Request, cap: str = "all"):
     return templates.TemplateResponse(
         request,
         "admin/ai_runs.html",
-        {"events": _rows(cap), "filters": filters, "cap": cap, "total": counts["all"]},
+        {"items": _group(_rows(cap)), "filters": filters, "cap": cap, "total": counts["all"]},
     )
 
 

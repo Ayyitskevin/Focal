@@ -93,6 +93,29 @@ def test_ai_runs_view_capability_filter(admin_client):
     assert "Content · odysseus" not in vision_only
 
 
+def test_shadow_pair_renders_as_grouped_comparison(admin_client):
+    corr = "shadow:gallery:5:42"
+    for provider, model, latency in (("argus", "argus", 100), ("qwen3-vl", "qwen3-vl:32b", 40)):
+        ai_runs.record(
+            ProviderResult(
+                capability=Capability.VISION,
+                provider=provider,
+                status=ResultStatus.OK,
+                review=ReviewRequirement.HUMAN_REVIEW,
+                output={"run_id": 42},
+                model=model,
+                latency_ms=latency,
+                cost_usd=0.0,
+            ),
+            subject_type="gallery",
+            subject_id=5,
+            correlation_id=corr,
+        )
+    body = admin_client.get("/admin/ai-runs").text
+    assert "Shadow comparison" in body
+    assert "Vision · argus" in body and "Vision · qwen3-vl" in body
+
+
 def test_ai_runs_csv_export(admin_client):
     _seed_runs()
     r = admin_client.get("/admin/ai-runs.csv")

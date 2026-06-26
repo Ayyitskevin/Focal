@@ -10,7 +10,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from . import config, db
+from . import config, db, features
 
 log = logging.getLogger("mise.platekit")
 
@@ -65,6 +65,41 @@ def _record(
             gallery_id,
         ),
     )
+    _record_provenance(gallery_id, status, error)
+
+
+def _record_provenance(gallery_id: int, status: str, error: str | None) -> None:
+    """Phase 4: log each Dionysus pack-draft outcome to the ai_runs ledger (CONTENT
+    capability) when the content facade flag is armed. Additive and gated — default off
+    leaves behavior unchanged. Maps the platekit status onto the normalized contract:
+    done/queued -> OK, skipped (no client slug, no call) -> DISABLED, else -> error."""
+    if not features.content_provider_facade_enabled():
+        return
+    from . import ai_runs
+    from .providers import Capability, ProviderResult, ResultStatus, ReviewRequirement
+
+    if status in ("done", "queued"):
+        pr = ProviderResult(
+            capability=Capability.CONTENT,
+            provider="dionysus",
+            status=ResultStatus.OK,
+            review=ReviewRequirement.HUMAN_REVIEW,
+            output={"pack_status": status},
+            model="dionysus",
+        )
+    elif status == "skipped":
+        pr = ProviderResult.disabled(Capability.CONTENT, "dionysus")
+    else:
+        pr = ProviderResult.failure(
+            Capability.CONTENT,
+            "dionysus",
+            ResultStatus.PROVIDER_ERROR,
+            error or f"dionysus pack {status}",
+        )
+    try:
+        ai_runs.record(pr, subject_type="gallery", subject_id=gallery_id)
+    except Exception:
+        log.exception("dionysus provenance record failed for gallery %s", gallery_id)
 
 
 def packs_for_client(client, *, include_drafts: bool = False) -> dict:
