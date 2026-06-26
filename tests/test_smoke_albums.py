@@ -123,3 +123,69 @@ def test_validate_layout_surfaces_omitted_against_live_gallery(tmp_path, monkeyp
     a1, a2 = _asset(gid), _asset(gid)
     v = albums.validate_layout(gid, [{"asset_id": a1, "spread": 0, "slot": 0}])
     assert v.ok and v.omitted == (a2,)
+
+
+# ── proposer + draft lifecycle ───────────────────────────────────────────────────
+
+
+def test_propose_draft_persists_baseline_and_logs_provenance(tmp_path, monkeypatch):
+    _configure_tmp_db(tmp_path, monkeypatch)
+    gid = _gallery()
+    a1, a2, a3 = _asset(gid), _asset(gid), _asset(gid)
+    draft_id = albums.propose_draft(gid, per_spread=2)
+    assert draft_id is not None
+
+    draft = albums.get_draft(draft_id)
+    assert draft["status"] == "draft" and draft["provider"] == "internal"
+    placed = [p["asset_id"] for p in albums.draft_placements(draft_id)]
+    assert placed == [a1, a2, a3]  # every ready photo laid out, in id order
+    # provenance landed in the ledger under the albums capability
+    row = db.one(
+        "SELECT capability, provider, review FROM ai_runs WHERE subject_type='gallery' AND subject_id=?",
+        (gid,),
+    )
+    assert row["capability"] == "albums" and row["review"] == "human_review"
+
+
+def test_propose_draft_none_when_no_eligible_photos(tmp_path, monkeypatch):
+    _configure_tmp_db(tmp_path, monkeypatch)
+    gid = _gallery()
+    _asset(gid, kind="video")  # not a photo
+    _asset(gid, status="pending")  # not ready
+    assert albums.propose_draft(gid) is None
+    assert db.one("SELECT COUNT(*) AS n FROM album_drafts")["n"] == 0
+
+
+def test_propose_draft_prefers_registered_provider(tmp_path, monkeypatch):
+    from app.providers import Capability, mocks, registry
+
+    _configure_tmp_db(tmp_path, monkeypatch)
+    gid = _gallery()
+    _asset(gid)
+    _asset(gid)
+    with registry.use(Capability.ALBUMS, mocks.MockAlbumAdapter()):
+        draft_id = albums.propose_draft(gid)
+    assert albums.get_draft(draft_id)["provider"] == "mock"
+
+
+def test_set_status_transitions_and_lists(tmp_path, monkeypatch):
+    _configure_tmp_db(tmp_path, monkeypatch)
+    gid = _gallery()
+    _asset(gid)
+    draft_id = albums.propose_draft(gid)
+    albums.set_status(draft_id, "approved")
+    assert albums.get_draft(draft_id)["status"] == "approved"
+    assert [d["id"] for d in albums.list_drafts(status="approved")] == [draft_id]
+    assert albums.list_drafts(status="rejected") == []
+
+
+def test_set_status_rejects_unknown(tmp_path, monkeypatch):
+    _configure_tmp_db(tmp_path, monkeypatch)
+    gid = _gallery()
+    _asset(gid)
+    draft_id = albums.propose_draft(gid)
+    try:
+        albums.set_status(draft_id, "shipped")
+        raise AssertionError("expected ValueError")
+    except ValueError:
+        pass

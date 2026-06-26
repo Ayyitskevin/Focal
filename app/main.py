@@ -17,6 +17,7 @@ from . import alerts, bootstrap, config, csrf, db, jobs, ratelimit, scheduler, s
 from .admin import (
     activity,
     ai_runs,
+    albums,
     audit,
     auth,
     content,
@@ -208,6 +209,7 @@ for r in (
     ai_runs.router,
     offers.router,
     validation.router,
+    albums.router,
     inbox.router,
     settings.router,
     financials.router,
