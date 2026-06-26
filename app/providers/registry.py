@@ -104,3 +104,56 @@ def reset() -> None:
     """Drop all overrides and challengers — restores the legacy default everywhere."""
     _overrides.clear()
     _challengers.clear()
+
+
+# ── production provider selection (the vision cutover seam) ──────────────────────
+
+# Names an operator may set MISE_VISION_PROVIDER to, mapped to a factory. Aliases let the
+# config read naturally ('qwen'/'challenger' both mean the Qwen3-VL adapter).
+_VISION_PROVIDER_FACTORIES = {
+    "argus": LegacyArgusVisionAdapter,
+    "qwen3-vl": InternalVisionChallengerAdapter,
+    "qwen": InternalVisionChallengerAdapter,
+    "challenger": InternalVisionChallengerAdapter,
+}
+_VISION_DEFAULT = "argus"
+
+
+def active_vision_provider(requested: str | None = None) -> dict:
+    """Resolve which provider serves PRODUCTION vision, with a hard interlock.
+
+    ``requested`` defaults to ``config.VISION_PROVIDER``. A provider is honored only if it
+    is known, declares ``serves_production``, AND is configured/enabled; otherwise this
+    falls back to Argus and says why. Returns ``{requested, effective, eligible, reason}``.
+
+    This is the seam the live vision trigger will consult once a production-capable
+    challenger exists; today it enforces the interlock and surfaces the promotion status, so
+    a flag pointing at an eval-only/unconfigured provider can NEVER quietly route production
+    into a non-writeback path. The challenger is eval-only (``serves_production = False``)
+    until it has an asset-writeback path.
+    """
+    from .. import config
+
+    req = (requested if requested is not None else config.VISION_PROVIDER) or _VISION_DEFAULT
+    req = req.strip().lower()
+
+    def _fallback(reason: str) -> dict:
+        return {"requested": req, "effective": _VISION_DEFAULT, "eligible": False, "reason": reason}
+
+    factory = _VISION_PROVIDER_FACTORIES.get(req)
+    if factory is None:
+        return _fallback(f"unknown vision provider {req!r}; using {_VISION_DEFAULT}")
+    adapter = factory()
+    name = getattr(adapter, "name", req)
+    if not getattr(adapter, "serves_production", False):
+        return _fallback(
+            f"{name} is eval-only (no production writeback yet); using {_VISION_DEFAULT}"
+        )
+    if not adapter.is_enabled():
+        return _fallback(f"{name} is not configured; using {_VISION_DEFAULT}")
+    return {
+        "requested": req,
+        "effective": name,
+        "eligible": True,
+        "reason": f"{name} serves production",
+    }

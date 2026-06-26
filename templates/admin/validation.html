@@ -60,6 +60,13 @@
         <ul style="margin:.3rem 0 .1rem; padding-left:1.1rem; font-size:.85rem">
           {% for r in report.reasons %}<li>{{ r }}</li>{% endfor %}
         </ul>
+        <div class="muted" style="margin:.35rem 0 .1rem; font-size:.82rem">
+          Production provider: <b>{{ promotion.effective }}</b>
+          {% if not promotion.eligible and promotion.requested != promotion.effective %}
+            · requested <code>{{ promotion.requested }}</code> not honored — {{ promotion.reason }}
+          {% endif %}
+          {% if not report.ready %}· gate not ready{% endif %}
+        </div>
       </div>
     </div>
   </section>

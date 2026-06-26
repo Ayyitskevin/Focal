@@ -470,3 +470,50 @@ def test_registry_reset_clears_overrides():
     registry._overrides[Capability.OFFERS] = mocks.MockOffersAdapter()
     registry.reset()
     assert isinstance(registry.resolve(Capability.OFFERS), adapters.LegacyPlutusOffersAdapter)
+
+
+# ── vision cutover seam: production-provider selection interlock ───────────────
+
+
+def test_active_vision_provider_defaults_to_argus(monkeypatch):
+    from app import argus_analyze, config
+
+    monkeypatch.setattr(config, "VISION_PROVIDER", "argus")
+    monkeypatch.setattr(argus_analyze, "is_enabled", lambda: True)
+    p = registry.active_vision_provider()
+    assert p["effective"] == "argus" and p["eligible"] is True
+
+
+def test_active_vision_provider_argus_unconfigured_is_ineligible_but_still_default(monkeypatch):
+    from app import argus_analyze, config
+
+    monkeypatch.setattr(config, "VISION_PROVIDER", "argus")
+    monkeypatch.setattr(argus_analyze, "is_enabled", lambda: False)
+    p = registry.active_vision_provider()
+    # falls back to the argus default and says it's not configured — never errors
+    assert p["effective"] == "argus" and p["eligible"] is False and "not configured" in p["reason"]
+
+
+def test_active_vision_provider_refuses_eval_only_challenger(monkeypatch):
+    # the challenger is serves_production=False -> selecting it must NOT route production to it
+    p = registry.active_vision_provider("qwen")
+    assert p["requested"] == "qwen"
+    assert p["effective"] == "argus" and p["eligible"] is False
+    assert "eval-only" in p["reason"]
+
+
+def test_active_vision_provider_unknown_falls_back(monkeypatch):
+    p = registry.active_vision_provider("totally-made-up")
+    assert p["effective"] == "argus" and p["eligible"] is False
+    assert "unknown" in p["reason"]
+
+
+def test_active_vision_provider_honors_a_production_capable_challenger(monkeypatch):
+    # prove the interlock is a real switch, not a hardcoded refusal: a challenger that
+    # declares serves_production AND is enabled is honored.
+    from app.providers.vision_challenger import InternalVisionChallengerAdapter
+
+    monkeypatch.setattr(InternalVisionChallengerAdapter, "serves_production", True, raising=False)
+    monkeypatch.setattr(InternalVisionChallengerAdapter, "is_enabled", lambda self: True)
+    p = registry.active_vision_provider("qwen")
+    assert p["effective"] == "qwen3-vl" and p["eligible"] is True
