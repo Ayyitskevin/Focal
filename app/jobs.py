@@ -17,6 +17,7 @@ from . import (
     notion_sync,
     plutus_recommend,
     presets,
+    qwen_writeback,
     video,
     vision_shadow,
 )
@@ -156,6 +157,10 @@ HANDLERS = {
     # Phase 2 vision shadow: ledger-only challenger comparison (no asset writes, inert
     # unless MISE_VISION_SHADOW is armed and a challenger is registered).
     "vision_shadow_gallery": lambda p: vision_shadow.run_for_gallery(p["gallery_id"]),
+    # Vision cutover (dormant): production Qwen writeback. writeback_gallery is itself
+    # interlocked — a no-op unless Qwen is the eligible production provider — so this handler
+    # mutates nothing until promotion is a deliberate flag + code change (ADR 0017).
+    "qwen_writeback_gallery": lambda p: qwen_writeback.writeback_gallery(p["gallery_id"]),
 }
 
 

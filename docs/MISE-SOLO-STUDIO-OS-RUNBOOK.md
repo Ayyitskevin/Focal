@@ -115,6 +115,26 @@ human-scored and never automatic (ADR 0010).
 
 Tune the bar without code via `MISE_VALIDATION_MIN_PAIRED` / `MISE_VALIDATION_PARITY_MARGIN`.
 
+### 3.1 Executing the cutover — `/admin/vision-cutover` (ADRs 0016, 0017)
+
+When the gate is green, `/admin/vision-cutover` is the cockpit that turns promotion from
+"remember four steps" into a checklist. It shows a **readiness checklist** (each remaining
+condition + the exact next step), an asset-safe **dry-run preview** (Qwen's parsed per-photo
+signals for a gallery, *written nowhere* — the prompt-tuning loop), and a manual **writeback**
+the interlock refuses until Qwen is promoted. It flips nothing itself. The remaining steps it
+tracks, in order:
+
+1. **Endpoint** — `MISE_VISION_CHALLENGER_URL` points at the trusted local Qwen endpoint.
+2. **Tune + writeback** — dry-run a few galleries on the page, adjust `STRUCTURED_PROMPT`
+   until the parsed signals look right, then (a reviewed code change) set
+   `InternalVisionChallengerAdapter.serves_production = True`.
+3. **Flag** — set `MISE_VISION_PROVIDER=qwen`.
+4. **Gate** — the validation gate (§3) is green.
+
+When all four hold, the interlock makes Qwen the eligible production provider and the writeback
+runs when triggered. **Rollback is the flag** — set `MISE_VISION_PROVIDER=argus` (or revert
+`serves_production`); Argus assets are re-writeable from its last run.
+
 ---
 
 ## 4. Notion API modernization
@@ -137,6 +157,7 @@ arm it. The controlled cutover to `2025-09-03` (data-source model) is its own ru
 | `MISE_VISION_CHALLENGER_TOKEN` | — | Auth token for the endpoint, if needed |
 | `MISE_VISION_CHALLENGER_TIMEOUT` | `120` | Per-call timeout (s) |
 | `MISE_VISION_CHALLENGER_MAX_IMAGES` | `4` | Cap on downsized web derivatives sent per gallery (data minimization) |
+| `MISE_VISION_PROVIDER` | `argus` | Which provider serves **production** vision. `qwen` is honored only once the interlock is satisfied (see §3.1); otherwise it falls back to Argus and logs why |
 | `MISE_VALIDATION_MIN_PAIRED` | `20` | Paired scores required before the gate evaluates parity |
 | `MISE_VALIDATION_PARITY_MARGIN` | `0.0` | How far the challenger must clear the baseline (0 = parity) |
 | `MISE_PROVIDER_FACADE_OFFERS` | `false` | Route Plutus offers through the facade + ledger provenance |
