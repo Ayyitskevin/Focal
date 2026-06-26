@@ -27,6 +27,10 @@
       <span style="color:#7C2F38">⚠ {{ issues|length }} issue{{ "s" if issues|length != 1 }} — see below</span>
     {% endif %}
 
+    {% if draft.ordered_at %}
+    <span class="audit-amount" style="background:#e7eef2;color:#2f6d8a">Ordered {{ draft.ordered_at | localtime }}</span>
+    {% endif %}
+
     {% if draft.status == 'draft' %}
     <form method="post" action="/admin/albums/{{ draft.id }}/approve" style="display:inline">
       <button type="submit" style="padding:.35rem .9rem; background:#2f7d57; color:#fff; border:none; border-radius:6px; cursor:pointer">Approve</button>
@@ -37,6 +41,46 @@
     </form>
     {% endif %}
   </div>
+
+  {% if draft.status == 'approved' %}
+  <section style="margin:.6rem 0; padding:.6rem .8rem; border:1px solid #e2e6e8; border-radius:8px; background:#fbfcfc">
+    <div style="display:flex; gap:.6rem; align-items:center; flex-wrap:wrap; margin-bottom:.35rem">
+      <b style="font-size:.92rem">Order</b>
+      {% if draft.ordered_at %}
+        <span class="audit-amount" style="background:#e7eef2;color:#2f6d8a">Ordered {{ draft.ordered_at | localtime }}</span>
+      {% else %}
+        <span class="muted" style="font-size:.8rem">not ordered yet — record the spec when you place it</span>
+      {% endif %}
+    </div>
+    <form method="post" action="/admin/albums/{{ draft.id }}/order"
+          style="display:flex; gap:.5rem; align-items:end; flex-wrap:wrap">
+      <label style="font-size:.78rem">Size<br>
+        <input name="size" value="{{ draft.order_size or '' }}" placeholder="e.g. 10×10"
+               style="padding:.3rem; width:8rem"></label>
+      <label style="font-size:.78rem">Cover<br>
+        <input name="cover" value="{{ draft.order_cover or '' }}" placeholder="e.g. linen"
+               style="padding:.3rem; width:9rem"></label>
+      <label style="font-size:.78rem">Notes<br>
+        <input name="notes" value="{{ draft.order_notes or '' }}" placeholder="optional"
+               style="padding:.3rem; width:16rem"></label>
+      <button type="submit" style="padding:.35rem .8rem; background:#2f6d8a; color:#fff; border:none; border-radius:6px; cursor:pointer">
+        {{ "Update order details" if draft.ordered_at else "Mark ordered" }}</button>
+    </form>
+    {% if draft.ordered_at %}
+    <div class="muted" style="font-size:.8rem; margin-top:.45rem">
+      Spec: {{ placement_count }} photo{{ "s" if placement_count != 1 }} · {{ spreads|length }} spread{{ "s" if spreads|length != 1 }}
+      {% if draft.order_size %} · {{ draft.order_size }}{% endif %}
+      {% if draft.order_cover %} · {{ draft.order_cover }}{% endif %}
+      {% if draft.order_notes %} · {{ draft.order_notes }}{% endif %}
+    </div>
+    <form method="post" action="/admin/albums/{{ draft.id }}/order/clear" style="margin-top:.35rem"
+          onsubmit="return confirm('Clear the order mark on this album?')">
+      <button type="submit" class="muted" style="padding:.25rem .6rem; background:none; border:1px solid #d3d9dc; border-radius:5px; cursor:pointer">Clear order mark</button>
+    </form>
+    {% endif %}
+    <div class="muted" style="font-size:.76rem; margin-top:.45rem">Record-only — this prints nothing, contacts no vendor, and charges nothing.</div>
+  </section>
+  {% endif %}
 
   {% if issues %}
   <ul style="margin:.3rem 0; padding-left:1.1rem; color:#7C2F38; font-size:.86rem">
@@ -75,9 +119,10 @@
   </section>
   {% endif %}
 
-  <p class="audit-note muted">Approving records your decision on this layout; it does not
-    print or order an album. The deterministic validator (re-run above against the
-    gallery's current photos) guarantees the draft never silently omits, duplicates, or
-    misassigns a photo.</p>
+  <p class="audit-note muted">Approving records your decision on this layout; marking it
+    ordered records the spec for your reference and prints/charges nothing (you place the
+    order with your lab however you do today). The deterministic validator (re-run above
+    against the gallery's current photos) guarantees the draft never silently omits,
+    duplicates, or misassigns a photo.</p>
 </main>
 {% endblock %}

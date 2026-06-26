@@ -65,6 +65,7 @@ def _rows(status: str) -> list[dict]:
                 "provider": d["provider"] or "",
                 "model": d["model"] or "",
                 "created_at": d["created_at"],
+                "ordered_at": d["ordered_at"],
             }
         )
     return out
@@ -184,3 +185,32 @@ async def reject(draft_id: int):
     albums.set_status(draft_id, "rejected")
     log.info("album draft %s rejected", draft_id)
     return _redirect(f"/admin/albums/{draft_id}", msg="Album rejected.")
+
+
+@router.post("/{draft_id}/order")
+async def order(request: Request, draft_id: int):
+    """Mark an approved album ordered with its spec — record-only (ADR 0019). Prints nothing,
+    hands off to no vendor, charges nothing."""
+    if not albums.get_draft(draft_id):
+        return _redirect("/admin/albums", err="No such album draft.")
+    form = await request.form()
+    try:
+        albums.mark_ordered(
+            draft_id,
+            size=form.get("size"),
+            cover=form.get("cover"),
+            notes=form.get("notes"),
+        )
+    except albums.OrderError as e:
+        return _redirect(f"/admin/albums/{draft_id}", err=str(e))
+    log.info("album draft %s marked ordered", draft_id)
+    return _redirect(f"/admin/albums/{draft_id}", msg="Album marked ordered.")
+
+
+@router.post("/{draft_id}/order/clear")
+async def order_clear(draft_id: int):
+    if not albums.get_draft(draft_id):
+        return _redirect("/admin/albums", err="No such album draft.")
+    albums.clear_order(draft_id)
+    log.info("album draft %s order cleared", draft_id)
+    return _redirect(f"/admin/albums/{draft_id}", msg="Order mark cleared.")

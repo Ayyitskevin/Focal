@@ -45,6 +45,7 @@
         </div>
         <div class="audit-detail">
           <span class="audit-amount" style="background:{{ d.status_bg }};color:{{ d.status_color }}">{{ d.status_label }}</span>
+          {% if d.ordered_at %}<span class="audit-amount" style="background:#e7eef2;color:#2f6d8a">Ordered</span>{% endif %}
           {{ d.placement_count }} photo{{ "s" if d.placement_count != 1 }} · {{ d.spread_count }} spread{{ "s" if d.spread_count != 1 }}
           {% if d.model %} · {{ d.model }}{% endif %}
         </div>
@@ -60,7 +61,7 @@
 
   <p class="audit-note muted">An album draft is a proposal in HUMAN_REVIEW state. The
     deterministic validator guarantees it never silently omits, duplicates, or misassigns a
-    photo; you decide whether to approve it. Approval records your decision — it does not
-    print or order anything.</p>
+    photo; you decide whether to approve it. Approval records your decision, and marking an
+    approved album ordered records its spec — neither prints, contacts a vendor, nor charges.</p>
 </main>
 {% endblock %}

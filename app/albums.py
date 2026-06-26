@@ -32,7 +32,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import ai_runs, db
+from . import ai_runs, audit, db
 from .providers import Capability, ProviderResult, ResultStatus, ReviewRequirement, registry
 
 log = logging.getLogger("mise.albums")
@@ -340,3 +340,63 @@ def set_status(draft_id: int, status: str) -> None:
         "UPDATE album_drafts SET status=?, updated_at=datetime('now') WHERE id=?",
         (status, draft_id),
     )
+
+
+class OrderError(ValueError):
+    """The album draft can't be ordered — e.g. it isn't approved. Non-mutating."""
+
+
+def mark_ordered(
+    draft_id: int,
+    *,
+    size: str | None = None,
+    cover: str | None = None,
+    notes: str | None = None,
+) -> None:
+    """Record that an APPROVED album draft was ordered, with its spec (size/cover/notes) —
+    the record-only fulfillment step (ADR 0019). It prints nothing, hands off to no vendor,
+    and charges nothing; the operator orders however they do today and this captures the
+    decision + spec for the record.
+
+    ``ordered_at`` is set on the first order and preserved on later spec edits, so the
+    original order date is stable. Raises :class:`OrderError` unless the draft is approved.
+    The column update and the audit row commit together.
+    """
+    draft = db.one("SELECT id, status, ordered_at FROM album_drafts WHERE id=?", (draft_id,))
+    if not draft:
+        raise OrderError(f"no album draft #{draft_id}")
+    if draft["status"] != "approved":
+        raise OrderError("only an approved album can be marked ordered")
+    size = (size or "").strip() or None
+    cover = (cover or "").strip() or None
+    notes = (notes or "").strip() or None
+    first_order = draft["ordered_at"] is None
+    with db.tx() as con:
+        con.execute(
+            """UPDATE album_drafts
+               SET ordered_at = COALESCE(ordered_at, datetime('now')),
+                   order_size = ?, order_cover = ?, order_notes = ?, updated_at = datetime('now')
+               WHERE id = ?""",
+            (size, cover, notes, draft_id),
+        )
+        audit.log(
+            con,
+            "album_draft",
+            draft_id,
+            "album_ordered" if first_order else "album_order_updated",
+            diff={"size": size, "cover": cover, "notes": notes},
+        )
+
+
+def clear_order(draft_id: int) -> None:
+    """Undo an order mark (operator marked one by mistake) — clears the date + spec. Records
+    nothing to money/print state because there was none. Idempotent."""
+    with db.tx() as con:
+        con.execute(
+            """UPDATE album_drafts
+               SET ordered_at = NULL, order_size = NULL, order_cover = NULL, order_notes = NULL,
+                   updated_at = datetime('now')
+               WHERE id = ?""",
+            (draft_id,),
+        )
+        audit.log(con, "album_draft", draft_id, "album_order_cleared")
