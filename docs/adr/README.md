@@ -20,7 +20,9 @@ states context, the decision, consequences, measured reopen criteria, and altern
 | [0013](0013-ai-operations-dashboard.md) | AI operations dashboard: one read-only pane over the consolidated capabilities | Accepted |
 | [0014](0014-shadow-to-validation-bridge.md) | Shadow→validation bridge: enrol shadowed galleries into the gate from the ledger | Accepted |
 
-See also [`../MISE-SOLO-STUDIO-OS.md`](../MISE-SOLO-STUDIO-OS.md),
+See also the operator runbook [`../MISE-SOLO-STUDIO-OS-RUNBOOK.md`](../MISE-SOLO-STUDIO-OS-RUNBOOK.md)
+(how to run it day to day), [`../MISE-SOLO-STUDIO-OS.md`](../MISE-SOLO-STUDIO-OS.md),
 [`../REPO-CONSOLIDATION-MATRIX.md`](../REPO-CONSOLIDATION-MATRIX.md),
 [`../MISE-CONSOLIDATION-ROADMAP.md`](../MISE-CONSOLIDATION-ROADMAP.md),
-[`../PHASE-0-SLICE.md`](../PHASE-0-SLICE.md).
+[`../PHASE-0-SLICE.md`](../PHASE-0-SLICE.md),
+[`../NOTION-MODERNIZATION.md`](../NOTION-MODERNIZATION.md).

@@ -7,7 +7,8 @@
 
 **Status:** design + Phase 0 foundation (this branch).
 **Audience:** Kevin (owner/operator) and any agent or engineer working on Mise.
-**Companion docs:** [`REPO-CONSOLIDATION-MATRIX.md`](REPO-CONSOLIDATION-MATRIX.md) ·
+**Companion docs:** [`MISE-SOLO-STUDIO-OS-RUNBOOK.md`](MISE-SOLO-STUDIO-OS-RUNBOOK.md) (how to operate it) ·
+[`REPO-CONSOLIDATION-MATRIX.md`](REPO-CONSOLIDATION-MATRIX.md) ·
 [`MISE-CONSOLIDATION-ROADMAP.md`](MISE-CONSOLIDATION-ROADMAP.md) ·
 [`adr/`](adr/) · [`PHASE-0-SLICE.md`](PHASE-0-SLICE.md)
 
