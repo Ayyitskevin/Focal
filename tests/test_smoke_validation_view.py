@@ -157,6 +157,18 @@ def test_record_scores_rejects_out_of_range_and_stores_nothing(admin_client):
     assert validation.scores_map("vision").get(it) is None
 
 
+def test_record_scores_valid_baseline_bad_challenger_stores_nothing(admin_client):
+    # the partial-write guard: a VALID baseline + a bad challenger must store NEITHER,
+    # so the "rejected" message matches the stored state (no masked partial write).
+    it = validation.add_item("vision", "gallery", 10)
+    r = admin_client.post(
+        f"/admin/validation/items/{it}/scores",
+        data={"baseline_score": "0.70", "challenger_score": "nope"},
+    )
+    assert "between 0.00 and 1.00" in r.text
+    assert validation.scores_map("vision").get(it) is None  # baseline NOT persisted
+
+
 def test_deactivate_item_drops_it_from_the_set(admin_client):
     it = validation.add_item("vision", "gallery", 10, label="Doomed")
     r = admin_client.post(f"/admin/validation/items/{it}/deactivate")

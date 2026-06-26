@@ -53,6 +53,17 @@ class LegacyArgusVisionAdapter:
                 str(exc),
                 latency_ms=_elapsed_ms(start),
             )
+        except Exception as exc:
+            # The trigger does an unguarded DB read before its own network try-block; map any
+            # non-typed failure (e.g. a sqlite lock) to a non-OK result so the adapter NEVER
+            # raises and NEVER mutates — its contract is to return a ProviderResult.
+            return ProviderResult.failure(
+                self.capability,
+                self.name,
+                ResultStatus.PROVIDER_ERROR,
+                str(exc),
+                latency_ms=_elapsed_ms(start),
+            )
         latency = _elapsed_ms(start)
         run_id = payload.get("run_id")
         job_id = payload.get("job_id")
@@ -95,6 +106,16 @@ class LegacyPlutusOffersAdapter:
         try:
             payload = plutus_recommend.trigger_gallery_recommend(gallery_id)
         except plutus_recommend.PlutusRecommendError as exc:
+            return ProviderResult.failure(
+                self.capability,
+                self.name,
+                ResultStatus.PROVIDER_ERROR,
+                str(exc),
+                latency_ms=_elapsed_ms(start),
+            )
+        except Exception as exc:
+            # Map any non-typed failure (e.g. an unguarded DB read raising) to a non-OK
+            # result: the adapter must always return a ProviderResult, never raise.
             return ProviderResult.failure(
                 self.capability,
                 self.name,
@@ -153,6 +174,16 @@ class LegacyOdysseusCaptionAdapter:
         try:
             result = caption_ai.draft_caption(ctx)
         except caption_ai.CaptionDraftError as exc:
+            return ProviderResult.failure(
+                self.capability,
+                self.name,
+                ResultStatus.PROVIDER_ERROR,
+                str(exc),
+                latency_ms=_elapsed_ms(start),
+            )
+        except Exception as exc:
+            # Map any non-typed failure to a non-OK result: the adapter must always return a
+            # ProviderResult, never raise.
             return ProviderResult.failure(
                 self.capability,
                 self.name,

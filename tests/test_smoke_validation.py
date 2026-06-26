@@ -163,7 +163,29 @@ def test_shadow_candidates_lists_unenrolled_shadowed_galleries(tmp_path, monkeyp
     cands = validation.shadow_candidates("vision")
     ids = [c["gallery_id"] for c in cands]
     assert g1 in ids and g2 not in ids  # enrolled gallery is excluded
-    assert next(c for c in cands if c["gallery_id"] == g1)["runs"] == 2
+    # one shadow comparison (two ledger rows under one correlation_id) counts as 1 run
+    assert next(c for c in cands if c["gallery_id"] == g1)["runs"] == 1
+
+
+def test_rollback_065_does_not_brick_validation_scores(tmp_path, monkeypatch):
+    """Rolling back 065 (ai_runs) while 067 (validation_scores, which FKs ai_runs) is
+    present must not leave a dangling FK that bricks validation_scores writes. The fixed
+    rollback drops the dependent table too, so running 065's teardown alone is clean."""
+    _configure_tmp_db(tmp_path, monkeypatch)
+    item = validation.add_item("vision", "gallery", 1)
+    validation.record_score(item, "argus", "argus", 0.5)  # a validation_scores row exists
+
+    sql = (db.MIGRATIONS_DIR / "rollback" / "065_ai_runs.sql").read_text()
+    con = db.connect()
+    try:
+        con.executescript(sql)  # must not raise
+        con.commit()
+    finally:
+        con.close()
+
+    tables = {r["name"] for r in db.all_("SELECT name FROM sqlite_master WHERE type='table'")}
+    # both dropped together -> no dangling FK left behind to brick validation_scores
+    assert "ai_runs" not in tables and "validation_scores" not in tables
 
 
 def test_shadow_candidates_ignores_non_shadow_vision_runs(tmp_path, monkeypatch):
