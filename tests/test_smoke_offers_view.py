@@ -123,3 +123,72 @@ def test_offers_requires_admin(tmp_path, monkeypatch):
         assert r.status_code == 303
         assert r.headers["location"] == "/admin/login"
         jobs.stop()
+
+
+# ── operator approve/reject decision (migration 068) ─────────────────────────────
+
+
+def test_approve_offer_persists_decision_and_feeds_approved_value(admin_client):
+    done, _ = _seed_offers()
+    r = admin_client.post(f"/admin/offers/{done}/approve")
+    assert "Offer approved" in r.text
+    row = db.one(
+        "SELECT plutus_offer_decision, plutus_offer_decided_at FROM galleries WHERE id=?", (done,)
+    )
+    assert row["plutus_offer_decision"] == "approved" and row["plutus_offer_decided_at"]
+    # the approved offer ($300) now shows as the committed pipeline in the header
+    body = admin_client.get("/admin/offers").text
+    assert "Approved" in body and "$300.00" in body
+
+
+def test_reject_then_reset_clears_decision(admin_client):
+    done, _ = _seed_offers()
+    admin_client.post(f"/admin/offers/{done}/reject")
+    assert (
+        db.one("SELECT plutus_offer_decision AS d FROM galleries WHERE id=?", (done,))["d"]
+        == "rejected"
+    )
+    r = admin_client.post(f"/admin/offers/{done}/reset")
+    assert "Decision cleared" in r.text
+    assert (
+        db.one("SELECT plutus_offer_decision AS d FROM galleries WHERE id=?", (done,))["d"] is None
+    )
+
+
+def test_decision_filter_narrows_queue(admin_client):
+    done, _err = _seed_offers()
+    admin_client.post(f"/admin/offers/{done}/approve")
+    approved = admin_client.get("/admin/offers?decision=approved").text
+    assert "Spring Tasting" in approved and "Gala Night" not in approved
+    undecided = admin_client.get("/admin/offers?decision=undecided").text
+    assert "Gala Night" in undecided and "Spring Tasting" not in undecided
+
+
+def test_decide_on_gallery_without_offer_is_rejected(admin_client):
+    gid = db.run("INSERT INTO galleries (slug, title, pin) VALUES (?,?,?)", ("NoOffer", "N", "1"))
+    r = admin_client.post(f"/admin/offers/{gid}/approve")
+    assert "has no offer to decide on" in r.text
+    assert (
+        db.one("SELECT plutus_offer_decision AS d FROM galleries WHERE id=?", (gid,))["d"] is None
+    )
+
+
+def test_decide_on_unknown_gallery(admin_client):
+    r = admin_client.post("/admin/offers/9999/approve")
+    assert "No gallery #9999" in r.text
+
+
+def test_csv_includes_decision_column(admin_client):
+    done, _ = _seed_offers()
+    admin_client.post(f"/admin/offers/{done}/approve")
+    text = admin_client.get("/admin/offers.csv").text
+    assert "Status,Decision,Bundles" in text
+    assert "approved" in text
+
+
+def test_decision_routes_require_admin(tmp_path, monkeypatch):
+    _configure_tmp_db(tmp_path, monkeypatch)
+    with TestClient(app) as anon:
+        r = anon.post("/admin/offers/1/approve", follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"] == "/admin/login"
+        jobs.stop()

@@ -5,8 +5,8 @@
   <div class="pgtop-lead">
     <h1>Offers</h1>
     <p class="pgtop-sub">
-      {% if total %}<b>{{ total }}</b> offer{{ "s" if total != 1 }} · {{ pipeline_value }} estimated pipeline · proposals only — review &amp; act in Plutus
-      {% else %}Print &amp; album offers Plutus proposes per gallery — review them here; they never auto-send or charge{% endif %}
+      {% if total %}<b>{{ total }}</b> offer{{ "s" if total != 1 }} · {{ pipeline_value }} proposed · <b>{{ approved_value }}</b> approved · proposals only
+      {% else %}Print &amp; album offers Plutus proposes per gallery — approve or reject them here; they never auto-send or charge{% endif %}
     </p>
   </div>
   <div class="pgtop-actions">
@@ -16,10 +16,21 @@
 {% endblock %}
 {% block admin_body %}
 <main class="admin-main">
+  {% if msg %}<div style="margin:.4rem 0; padding:.5rem .8rem; border-radius:6px; background:#e1f2e9; color:#2f7d57">{{ msg }}</div>{% endif %}
+  {% if err %}<div style="margin:.4rem 0; padding:.5rem .8rem; border-radius:6px; background:#f3e3e5; color:#7C2F38">{{ err }}</div>{% endif %}
+
   <div class="audit-filters">
     {% for f in filters %}
     <a class="audit-chip{% if f.active %} is-active{% endif %}"
-       href="/admin/offers{% if f.key != 'all' %}?status={{ f.key }}{% endif %}">
+       href="/admin/offers?status={{ f.key }}{% if decision != 'any' %}&decision={{ decision }}{% endif %}">
+      {{ f.label }} <span class="audit-chip-n">{{ f.n }}</span>
+    </a>
+    {% endfor %}
+  </div>
+  <div class="audit-filters">
+    {% for f in decision_filters %}
+    <a class="audit-chip{% if f.active %} is-active{% endif %}"
+       href="/admin/offers?decision={{ f.key }}{% if status != 'all' %}&status={{ status }}{% endif %}">
       {{ f.label }} <span class="audit-chip-n">{{ f.n }}</span>
     </a>
     {% endfor %}
@@ -41,24 +52,41 @@
         </div>
         <div class="audit-detail">
           <span class="audit-amount" style="background:{{ e.status_bg }};color:{{ e.status_color }}">{{ e.status_label }}</span>
+          {% if e.decision %}<span class="audit-amount" style="background:{{ e.decision_bg }};color:{{ e.decision_color }}">{{ e.decision_label }}</span>{% endif %}
           {% if e.bundle_count is not none %}{{ e.bundle_count }} bundle{{ "s" if e.bundle_count != 1 }}{% endif %}
           {% if e.estimated %} · <b>{{ e.estimated }}</b> est.{% endif %}
           {% if e.error %} · <span style="color:#7C2F38">{{ e.error }}</span>{% endif %}
         </div>
-        <div class="audit-foot">
+        <div class="audit-foot" style="display:flex; gap:.6rem; align-items:center; flex-wrap:wrap">
           {% if e.offer_url %}<a class="audit-actor" href="{{ e.offer_url }}" target="_blank" rel="noopener">Review offer ↗</a>{% endif %}
           {% if e.pitch_url %}<a class="audit-actor" href="{{ e.pitch_url }}" target="_blank" rel="noopener">Pitch ↗</a>{% endif %}
+          {% if e.decision != 'approved' %}
+          <form method="post" action="/admin/offers/{{ e.gallery_id }}/approve" style="display:inline">
+            <button type="submit" style="padding:.25rem .7rem; background:#2f7d57; color:#fff; border:none; border-radius:5px; cursor:pointer">Approve</button>
+          </form>
+          {% endif %}
+          {% if e.decision != 'rejected' %}
+          <form method="post" action="/admin/offers/{{ e.gallery_id }}/reject" style="display:inline">
+            <button type="submit" style="padding:.25rem .7rem; background:none; color:#7C2F38; border:1px solid #e0c2c6; border-radius:5px; cursor:pointer">Reject</button>
+          </form>
+          {% endif %}
+          {% if e.decision %}
+          <form method="post" action="/admin/offers/{{ e.gallery_id }}/reset" style="display:inline">
+            <button type="submit" class="muted" style="padding:.25rem .6rem; background:none; border:1px solid #d3d9dc; border-radius:5px; cursor:pointer">Reset</button>
+          </form>
+          {% endif %}
         </div>
       </div>
     </div>
     {% endfor %}
   </section>
   {% else %}
-  <p class="muted">No offers{% if status != 'all' %} in this state{% endif %} yet.
+  <p class="muted">No offers{% if status != 'all' or decision != 'any' %} in this state{% endif %} yet.
     Plutus proposes an offer after a gallery is analyzed (needs <code>MISE_PLUTUS_URL</code> armed).</p>
   {% endif %}
 
   <p class="audit-note muted">Offers are proposals — Mise never auto-sends or charges them.
-    Review and edit the offer in Plutus, then share the offer link with the client deliberately.</p>
+    Approving records your decision and feeds the approved-pipeline total; edit the offer in
+    Plutus and share the link with the client deliberately.</p>
 </main>
 {% endblock %}
