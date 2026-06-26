@@ -170,3 +170,42 @@ def test_write_routes_require_admin(tmp_path, monkeypatch):
         r = anon.post("/admin/validation/items", data={"subject_id": "1"}, follow_redirects=False)
         assert r.status_code == 303 and r.headers["location"] == "/admin/login"
         jobs.stop()
+
+
+# ── shadow→validation bridge ─────────────────────────────────────────────────────
+
+
+def _shadow_pair(gid):
+    """Two ai_runs rows (legacy + challenger) sharing a shadow correlation id, as the
+    vision shadow runner records them."""
+    for model, prov in (("argus", "argus"), ("qwen3-vl:32b", "qwen")):
+        db.run(
+            """INSERT INTO ai_runs (capability, provider, status, review, model,
+                                    subject_type, subject_id, correlation_id)
+               VALUES ('vision', ?, 'ok', 'human_review', ?, 'gallery', ?, ?)""",
+            (prov, model, gid, f"shadow:gallery:{gid}:1"),
+        )
+
+
+def test_shadow_candidate_appears_then_enrolls(admin_client):
+    gid = db.run(
+        "INSERT INTO galleries (slug, title, pin) VALUES (?,?,?)",
+        ("ShadowG", "Shadow Wedding", "1"),
+    )
+    _shadow_pair(gid)
+    body = admin_client.get("/admin/validation").text
+    assert "From vision shadow runs" in body and "Shadow Wedding" in body
+
+    # one-click enrol uses the existing add-item route (as the button does)
+    admin_client.post(
+        "/admin/validation/items",
+        data={"subject_type": "gallery", "subject_id": str(gid), "label": "Shadow Wedding"},
+    )
+    assert validation.list_items("vision")[0]["subject_id"] == gid
+    # now enrolled -> no longer a candidate
+    assert validation.shadow_candidates("vision") == []
+    assert "From vision shadow runs" not in admin_client.get("/admin/validation").text
+
+
+def test_no_shadow_candidates_section_when_none(admin_client):
+    assert "From vision shadow runs" not in admin_client.get("/admin/validation").text

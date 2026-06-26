@@ -18,6 +18,7 @@ states context, the decision, consequences, measured reopen criteria, and altern
 | [0011](0011-album-proposer-and-review-workflow.md) | Mnemosyne albums: deterministic baseline proposer + human review workflow | Accepted |
 | [0012](0012-offer-approval-state.md) | Plutus offers: persisted operator approve/reject state | Accepted |
 | [0013](0013-ai-operations-dashboard.md) | AI operations dashboard: one read-only pane over the consolidated capabilities | Accepted |
+| [0014](0014-shadow-to-validation-bridge.md) | Shadow→validation bridge: enrol shadowed galleries into the gate from the ledger | Accepted |
 
 See also [`../MISE-SOLO-STUDIO-OS.md`](../MISE-SOLO-STUDIO-OS.md),
 [`../REPO-CONSOLIDATION-MATRIX.md`](../REPO-CONSOLIDATION-MATRIX.md),

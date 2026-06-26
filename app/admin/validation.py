@@ -93,6 +93,15 @@ def _item_rows(spec: dict) -> list[dict]:
 @router.get("", response_class=HTMLResponse)
 async def validation_view(request: Request, msg: str = "", err: str = ""):
     items = _item_rows(_VISION)
+    candidates = [
+        {
+            "gallery_id": c["gallery_id"],
+            "label": c["title"] or c["slug"],
+            "runs": c["runs"],
+            "last_shadow": c["last_shadow"],
+        }
+        for c in validation.shadow_candidates(_VISION["capability"])
+    ]
     return templates.TemplateResponse(
         request,
         "admin/validation.html",
@@ -100,6 +109,7 @@ async def validation_view(request: Request, msg: str = "", err: str = ""):
             "report": _report_view(_VISION),
             "items": items,
             "item_count": len(items),
+            "candidates": candidates,
             "baseline_model": _VISION["baseline"],
             "challenger_model": _VISION["challenger"],
             "msg": msg,

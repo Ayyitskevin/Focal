@@ -131,3 +131,48 @@ def test_deactivate_item_drops_it_from_listing(tmp_path, monkeypatch):
     assert validation.list_items("vision") == []
     # the row (and any scores) survive for the record — only active flips
     assert db.one("SELECT active FROM validation_items WHERE id=?", (item,))["active"] == 0
+
+
+def _gallery(slug):
+    return db.run("INSERT INTO galleries (slug, title, pin) VALUES (?,?,?)", (slug, slug, "1"))
+
+
+def _shadow_pair(gid):
+    corr = f"shadow:gallery:{gid}:1"
+    ai_runs.record(
+        _ok_run("argus", latency=1, cost=0.0, provider="argus"),
+        subject_type="gallery",
+        subject_id=gid,
+        correlation_id=corr,
+    )
+    ai_runs.record(
+        _ok_run("qwen3-vl:32b", latency=1, cost=0.0, provider="qwen"),
+        subject_type="gallery",
+        subject_id=gid,
+        correlation_id=corr,
+    )
+
+
+def test_shadow_candidates_lists_unenrolled_shadowed_galleries(tmp_path, monkeypatch):
+    _configure_tmp_db(tmp_path, monkeypatch)
+    g1, g2 = _gallery("Shadowed"), _gallery("Enrolled")
+    _shadow_pair(g1)
+    _shadow_pair(g2)
+    validation.add_item("vision", "gallery", g2)  # g2 already in the set
+
+    cands = validation.shadow_candidates("vision")
+    ids = [c["gallery_id"] for c in cands]
+    assert g1 in ids and g2 not in ids  # enrolled gallery is excluded
+    assert next(c for c in cands if c["gallery_id"] == g1)["runs"] == 2
+
+
+def test_shadow_candidates_ignores_non_shadow_vision_runs(tmp_path, monkeypatch):
+    _configure_tmp_db(tmp_path, monkeypatch)
+    gid = _gallery("PlainVision")
+    # a vision run with no shadow correlation id is not a shadow comparison
+    ai_runs.record(
+        _ok_run("argus", latency=1, cost=0.0, provider="argus"),
+        subject_type="gallery",
+        subject_id=gid,
+    )
+    assert validation.shadow_candidates("vision") == []
