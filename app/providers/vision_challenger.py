@@ -1,7 +1,7 @@
 """Internal vision challenger — Qwen3-VL on a local OpenAI-compatible endpoint.
 
-The recommended local challenger to Argus's cloud Grok vision path (audit §9.2/§9.6):
-**Qwen3-VL (8B-class)** served on ``strix`` via an OpenAI-compatible endpoint (Ollama).
+The local challenger to Argus's cloud Grok vision path (audit §9.2/§9.6, ADR 0007):
+**Qwen3-VL (32B)** served on ``mickeybot`` via an OpenAI-compatible endpoint (Ollama).
 It is DORMANT until ``MISE_VISION_CHALLENGER_URL`` is set, and is used in **shadow only**
 — ``app.vision_shadow`` records its result to the ai_runs ledger for comparison against
 the legacy Argus run; it never writes to assets/galleries. It never raises (every failure

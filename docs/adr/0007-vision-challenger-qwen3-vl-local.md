@@ -11,18 +11,23 @@ Phase 2 shipped the vision shadow harness (asset-safe, ledger-only) with a chall
 quality/cost data the audit calls for (§9.5), a real challenger must run alongside the
 legacy Argus path. Current production vision is **xAI Grok via Argus** (cloud) **[CODE]**.
 
-The audit's named challenger candidate (§9.2, Vision-challenger row) is **Qwen3-VL
-(8B-class)**, ~7–11 GB Q4, eligible on `strix` if the GPU qualifies, valued for "private
-captioning, metadata, album analysis" and explicitly required to "beat the Argus
-validation set" before any promotion. The audit also recommends exposing local models
-behind a **stable OpenAI-compatible endpoint**, with **Ollama** as the starting layer
-(§9.6), so callers depend on a capability/quality tier rather than a specific runtime.
+The audit's named challenger family (§9.2) is **Qwen3-VL**: an 8B-class tier (~7–11 GB) and
+a premium 30–32B tier (~22–28+ GB, "only ≥32 GB practical memory"), valued for "private
+captioning, metadata, album analysis" and explicitly required to "beat the Argus validation
+set" before any promotion. The audit also recommends exposing local models behind a
+**stable OpenAI-compatible endpoint**, with **Ollama** as the starting layer (§9.6), so
+callers depend on a capability/quality tier rather than a specific runtime.
+
+Kevin runs **`qwen3-vl:32b` on `mickeybot`** (deployed evidence — authoritative). That
+hardware/model choice is provisioned, so this ADR records the **premium 32B tier on
+mickeybot** as the challenger, not the smaller starting tier I initially defaulted to.
 
 ## Decision
 
-Adopt **Qwen3-VL (8B-class) served on `strix` via Ollama's OpenAI-compatible API** as the
-internal vision challenger. Implemented as `InternalVisionChallengerAdapter`
-(`app/providers/vision_challenger.py`), conforming to `Capability.VISION`:
+Adopt **Qwen3-VL (32B) served on `mickeybot` via Ollama's OpenAI-compatible API** as the
+internal vision challenger (default model `qwen3-vl:32b`, overridable by env). Implemented
+as `InternalVisionChallengerAdapter` (`app/providers/vision_challenger.py`), conforming to
+`Capability.VISION`:
 
 - **Dormant by env.** Disabled unless `MISE_VISION_CHALLENGER_URL` is set; with both that
   and `MISE_VISION_SHADOW` armed, shadow runs for real. No secret is stored in the repo —
@@ -35,8 +40,9 @@ internal vision challenger. Implemented as `InternalVisionChallengerAdapter`
   comparison (`providers.shadow.compare`) and surfaced at `/admin/ai-runs`; they are
   **never** written to assets/galleries and never auto-promoted. Human review against the
   validation set is the promotion gate.
-- **Smallest model that meets the bar.** Start at 8B-class (not the 30–32B premium tier),
-  per the audit's "smallest model meeting a validated quality threshold" rule.
+- **Premium quality tier on provisioned hardware.** `qwen3-vl:32b` is the model Kevin runs
+  on `mickeybot`; the validation set (not model size) remains the promotion gate, and the
+  env override allows dropping to a smaller tier if the cost/latency ledger argues for it.
 
 ## Consequences
 
@@ -47,8 +53,9 @@ internal vision challenger. Implemented as `InternalVisionChallengerAdapter`
   OpenAI-compatible contract but **not yet validated against a live endpoint** — the
   shadow ledger + human scoring (§9.5) is exactly the mechanism to tune them before any
   promotion. Until then the adapter stores the raw reply for review, not a strict schema.
-- **Hardware unknown (audit §4):** whether `strix`'s GPU/VRAM meets the 8B-class fit at
-  acceptable latency is unverified; the shadow latency in `ai_runs` is the measurement.
+- **Latency to measure (audit §4):** the 32B tier needs ample VRAM and is heavier than the
+  8B tier; whether `mickeybot` serves it within an acceptable shadow window is exactly what
+  the shadow latency in `ai_runs` measures.
 
 ## Promotion gate (unchanged from the roadmap)
 
@@ -62,5 +69,6 @@ audit §9.5). Argus stays the default and the legacy adapter is never removed un
   media to a second cloud provider; the local option is the privacy-positive, lower-cost
   path the audit recommends. Still reachable later behind the same seam if a measured case
   emerges.
-- **Premium local Qwen3-VL 30–32B:** deferred — "not justified merely because it fits"
-  (§9.2); start at 8B and let the validation set decide.
+- **Smaller Qwen3-VL 8B-class:** available via the env override and lower-footprint, but
+  Kevin has provisioned the 32B tier on `mickeybot` for quality; if the cost/latency ledger
+  shows 32B isn't worth it, dropping to 8B is a one-env-var change behind the same seam.

@@ -161,8 +161,8 @@ def test_real_qwen_challenger_autoregisters_and_shadow_records(tmp_path, monkeyp
     assets."""
     _configure_tmp_db(tmp_path, monkeypatch)
     monkeypatch.setattr(config, "VISION_SHADOW", True)
-    monkeypatch.setattr(config, "VISION_CHALLENGER_URL", "http://strix:11434/v1")
-    monkeypatch.setattr(config, "VISION_CHALLENGER_MODEL", "qwen3-vl:8b")
+    monkeypatch.setattr(config, "VISION_CHALLENGER_URL", "http://mickeybot:11434/v1")
+    monkeypatch.setattr(config, "VISION_CHALLENGER_MODEL", "qwen3-vl:32b")
     gid = _gallery_with_completed_run(run_id=55)
 
     # a real (tiny) web derivative the adapter will read + base64-encode
@@ -193,6 +193,6 @@ def test_real_qwen_challenger_autoregisters_and_shadow_records(tmp_path, monkeyp
     )
     assert {r["provider"] for r in rows} == {"argus", "qwen3-vl"}
     chal = next(r for r in rows if r["provider"] == "qwen3-vl")
-    assert chal["status"] == "ok" and chal["model"] == "qwen3-vl:8b"
+    assert chal["status"] == "ok" and chal["model"] == "qwen3-vl:32b"
     # asset-safe: no assets created for this gallery
     assert db.one("SELECT COUNT(*) AS n FROM assets WHERE gallery_id=?", (gid,))["n"] == 0
