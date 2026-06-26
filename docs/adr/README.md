@@ -11,6 +11,7 @@ states context, the decision, consequences, measured reopen criteria, and altern
 | [0004](0004-odysseus-provider-boundary.md) | Odysseus / model-provider boundary (propose, never mutate) | Accepted |
 | [0005](0005-sqlite-retention.md) | Retain SQLite; no Postgres on spec | Accepted |
 | [0006](0006-ai-provenance-and-human-approval.md) | One AI result contract; human approval; only OK writes | Accepted |
+| [0007](0007-vision-challenger-qwen3-vl-local.md) | Vision challenger: Qwen3-VL on a local OpenAI-compatible endpoint | Accepted |
 
 See also [`../MISE-SOLO-STUDIO-OS.md`](../MISE-SOLO-STUDIO-OS.md),
 [`../REPO-CONSOLIDATION-MATRIX.md`](../REPO-CONSOLIDATION-MATRIX.md),

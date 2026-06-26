@@ -5,10 +5,13 @@ run records exactly two linked ai_runs rows (legacy snapshot + challenger) and w
 NOTHING to assets or galleries. Same DB-backed pattern as test_smoke_argus.py.
 """
 
+import json
+
 import pytest
 
 from app import config, db, jobs, vision_shadow
 from app.providers import Capability, registry
+from app.providers import vision_challenger as vc
 from app.providers.mocks import MockVisionChallengerAdapter
 
 
@@ -149,3 +152,47 @@ def test_completed_argus_run_no_shadow_when_flag_off(tmp_path, monkeypatch):
     _fake_sync_argus(monkeypatch)
     argus_analyze.run_for_gallery(gid)
     assert ("vision_shadow_gallery", {"gallery_id": gid}) not in enq
+
+
+def test_real_qwen_challenger_autoregisters_and_shadow_records(tmp_path, monkeypatch):
+    """End-to-end with the REAL Qwen3-VL adapter: configuring its URL auto-registers it as
+    the VISION challenger; with a real web derivative on disk and a mocked OpenAI-compatible
+    endpoint, shadow records two linked ai_runs rows (argus + qwen3-vl) and touches no
+    assets."""
+    _configure_tmp_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "VISION_SHADOW", True)
+    monkeypatch.setattr(config, "VISION_CHALLENGER_URL", "http://strix:11434/v1")
+    monkeypatch.setattr(config, "VISION_CHALLENGER_MODEL", "qwen3-vl:8b")
+    gid = _gallery_with_completed_run(run_id=55)
+
+    # a real (tiny) web derivative the adapter will read + base64-encode
+    web = config.MEDIA_DIR / str(gid) / "web"
+    web.mkdir(parents=True, exist_ok=True)
+    (web / "shot.jpg").write_bytes(b"\xff\xd8\xff\xe0fakejpeg\xff\xd9")
+
+    class _Resp:
+        def read(self):
+            return json.dumps(
+                {"choices": [{"message": {"content": "keywords: plated dish; alt: a bowl"}}]}
+            ).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+    monkeypatch.setattr(vc.urllib.request, "urlopen", lambda req, timeout: _Resp())
+
+    # no use_challenger() — relies on registry auto-registration from the configured URL
+    comparison = vision_shadow.run_for_gallery(gid)
+    assert comparison is not None and comparison["challenger_provider"] == "qwen3-vl"
+
+    rows = db.all_(
+        "SELECT * FROM ai_runs WHERE subject_type='gallery' AND subject_id=? ORDER BY id", (gid,)
+    )
+    assert {r["provider"] for r in rows} == {"argus", "qwen3-vl"}
+    chal = next(r for r in rows if r["provider"] == "qwen3-vl")
+    assert chal["status"] == "ok" and chal["model"] == "qwen3-vl:8b"
+    # asset-safe: no assets created for this gallery
+    assert db.one("SELECT COUNT(*) AS n FROM assets WHERE gallery_id=?", (gid,))["n"] == 0

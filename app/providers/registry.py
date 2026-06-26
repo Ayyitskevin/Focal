@@ -21,6 +21,7 @@ from .adapters import (
     LegacyPlutusOffersAdapter,
 )
 from .contracts import Capability
+from .vision_challenger import InternalVisionChallengerAdapter
 
 # The default (legacy) provider for each capability. CONTENT defaults to the Odysseus
 # caption drafter; the Dionysus pack reader is addressed by name where needed.
@@ -35,10 +36,14 @@ _overrides: dict[Capability, Any] = {}
 
 # Per-capability CHALLENGER adapter for shadow mode (Phase 2). A challenger runs
 # alongside the legacy provider, is recorded to the ai_runs ledger for comparison, and
-# NEVER writes authoritative state. Default empty: with no challenger registered, shadow
-# mode is inert even when its feature flag is armed — production stays safe until a real
-# challenger backend is deliberately wired in.
+# NEVER writes authoritative state. Overrides (test/shadow) take precedence; otherwise a
+# default challenger factory is consulted and returned only if it is configured/enabled,
+# so shadow stays inert until a real challenger backend is deliberately armed by env.
 _challengers: dict[Capability, Any] = {}
+
+_DEFAULT_CHALLENGER_FACTORIES = {
+    Capability.VISION: InternalVisionChallengerAdapter,
+}
 
 
 def resolve(capability: Capability) -> Any:
@@ -53,9 +58,16 @@ def resolve(capability: Capability) -> Any:
 
 
 def challenger(capability: Capability) -> Any | None:
-    """Return the registered shadow challenger for ``capability``, or None if none is
-    wired. None means shadow mode no-ops for that capability."""
-    return _challengers.get(capability)
+    """Return the shadow challenger for ``capability`` — a registered override if present,
+    else the default challenger backend if it is configured/enabled, else None. None means
+    shadow mode no-ops for that capability."""
+    if capability in _challengers:
+        return _challengers[capability]
+    factory = _DEFAULT_CHALLENGER_FACTORIES.get(capability)
+    if factory is None:
+        return None
+    adapter = factory()
+    return adapter if adapter.is_enabled() else None
 
 
 @contextmanager
