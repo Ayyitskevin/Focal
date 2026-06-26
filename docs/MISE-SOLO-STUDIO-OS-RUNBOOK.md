@@ -86,11 +86,18 @@ nothing until you set the relevant flag. Flags live in flow's `.env`
   the same seam later.
 - **Surface:** `/admin/albums` — propose a baseline for a gallery, review the spreads (with
   thumbnails) and the **omitted** photos, then approve or reject.
+- **Order (approved albums):** an approved album's detail page has an **Order** block —
+  record the spec (size, cover, notes) and mark it **Ordered** (migration 070). It's
+  record-only: it prints nothing, contacts no vendor, and charges nothing — you place the
+  order with your lab however you do today, and this captures the decision + spec (and an
+  audit row) for the record. ADR 0019.
 - **Arm:** nothing to arm — the baseline proposer is always available. The deterministic
   validator guarantees a draft never silently omits, duplicates, or misassigns a photo, and
   refuses to store one that would.
-- **Bounded:** approval records your decision; it does **not** print or order an album.
-- **Rollback:** the tables (migration 066) are additive and dormant; see §6.
+- **Bounded:** approval records your decision; ordering records the spec. Neither prints,
+  orders from a vendor, nor charges.
+- **Rollback:** the tables (migration 066) and the order columns (migration 070) are additive
+  and dormant; see §6.
 
 ### Content / captions (Odysseus, Dionysus) — ADR 0006
 
@@ -190,6 +197,7 @@ feature dormant changes nothing. Run via the app's normal `db.migrate()` on boot
 | `067_validation_set.sql` | `validation_items` + `validation_scores` | `rollback/067_validation_set.sql` |
 | `068_plutus_offer_decision.sql` | `galleries.plutus_offer_decision` + `…_decided_at` | `rollback/068…` (DROP COLUMN; SQLite ≥3.35) |
 | `069_plutus_offer_sent.sql` | `galleries.plutus_offer_sent_at` + `…_sent_to` | `rollback/069…` (DROP COLUMN; SQLite ≥3.35) |
+| `070_album_order.sql` | `album_drafts.ordered_at` + `order_size/cover/notes` | `rollback/070…` (DROP COLUMN; SQLite ≥3.35) |
 
 Each rollback is safe because the tables/columns are dormant and referenced by no money,
 invoice, or business record. Rolling a feature back is normally a **flag**, not a migration —
