@@ -160,6 +160,15 @@ VISION_CHALLENGER_TOKEN = os.environ.get("MISE_VISION_CHALLENGER_TOKEN", "")
 VISION_CHALLENGER_TIMEOUT = int(os.environ.get("MISE_VISION_CHALLENGER_TIMEOUT", "120"))
 VISION_CHALLENGER_MAX_IMAGES = int(os.environ.get("MISE_VISION_CHALLENGER_MAX_IMAGES", "4"))
 
+# Which provider serves PRODUCTION vision — the cutover switch (default 'argus'). The
+# registry enforces a hard interlock (providers.registry.active_vision_provider): a provider
+# is honored ONLY if it declares it serves the production contract AND is configured;
+# otherwise this falls back to Argus. The Qwen challenger is eval-only until it has a
+# production writeback path, so setting this to 'qwen' today is refused and logged, never
+# silently routing production into a non-writeback path. Promotion stays a deliberate flip
+# once the data (validation gate) and a production-capable challenger both exist.
+VISION_PROVIDER = os.environ.get("MISE_VISION_PROVIDER", "argus").strip().lower()
+
 # Validation-scoring harness thresholds (the promotion gate over the fixed validation set).
 # MIN_PAIRED = how many validation items must be HUMAN-scored for BOTH the baseline and the
 # challenger before parity is even evaluated (enough overlapping evidence). PARITY_MARGIN =

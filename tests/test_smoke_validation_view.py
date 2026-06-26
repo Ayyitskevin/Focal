@@ -209,3 +209,9 @@ def test_shadow_candidate_appears_then_enrolls(admin_client):
 
 def test_no_shadow_candidates_section_when_none(admin_client):
     assert "From vision shadow runs" not in admin_client.get("/admin/validation").text
+
+
+def test_promotion_status_shows_argus_as_production_provider(admin_client):
+    # the cutover seam surfaces the effective production provider; default is argus
+    assert "Production provider:" in admin_client.get("/admin/validation").text
+    assert "argus" in admin_client.get("/admin/validation").text

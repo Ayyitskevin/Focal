@@ -56,6 +56,11 @@ class InternalVisionChallengerAdapter:
 
     capability = Capability.VISION
     name = "qwen3-vl"
+    # Eval-only: analyze_gallery returns a raw reply for the shadow ledger (ADR 0007), not
+    # the structured asset writeback Argus performs. It therefore CANNOT serve production
+    # vision until a writeback path exists — the registry interlock refuses to route
+    # production here while this is False, so a misconfigured flag can't break the live path.
+    serves_production = False
 
     def is_enabled(self) -> bool:
         return bool(config.VISION_CHALLENGER_URL)

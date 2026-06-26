@@ -32,6 +32,9 @@ class LegacyArgusVisionAdapter:
 
     capability = Capability.VISION
     name = "argus"
+    # Argus owns the full production path (trigger -> callback -> writeback of asset
+    # scores/alt-text/keywords/hero), so it is eligible to serve production vision.
+    serves_production = True
 
     def is_enabled(self) -> bool:
         return argus_analyze.is_enabled()

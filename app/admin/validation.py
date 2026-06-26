@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 
 from .. import config, db, security, validation
+from ..providers import registry
 from ..render import templates
 
 log = logging.getLogger("mise.admin.validation")
@@ -110,6 +111,7 @@ async def validation_view(request: Request, msg: str = "", err: str = ""):
             "items": items,
             "item_count": len(items),
             "candidates": candidates,
+            "promotion": registry.active_vision_provider(),
             "baseline_model": _VISION["baseline"],
             "challenger_model": _VISION["challenger"],
             "msg": msg,
