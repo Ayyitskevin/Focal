@@ -160,6 +160,15 @@ VISION_CHALLENGER_TOKEN = os.environ.get("MISE_VISION_CHALLENGER_TOKEN", "")
 VISION_CHALLENGER_TIMEOUT = int(os.environ.get("MISE_VISION_CHALLENGER_TIMEOUT", "120"))
 VISION_CHALLENGER_MAX_IMAGES = int(os.environ.get("MISE_VISION_CHALLENGER_MAX_IMAGES", "4"))
 
+# Validation-scoring harness thresholds (the promotion gate over the fixed validation set).
+# MIN_PAIRED = how many validation items must be HUMAN-scored for BOTH the baseline and the
+# challenger before parity is even evaluated (enough overlapping evidence). PARITY_MARGIN =
+# how much the challenger's mean quality must clear the baseline's on those paired items;
+# 0.0 means "at least parity". These tune the deterministic verdict WITHOUT touching code;
+# the gate only reports readiness — promotion is always a deliberate human action.
+VALIDATION_MIN_PAIRED = int(os.environ.get("MISE_VALIDATION_MIN_PAIRED", "20"))
+VALIDATION_PARITY_MARGIN = float(os.environ.get("MISE_VALIDATION_PARITY_MARGIN", "0.0"))
+
 # Plutus print upsell (Phase 1). BOTH url+token arm post-Argus recommend hooks.
 PLUTUS_URL = os.environ.get("MISE_PLUTUS_URL", "").rstrip("/")
 PLUTUS_TOKEN = os.environ.get("MISE_PLUTUS_TOKEN", "")

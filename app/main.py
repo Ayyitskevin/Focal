@@ -44,6 +44,7 @@ from .admin import (
     shotlist,
     studio,
     uploads,
+    validation,
 )
 from .admin import scheduling as admin_scheduling
 from .public import docs, downloads, gallery, media, pay, portal, site, sms_webhook, workspace
@@ -206,6 +207,7 @@ for r in (
     audit.router,
     ai_runs.router,
     offers.router,
+    validation.router,
     inbox.router,
     settings.router,
     financials.router,

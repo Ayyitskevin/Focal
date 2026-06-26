@@ -1,0 +1,91 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Validation · Mise{% endblock %}
+{% block topbar %}
+<header class="admin-topbar pgtop">
+  <div class="pgtop-lead">
+    <h1>Validation gate</h1>
+    <p class="pgtop-sub">
+      Human-scored parity over a fixed validation set — the promotion gate for a shadowed
+      AI provider. Quality from your scores, cost &amp; latency from the AI runs ledger.
+    </p>
+  </div>
+  <div class="pgtop-actions">
+    <a class="pgtop-link" href="/admin/validation.csv">&#10515; Export scores</a>
+  </div>
+</header>
+{% endblock %}
+{% block admin_body %}
+<main class="admin-main">
+  <section class="audit-feed">
+    <div class="airuns-shadow" style="border-left:3px solid {{ '#2f7d57' if report.ready else '#9a7a2c' }}; padding-left:.7rem; margin:.5rem 0">
+      <div class="audit-head">
+        <span class="audit-title">{{ report.label }} · {{ report.challenger.model }} vs {{ report.baseline.model }}</span>
+        <span class="audit-amount"
+              style="background:{{ '#e1f2e9' if report.ready else '#f7ecd2' }};color:{{ '#2f7d57' if report.ready else '#9a7a2c' }}">
+          {{ report.verdict }}
+        </span>
+      </div>
+
+      <div class="audit-detail" style="margin:.4rem 0">
+        <table style="border-collapse:collapse; font-size:.9rem">
+          <tr style="text-align:left; color:#5b6b73">
+            <th style="padding:.15rem .8rem .15rem 0">Model</th>
+            <th style="padding:.15rem .8rem">Mean score</th>
+            <th style="padding:.15rem .8rem">Items scored</th>
+            <th style="padding:.15rem .8rem">OK runs</th>
+          </tr>
+          <tr>
+            <td style="padding:.15rem .8rem .15rem 0">{{ report.baseline.model }} <span class="muted">(baseline)</span></td>
+            <td style="padding:.15rem .8rem">{{ report.baseline.mean_score }}</td>
+            <td style="padding:.15rem .8rem">{{ report.baseline.scored }}</td>
+            <td style="padding:.15rem .8rem">{{ report.baseline.runs }}</td>
+          </tr>
+          <tr>
+            <td style="padding:.15rem .8rem .15rem 0">{{ report.challenger.model }} <span class="muted">(challenger)</span></td>
+            <td style="padding:.15rem .8rem">{{ report.challenger.mean_score }}</td>
+            <td style="padding:.15rem .8rem">{{ report.challenger.scored }}</td>
+            <td style="padding:.15rem .8rem">{{ report.challenger.runs }}</td>
+          </tr>
+        </table>
+      </div>
+
+      <div class="audit-foot" style="display:block">
+        <div class="muted" style="margin:.1rem 0">
+          quality delta {{ report.mean_delta }} · paired {{ report.paired }}/{{ report.min_paired }} ·
+          {{ report.total_items }} item{{ "s" if report.total_items != 1 }} in set
+        </div>
+        <ul style="margin:.3rem 0 .1rem; padding-left:1.1rem; font-size:.85rem">
+          {% for r in report.reasons %}<li>{{ r }}</li>{% endfor %}
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  {% if items %}
+  <section class="audit-feed" style="margin-top:.6rem">
+    <div class="muted" style="font-size:.8rem; margin:.2rem 0">Validation set ({{ item_count }})</div>
+    {% for it in items %}
+    <div class="audit-row">
+      <span class="audit-ic" aria-hidden="true" style="background:#eceff1;color:#5b6b73">V</span>
+      <div class="audit-body">
+        <div class="audit-head">
+          <span class="audit-title">{{ it.label or (it.subject_type ~ " #" ~ it.subject_id) }}</span>
+          <span class="audit-time">{{ it.subject_type }} #{{ it.subject_id }}</span>
+        </div>
+        {% if it.expected %}<div class="audit-detail muted">expected: {{ it.expected }}</div>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </section>
+  {% else %}
+  <p class="muted">The validation set is empty. Curate fixed subjects with
+    <code>validation.add_item(...)</code> and record human scores with
+    <code>validation.record_score(...)</code>; the verdict above evaluates once both the
+    baseline and challenger are scored on enough shared items.</p>
+  {% endif %}
+
+  <p class="audit-note muted">This gate only <em>reports</em> readiness — promoting a
+    provider over the legacy default stays a deliberate human action. Quality is your
+    scored judgement; cost and latency are informational, never an auto-gate (audit §9.5).</p>
+</main>
+{% endblock %}
