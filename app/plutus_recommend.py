@@ -12,7 +12,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from . import config, db
+from . import config, db, features
 
 log = logging.getLogger("mise.plutus")
 
@@ -156,9 +156,37 @@ def apply_callback(gallery_id: int, payload: dict) -> None:
     )
 
 
+def _run_via_facade(gallery_id: int) -> None:
+    """Phase 3 facade path: route the recommend through providers.resolve(OFFERS) — which
+    still resolves to the legacy Plutus adapter — record provenance to ai_runs, and record
+    plutus_last_* from the same result. Single Plutus call; same recording as the legacy
+    path. Offers stay proposal-only; this never touches money/invoice state."""
+    from . import ai_runs, providers
+
+    pr = providers.resolve(providers.Capability.OFFERS).recommend_gallery(gallery_id)
+    ai_runs.record(pr, subject_type="gallery", subject_id=gallery_id)
+    if not pr.ok:
+        log.warning("plutus recommend failed for gallery %s (facade): %s", gallery_id, pr.error)
+        _record(gallery_id, status="error", error=pr.error)
+        return
+    out = pr.output or {}
+    _record(
+        gallery_id,
+        status="done",
+        run_id=int(out["run_id"]) if out.get("run_id") is not None else None,
+        review_url=out.get("review_url"),
+        pitch_url=out.get("pitch_url"),
+        bundle_count=out.get("bundle_count"),
+        estimated_total_cents=out.get("estimated_total_cents"),
+    )
+
+
 def run_for_gallery(gallery_id: int) -> None:
     if not is_enabled():
         log.info("plutus recommend skipped for %s (not configured)", gallery_id)
+        return
+    if features.offers_provider_facade_enabled():
+        _run_via_facade(gallery_id)
         return
     try:
         result = trigger_gallery_recommend(gallery_id)

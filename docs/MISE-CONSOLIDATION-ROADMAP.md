@@ -92,11 +92,11 @@ flow changes until a challenger is deliberately wired.
 
 ## Phase 3 — Plutus offers, idempotent client links
 
-| Slice | Deliverable | Acceptance | Rollback |
-| --- | --- | --- | --- |
-| 3.1 | Route recommend through `providers` (`Capability.OFFERS`); legacy default. | One idempotent offer per gallery preserved; `plutus_last_*` + `ai_runs` written; retry never duplicates. | Flag → legacy. |
-| 3.2 | Operator review/edit UI for offers in Mise (offers are **A1 drafts**). | No auto-send, no auto-charge; human approves each offer/pitch. | Hide UI; offers remain proposal-only. |
-| 3.3 | **30–60 day offer-acceptance/revenue scorecard.** | Measured revenue lift or it is a retire candidate (audit §19.4). | — |
+| Slice | Deliverable | Acceptance | Rollback | Status |
+| --- | --- | --- | --- | --- |
+| 3.1 | Route recommend through `providers` (`Capability.OFFERS`) behind `MISE_PROVIDER_FACADE_OFFERS` (default off); record `ai_runs` provenance. Single Plutus call; `plutus_last_*` recorded identically. | Flag OFF (default) = byte-identical legacy path, no `ai_runs` row; flag ON = facade + one OFFERS provenance row; failure records a non-OK row and `plutus_last_status='error'`. Offers stay proposal-only — no charge/send/invoice touch. | Flip `MISE_PROVIDER_FACADE_OFFERS` off → legacy. | ✅ in PR |
+| 3.2 | Operator review/edit UI for offers in Mise (offers are **A1 drafts**). | No auto-send, no auto-charge; human approves each offer/pitch. | Hide UI; offers remain proposal-only. | ⏳ later |
+| 3.3 | **30–60 day offer-acceptance/revenue scorecard.** | Measured revenue lift or it is a retire candidate (audit §19.4). | — | ⏳ later |
 
 **Money guardrail:** any pricing/SKU rule that affects an invoice is **red-light** —
 proposal only, deterministic Mise code + human applies it. Never let the model set price

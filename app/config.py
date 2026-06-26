@@ -137,6 +137,13 @@ PLUTUS_URL = os.environ.get("MISE_PLUTUS_URL", "").rstrip("/")
 PLUTUS_TOKEN = os.environ.get("MISE_PLUTUS_TOKEN", "")
 PLUTUS_TIMEOUT = int(os.environ.get("MISE_PLUTUS_TIMEOUT", "30"))
 
+# Phase 3 strangler flag (Mise Solo Studio OS). When ON, the offers recommend path routes
+# through the app/providers facade (still the legacy Plutus adapter by default) and records
+# provenance to the ai_runs ledger. Default OFF: the legacy plutus_recommend path runs
+# unchanged and writes no ai_runs rows. Offers stay PROPOSAL-ONLY either way — this never
+# charges, sends, or touches an invoice.
+PROVIDER_FACADE_OFFERS = _b("MISE_PROVIDER_FACADE_OFFERS", "false")
+
 # studio-notify-on-reopen: best-effort push to Odysseus when a client reply
 # auto-reopens a resolved video-comment thread. Both unset -> dormant, no outbound
 # call. Timeout is SHORT (5s) — opposite of caption: a slow/down Odysseus must never
