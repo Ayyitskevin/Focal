@@ -32,13 +32,13 @@ def test_disabled_when_url_unset(monkeypatch):
 
 
 def test_enabled_when_url_set(monkeypatch):
-    monkeypatch.setattr(config, "VISION_CHALLENGER_URL", "http://strix:11434/v1")
+    monkeypatch.setattr(config, "VISION_CHALLENGER_URL", "http://mickeybot:11434/v1")
     assert InternalVisionChallengerAdapter().is_enabled() is True
 
 
 def test_ok_mapping(monkeypatch):
-    monkeypatch.setattr(config, "VISION_CHALLENGER_URL", "http://strix:11434/v1")
-    monkeypatch.setattr(config, "VISION_CHALLENGER_MODEL", "qwen3-vl:8b")
+    monkeypatch.setattr(config, "VISION_CHALLENGER_URL", "http://mickeybot:11434/v1")
+    monkeypatch.setattr(config, "VISION_CHALLENGER_MODEL", "qwen3-vl:32b")
     monkeypatch.setattr(
         vc, "_gather_image_paths", lambda gid, limit: [Path("a.jpg"), Path("b.jpg")]
     )
@@ -50,14 +50,14 @@ def test_ok_mapping(monkeypatch):
     r = InternalVisionChallengerAdapter().analyze_gallery(5)
     assert r.ok
     assert r.capability is Capability.VISION and r.provider == "qwen3-vl"
-    assert r.model == "qwen3-vl:8b"
+    assert r.model == "qwen3-vl:32b"
     assert r.output["image_count"] == 2
     assert r.output["analysis"] == "keywords: plated dish"
     assert r.cost_usd == 0.0 and r.latency_ms is not None
 
 
 def test_no_images_is_invalid(monkeypatch):
-    monkeypatch.setattr(config, "VISION_CHALLENGER_URL", "http://strix:11434/v1")
+    monkeypatch.setattr(config, "VISION_CHALLENGER_URL", "http://mickeybot:11434/v1")
     monkeypatch.setattr(vc, "_gather_image_paths", lambda gid, limit: [])
     r = InternalVisionChallengerAdapter().analyze_gallery(5)
     assert r.status is ResultStatus.INVALID_RESPONSE
@@ -65,7 +65,7 @@ def test_no_images_is_invalid(monkeypatch):
 
 
 def test_provider_error_is_non_raising(monkeypatch):
-    monkeypatch.setattr(config, "VISION_CHALLENGER_URL", "http://strix:11434/v1")
+    monkeypatch.setattr(config, "VISION_CHALLENGER_URL", "http://mickeybot:11434/v1")
     monkeypatch.setattr(vc, "_gather_image_paths", lambda gid, limit: [Path("a.jpg")])
 
     def boom(self, paths):
@@ -78,7 +78,7 @@ def test_provider_error_is_non_raising(monkeypatch):
 
 
 def test_unexpected_shape_is_invalid(monkeypatch):
-    monkeypatch.setattr(config, "VISION_CHALLENGER_URL", "http://strix:11434/v1")
+    monkeypatch.setattr(config, "VISION_CHALLENGER_URL", "http://mickeybot:11434/v1")
     monkeypatch.setattr(vc, "_gather_image_paths", lambda gid, limit: [Path("a.jpg")])
     monkeypatch.setattr(
         InternalVisionChallengerAdapter, "_analyze", lambda self, paths: {"oops": 1}
@@ -91,13 +91,13 @@ def test_registry_autoregisters_only_when_configured(monkeypatch):
     monkeypatch.setattr(config, "VISION_CHALLENGER_URL", "")
     assert registry.challenger(Capability.VISION) is None  # dormant
 
-    monkeypatch.setattr(config, "VISION_CHALLENGER_URL", "http://strix:11434/v1")
+    monkeypatch.setattr(config, "VISION_CHALLENGER_URL", "http://mickeybot:11434/v1")
     chal = registry.challenger(Capability.VISION)
     assert isinstance(chal, InternalVisionChallengerAdapter)
 
 
 def test_registry_override_still_wins(monkeypatch):
-    monkeypatch.setattr(config, "VISION_CHALLENGER_URL", "http://strix:11434/v1")
+    monkeypatch.setattr(config, "VISION_CHALLENGER_URL", "http://mickeybot:11434/v1")
     from app.providers.mocks import MockVisionChallengerAdapter
 
     mock = MockVisionChallengerAdapter()

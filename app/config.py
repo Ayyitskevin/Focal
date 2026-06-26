@@ -132,16 +132,16 @@ ARGUS_ANALYZE_LIMIT = int(os.environ.get("MISE_ARGUS_ANALYZE_LIMIT", "0"))
 # arming the flag alone changes nothing. See docs/MISE-CONSOLIDATION-ROADMAP.md Phase 2.
 VISION_SHADOW = _b("MISE_VISION_SHADOW", "false")
 
-# Internal vision challenger backend (Phase 2). The recommended local challenger to
-# Argus's cloud Grok path is Qwen3-VL (8B-class) served on strix via an OpenAI-compatible
-# endpoint (Ollama) — audit §9.2/§9.6. DORMANT until the URL is set (point it ONLY at a
-# trusted LOCAL endpoint; client-media privacy — cloud vision by default is intentionally
-# unsupported here). Used in SHADOW only: results go to the ai_runs ledger, never to
-# assets. URL is the OpenAI-compatible base (e.g. http://strix-halo-a9-mega:11434/v1);
-# the adapter POSTs {URL}/chat/completions with downsized WEB derivatives (not originals),
-# capped at MAX_IMAGES to minimize data exposure (§13.4).
+# Internal vision challenger backend (Phase 2). The local challenger to Argus's cloud Grok
+# path is Qwen3-VL (32B) served on mickeybot via an OpenAI-compatible endpoint (Ollama) —
+# audit §9.2/§9.6, ADR 0007. DORMANT until the URL is set (point it ONLY at a trusted LOCAL
+# endpoint; client-media privacy — cloud vision by default is intentionally unsupported
+# here). Used in SHADOW only: results go to the ai_runs ledger, never to assets. URL is the
+# OpenAI-compatible base (e.g. http://mickeybot:11434/v1); the adapter POSTs
+# {URL}/chat/completions with downsized WEB derivatives (not originals), capped at
+# MAX_IMAGES to minimize data exposure (§13.4).
 VISION_CHALLENGER_URL = os.environ.get("MISE_VISION_CHALLENGER_URL", "").rstrip("/")
-VISION_CHALLENGER_MODEL = os.environ.get("MISE_VISION_CHALLENGER_MODEL", "qwen3-vl:8b")
+VISION_CHALLENGER_MODEL = os.environ.get("MISE_VISION_CHALLENGER_MODEL", "qwen3-vl:32b")
 VISION_CHALLENGER_TOKEN = os.environ.get("MISE_VISION_CHALLENGER_TOKEN", "")
 VISION_CHALLENGER_TIMEOUT = int(os.environ.get("MISE_VISION_CHALLENGER_TIMEOUT", "120"))
 VISION_CHALLENGER_MAX_IMAGES = int(os.environ.get("MISE_VISION_CHALLENGER_MAX_IMAGES", "4"))
