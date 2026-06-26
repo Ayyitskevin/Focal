@@ -34,6 +34,13 @@ def vision_shadow_enabled() -> bool:
     return bool(config.VISION_SHADOW)
 
 
+def offers_provider_facade_enabled() -> bool:
+    """Phase 3: route Plutus offer recommendations through the app/providers facade and
+    record ai_runs provenance. Default off — the legacy plutus_recommend path stays
+    production. Offers remain proposal-only regardless."""
+    return bool(config.PROVIDER_FACADE_OFFERS)
+
+
 def gmail_enabled() -> bool:
     return bool(config.GMAIL_USER and config.GMAIL_APP_PASSWORD)
 
