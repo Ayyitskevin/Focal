@@ -244,6 +244,21 @@ def _scores_for(capability: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def scores_map(capability: str) -> dict[int, dict[str, float]]:
+    """``{item_id: {model: score}}`` for the active set — lets the operator UI pre-fill the
+    current score for each (item, model) without N queries. Read-only."""
+    out: dict[int, dict[str, float]] = {}
+    for s in _scores_for(capability):
+        out.setdefault(s["item_id"], {})[s["model"]] = s["score"]
+    return out
+
+
+def deactivate_item(item_id: int) -> None:
+    """Drop a subject from the fixed set (soft — ``active=0``). The gate excludes inactive
+    items; its scores are kept for the record. Reversible by flipping ``active`` back."""
+    db.run("UPDATE validation_items SET active=0 WHERE id=?", (item_id,))
+
+
 def _run_metrics(capability: str, model: str) -> dict:
     """Average ok-run latency/cost for ``model`` from the ai_runs ledger (the cost/latency
     half of the audit's evaluation; quality comes from human scores)."""

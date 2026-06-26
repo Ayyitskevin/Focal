@@ -16,6 +16,9 @@
 {% endblock %}
 {% block admin_body %}
 <main class="admin-main">
+  {% if msg %}<div style="margin:.4rem 0; padding:.5rem .8rem; border-radius:6px; background:#e1f2e9; color:#2f7d57">{{ msg }}</div>{% endif %}
+  {% if err %}<div style="margin:.4rem 0; padding:.5rem .8rem; border-radius:6px; background:#f3e3e5; color:#7C2F38">{{ err }}</div>{% endif %}
+
   <section class="audit-feed">
     <div class="airuns-shadow" style="border-left:3px solid {{ '#2f7d57' if report.ready else '#9a7a2c' }}; padding-left:.7rem; margin:.5rem 0">
       <div class="audit-head">
@@ -61,27 +64,60 @@
     </div>
   </section>
 
+  <details style="margin:.6rem 0">
+    <summary style="cursor:pointer; font-size:.9rem; color:#3B5A48">＋ Add a subject to the validation set</summary>
+    <form method="post" action="/admin/validation/items" style="margin:.5rem 0; display:flex; flex-wrap:wrap; gap:.5rem; align-items:end">
+      <label style="font-size:.8rem">Subject type<br>
+        <input name="subject_type" value="gallery" style="padding:.3rem"></label>
+      <label style="font-size:.8rem">Subject id<br>
+        <input name="subject_id" type="number" min="1" required style="padding:.3rem; width:6rem"></label>
+      <label style="font-size:.8rem">Label<br>
+        <input name="label" placeholder="e.g. Spring wedding A" style="padding:.3rem; width:14rem"></label>
+      <label style="font-size:.8rem">Expected (ground truth)<br>
+        <input name="expected" placeholder="optional note" style="padding:.3rem; width:16rem"></label>
+      <button type="submit" style="padding:.35rem .8rem">Add</button>
+    </form>
+  </details>
+
   {% if items %}
-  <section class="audit-feed" style="margin-top:.6rem">
-    <div class="muted" style="font-size:.8rem; margin:.2rem 0">Validation set ({{ item_count }})</div>
+  <section class="audit-feed" style="margin-top:.4rem">
+    <div class="muted" style="font-size:.8rem; margin:.2rem 0">Validation set ({{ item_count }}) — score each model 0.00–1.00</div>
     {% for it in items %}
     <div class="audit-row">
       <span class="audit-ic" aria-hidden="true" style="background:#eceff1;color:#5b6b73">V</span>
       <div class="audit-body">
         <div class="audit-head">
-          <span class="audit-title">{{ it.label or (it.subject_type ~ " #" ~ it.subject_id) }}</span>
-          <span class="audit-time">{{ it.subject_type }} #{{ it.subject_id }}</span>
+          <span class="audit-title">{{ it.label }}</span>
+          <span class="audit-time">{{ it.subject }}</span>
         </div>
         {% if it.expected %}<div class="audit-detail muted">expected: {{ it.expected }}</div>{% endif %}
+        <div class="audit-foot" style="display:flex; gap:.6rem; align-items:end; flex-wrap:wrap">
+          <form method="post" action="/admin/validation/items/{{ it.id }}/scores"
+                style="display:flex; gap:.5rem; align-items:end">
+            <label style="font-size:.78rem">{{ baseline_model }}<br>
+              <input name="baseline_score" type="number" min="0" max="1" step="0.05"
+                     value="{{ '%.2f'|format(it.baseline_score) if it.baseline_score is not none else '' }}"
+                     style="padding:.25rem; width:5rem"></label>
+            <label style="font-size:.78rem">{{ challenger_model }}<br>
+              <input name="challenger_score" type="number" min="0" max="1" step="0.05"
+                     value="{{ '%.2f'|format(it.challenger_score) if it.challenger_score is not none else '' }}"
+                     style="padding:.25rem; width:5rem"></label>
+            <button type="submit" style="padding:.3rem .7rem">Save</button>
+          </form>
+          <form method="post" action="/admin/validation/items/{{ it.id }}/deactivate"
+                onsubmit="return confirm('Remove this subject from the validation set?')">
+            <button type="submit" class="muted"
+                    style="padding:.3rem .6rem; background:none; border:1px solid #d3d9dc; border-radius:5px; cursor:pointer">Remove</button>
+          </form>
+        </div>
       </div>
     </div>
     {% endfor %}
   </section>
   {% else %}
-  <p class="muted">The validation set is empty. Curate fixed subjects with
-    <code>validation.add_item(...)</code> and record human scores with
-    <code>validation.record_score(...)</code>; the verdict above evaluates once both the
-    baseline and challenger are scored on enough shared items.</p>
+  <p class="muted">The validation set is empty. Add fixed subjects above, then score the
+    baseline and challenger on each; the verdict evaluates once both are scored on enough
+    shared items.</p>
   {% endif %}
 
   <p class="audit-note muted">This gate only <em>reports</em> readiness — promoting a
