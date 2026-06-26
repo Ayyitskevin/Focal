@@ -15,14 +15,16 @@ validates, human approves" loop (§11.4, ADR 0009/0011):
 Writes are admin-gated; same-origin is enforced by the global CSRF middleware.
 """
 
+import csv
+import io
 import logging
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 
 from .. import albums, db, security
-from ..render import templates
+from ..render import _localtime, templates
 
 log = logging.getLogger("mise.admin.albums")
 router = APIRouter(prefix="/admin/albums", dependencies=[Depends(security.require_admin)])
@@ -214,3 +216,80 @@ async def order_clear(draft_id: int):
     albums.clear_order(draft_id)
     log.info("album draft %s order cleared", draft_id)
     return _redirect(f"/admin/albums/{draft_id}", msg="Order mark cleared.")
+
+
+# ── print-ready export (record-only — for the operator to hand to their lab) ────────────────
+
+
+def _export_data(draft_id: int):
+    """Shared fetch for the print sheet + CSV: an APPROVED draft, its gallery, and its
+    placements in spread/slot order. Returns ``(draft, gallery, placements)`` or None."""
+    draft = albums.get_draft(draft_id)
+    if not draft or draft["status"] != "approved":
+        return None
+    gallery = db.one("SELECT id, slug, title FROM galleries WHERE id=?", (draft["gallery_id"],))
+    if not gallery:
+        return None
+    return draft, dict(gallery), albums.draft_placements(draft_id)
+
+
+@router.get("/{draft_id}/order-sheet", response_class=HTMLResponse)
+async def order_sheet(request: Request, draft_id: int):
+    """A standalone, print-ready order sheet for an approved album — the operator prints it to
+    PDF for their lab. Read-only; shows the spec + every photo in spread/slot order."""
+    data = _export_data(draft_id)
+    if data is None:
+        return _redirect(
+            "/admin/albums", err="The order sheet is available once the album is approved."
+        )
+    draft, gallery, placements = data
+    spreads: dict[int, list[dict]] = {}
+    for p in placements:
+        spreads.setdefault(p["spread"], []).append(p)
+    spread_view = [
+        {"spread": s, "slots": sorted(spreads[s], key=lambda x: x["slot"])} for s in sorted(spreads)
+    ]
+    return templates.TemplateResponse(
+        request,
+        "admin/album_order_sheet.html",
+        {
+            "draft": draft,
+            "gallery": gallery,
+            "spreads": spread_view,
+            "photo_count": len(placements),
+        },
+    )
+
+
+@router.get("/{draft_id}/order.csv", response_class=PlainTextResponse)
+async def order_csv(draft_id: int):
+    """The album's photo manifest as CSV — the ordered file list a lab pulls from. Spec rows
+    up top, then one row per photo in spread/slot order."""
+    data = _export_data(draft_id)
+    if data is None:
+        return _redirect(
+            "/admin/albums", err="The manifest is available once the album is approved."
+        )
+    draft, gallery, placements = data
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["Album", gallery["title"] or gallery["slug"]])
+    w.writerow(["Gallery", f"#{gallery['id']} {gallery['slug']}"])
+    w.writerow(["Size", draft["order_size"] or ""])
+    w.writerow(["Cover", draft["order_cover"] or ""])
+    w.writerow(["Notes", draft["order_notes"] or ""])
+    w.writerow(
+        [
+            "Ordered",
+            _localtime(draft["ordered_at"]) if draft["ordered_at"] else "not marked ordered",
+        ]
+    )
+    w.writerow(["Photos", len(placements)])
+    w.writerow([])
+    w.writerow(["Spread", "Slot", "Filename", "Asset ID"])
+    for p in placements:
+        w.writerow([p["spread"] + 1, p["slot"] + 1, p["filename"], p["asset_id"]])
+    filename = f"album-{gallery['slug']}-manifest.csv"
+    return PlainTextResponse(
+        buf.getvalue(), headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )

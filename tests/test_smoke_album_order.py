@@ -119,10 +119,41 @@ def test_clear_order(admin_client):
     assert d["ordered_at"] is None and d["order_size"] is None and d["order_notes"] is None
 
 
+def test_order_sheet_renders_for_approved(admin_client):
+    did = _draft()
+    admin_client.post(f"/admin/albums/{did}/order", data={"size": "10x10", "cover": "linen"})
+    body = admin_client.get(f"/admin/albums/{did}/order-sheet").text
+    assert "Album order sheet" in body
+    assert "p1.jpg" in body  # the photo manifest is in the sheet
+    assert "10x10" in body and "linen" in body  # the recorded spec
+    assert "window.print()" in body  # print-to-PDF affordance
+
+
+def test_manifest_csv_lists_photos_in_order(admin_client):
+    did = _draft()
+    admin_client.post(f"/admin/albums/{did}/order", data={"size": "8x8"})
+    r = admin_client.get(f"/admin/albums/{did}/order.csv")
+    assert r.status_code == 200
+    assert "attachment" in r.headers["content-disposition"]
+    text = r.text
+    assert "Spread,Slot,Filename,Asset ID" in text  # manifest header
+    assert "p1.jpg" in text and "8x8" in text
+
+
+def test_export_refused_until_approved(admin_client):
+    did = _draft(approved=False)  # status 'draft'
+    r = admin_client.get(f"/admin/albums/{did}/order-sheet", follow_redirects=False)
+    assert r.status_code == 303 and "err=" in r.headers["location"]
+    r2 = admin_client.get(f"/admin/albums/{did}/order.csv", follow_redirects=False)
+    assert r2.status_code == 303 and "err=" in r2.headers["location"]
+
+
 def test_album_order_requires_admin(tmp_path, monkeypatch):
     _configure_tmp_db(tmp_path, monkeypatch)
     with TestClient(app) as anon:
         r = anon.post("/admin/albums/1/order", data={"size": "8x8"}, follow_redirects=False)
         assert r.status_code == 303
         assert r.headers["location"] == "/admin/login"
+        r2 = anon.get("/admin/albums/1/order-sheet", follow_redirects=False)
+        assert r2.status_code == 303 and r2.headers["location"] == "/admin/login"
         jobs.stop()
