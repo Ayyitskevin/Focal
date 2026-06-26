@@ -19,7 +19,7 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 
-from .. import db, security
+from .. import audit, config, db, mailer, security
 from ..render import _localtime, templates
 
 log = logging.getLogger("mise.admin.offers")
@@ -87,7 +87,8 @@ def _rows(status: str, decision: str = "any") -> list[dict]:
                   g.plutus_last_offer_url, g.plutus_last_pitch_url, g.plutus_last_bundle_count,
                   g.plutus_last_estimated_cents, g.plutus_last_error, g.plutus_last_at,
                   g.plutus_offer_decision, g.plutus_offer_decided_at,
-                  c.name AS client_name, c.company
+                  g.plutus_offer_sent_at, g.plutus_offer_sent_to,
+                  c.name AS client_name, c.company, c.email AS client_email
            FROM galleries g LEFT JOIN clients c ON c.id = g.client_id
            WHERE g.plutus_last_status IS NOT NULL """
     params: list = []
@@ -126,6 +127,17 @@ def _rows(status: str, decision: str = "any") -> list[dict]:
                 "decision_label": dmeta["label"],
                 "decision_bg": dmeta["bg"],
                 "decision_color": dmeta["color"],
+                "sent_at": r["plutus_offer_sent_at"],
+                "sent_to": r["plutus_offer_sent_to"] or "",
+                "client_email": (r["client_email"] or "").strip(),
+                # "Send to client" is offered only for a ready, approved offer that has a
+                # link and a client email — the deliberate, human-clicked money-path step.
+                "sendable": (
+                    r["plutus_last_status"] == "done"
+                    and r["plutus_offer_decision"] == "approved"
+                    and bool(r["plutus_last_offer_url"])
+                    and bool((r["client_email"] or "").strip())
+                ),
             }
         )
     return out
@@ -241,6 +253,132 @@ async def reset(gallery_id: int):
     return _decision_route(gallery_id, None, "Decision cleared.")
 
 
+# ── send an approved offer to the client (money-adjacent — deliberate, human-clicked) ──────
+
+
+def _offer_gallery(gallery_id: int):
+    return db.one(
+        """SELECT g.id, g.slug, g.title, g.project_id, g.client_id,
+                  g.plutus_last_status, g.plutus_last_offer_url,
+                  g.plutus_offer_decision, g.plutus_offer_sent_at, g.plutus_offer_sent_to,
+                  c.name AS client_name, c.email AS client_email
+           FROM galleries g LEFT JOIN clients c ON c.id = g.client_id
+           WHERE g.id=?""",
+        (gallery_id,),
+    )
+
+
+def _send_block(g) -> str | None:
+    """A human reason the offer can't be sent, or None if it's sendable. The send is
+    money-adjacent, so the same explicit guard runs on both the compose (GET) and send
+    (POST) paths — only a ready, operator-APPROVED offer with a link and a client email."""
+    if g is None:
+        return "No such gallery."
+    if g["plutus_last_status"] != "done":
+        return "This gallery has no ready offer to send."
+    if g["plutus_offer_decision"] != "approved":
+        return "Approve the offer before sending it."
+    if not g["plutus_last_offer_url"]:
+        return "This offer has no link to send."
+    if not (g["client_email"] or "").strip():
+        return "The client has no email address on file."
+    return None
+
+
+def _draft_email(g) -> dict:
+    """The default, EDITABLE offer email — a warm note plus the offer link only (pricing
+    stays on the offer page, per the chosen content). The operator reviews and edits this,
+    then clicks Send; nothing here sends or charges."""
+    title = g["title"] or g["slug"]
+    first = (g["client_name"] or "").strip().split(" ")[0] or "there"
+    subject = f"Print & album options for {title}"
+    body = (
+        f"Hi {first},\n\n"
+        f"Thank you again for working with {config.SITE_NAME}. I've put together a few print "
+        f"and album options I thought would suit your gallery beautifully.\n\n"
+        f"You can take a look here:\n{g['plutus_last_offer_url']}\n\n"
+        f"No rush at all — have a look whenever you like, and just reply if you have any "
+        f"questions or would like to go ahead.\n\n"
+        f"Warmly,\n{config.SITE_NAME}"
+    )
+    return {"subject": subject, "body": body}
+
+
+def _compose_redirect(gallery_id: int, msg: str = "", err: str = "") -> RedirectResponse:
+    params = {k: v for k, v in (("msg", msg), ("err", err)) if v}
+    return RedirectResponse(
+        f"/admin/offers/{gallery_id}/send{('?' + urlencode(params)) if params else ''}",
+        status_code=303,
+    )
+
+
+@router.get("/{gallery_id}/send", response_class=HTMLResponse)
+async def send_compose(request: Request, gallery_id: int, msg: str = "", err: str = ""):
+    g = _offer_gallery(gallery_id)
+    block = _send_block(g)
+    if block:
+        return _redirect(err=block)
+    draft = _draft_email(g)
+    return templates.TemplateResponse(
+        request,
+        "admin/offer_send.html",
+        {
+            "gallery_id": gallery_id,
+            "title": g["title"] or g["slug"],
+            "to": g["client_email"],
+            "offer_url": g["plutus_last_offer_url"],
+            "subject": draft["subject"],
+            "body": draft["body"],
+            "sent_at": g["plutus_offer_sent_at"],
+            "sent_to": g["plutus_offer_sent_to"] or "",
+            "mailer_ready": mailer.configured(),
+            "msg": msg,
+            "err": err,
+        },
+    )
+
+
+@router.post("/{gallery_id}/send")
+async def send_offer(request: Request, gallery_id: int):
+    g = _offer_gallery(gallery_id)
+    block = _send_block(g)
+    if block:
+        return _redirect(err=block)
+    if not mailer.configured():
+        return _redirect(err="Email is not configured.")
+    form = await request.form()
+    to = (form.get("to") or "").strip()
+    subject = (form.get("subject") or "").strip()
+    message = (form.get("message") or "").strip()
+    if not to or not subject or not message:
+        return _compose_redirect(gallery_id, err="To, subject, and message are all required.")
+    try:
+        mailer.send(to, subject, message)
+    except Exception:
+        log.exception("offer send failed for gallery %s", gallery_id)
+        return _compose_redirect(gallery_id, err="SMTP send failed — check the logs.")
+    # mailer.send succeeded, so record the send atomically — the emails_log row, the gallery's
+    # sent state, and the audit row land together (or roll back together). This records that
+    # the offer LINK was emailed; it creates no invoice and charges nothing.
+    with db.tx() as con:
+        # emails_log.doc_kind is constrained to the studio doc kinds + 'other'; an offer send
+        # is logged as 'other' with doc_id = gallery_id. The audit row below ('offer_emailed')
+        # and plutus_offer_sent_* carry the precise offer semantics.
+        con.execute(
+            "INSERT INTO emails_log (project_id, doc_kind, doc_id, to_email, subject) "
+            "VALUES (?,?,?,?,?)",
+            (g["project_id"], "other", gallery_id, to, subject),
+        )
+        con.execute(
+            "UPDATE galleries SET plutus_offer_sent_at=datetime('now'), plutus_offer_sent_to=? "
+            "WHERE id=?",
+            (to, gallery_id),
+        )
+        audit.log(con, "gallery", gallery_id, "offer_emailed", diff={"to": to, "subject": subject})
+    log.info("offer emailed for gallery %s to %s", gallery_id, to)
+    return _redirect(msg=f"Offer sent to {to}.")
+
+
 @router.get(".csv", response_class=PlainTextResponse)
 async def offers_csv():
     """Open offers as CSV — an upsell pipeline snapshot for review."""
@@ -253,6 +391,7 @@ async def offers_csv():
             "Client",
             "Status",
             "Decision",
+            "Sent",
             "Bundles",
             "Estimated",
             "Offer",
@@ -267,6 +406,7 @@ async def offers_csv():
                 e["client"],
                 e["status"],
                 e["decision"] or "undecided",
+                _localtime(e["sent_at"]) if e["sent_at"] else "",
                 e["bundle_count"],
                 e["estimated"],
                 e["offer_url"],

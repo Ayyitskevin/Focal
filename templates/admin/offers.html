@@ -53,6 +53,7 @@
         <div class="audit-detail">
           <span class="audit-amount" style="background:{{ e.status_bg }};color:{{ e.status_color }}">{{ e.status_label }}</span>
           {% if e.decision %}<span class="audit-amount" style="background:{{ e.decision_bg }};color:{{ e.decision_color }}">{{ e.decision_label }}</span>{% endif %}
+          {% if e.sent_at %}<span class="audit-amount" style="background:#e7eef2;color:#2f6d8a">Sent {{ e.sent_at | localtime }}</span>{% endif %}
           {% if e.bundle_count is not none %}{{ e.bundle_count }} bundle{{ "s" if e.bundle_count != 1 }}{% endif %}
           {% if e.estimated %} · <b>{{ e.estimated }}</b> est.{% endif %}
           {% if e.error %} · <span style="color:#7C2F38">{{ e.error }}</span>{% endif %}
@@ -74,6 +75,12 @@
           <form method="post" action="/admin/offers/{{ e.gallery_id }}/reset" style="display:inline">
             <button type="submit" class="muted" style="padding:.25rem .6rem; background:none; border:1px solid #d3d9dc; border-radius:5px; cursor:pointer">Reset</button>
           </form>
+          {% endif %}
+          {% if e.sendable %}
+          <a class="audit-actor" href="/admin/offers/{{ e.gallery_id }}/send"
+             style="padding:.25rem .7rem; background:#2f6d8a; color:#fff; border-radius:5px; text-decoration:none">{{ "Resend offer →" if e.sent_at else "Send to client →" }}</a>
+          {% elif e.decision == 'approved' and not e.client_email %}
+          <span class="muted" style="font-size:.78rem">add a client email to send</span>
           {% endif %}
         </div>
       </div>
