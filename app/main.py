@@ -48,6 +48,7 @@ from .admin import (
     studio,
     uploads,
     validation,
+    vision_cutover,
 )
 from .admin import scheduling as admin_scheduling
 from .public import docs, downloads, gallery, media, pay, portal, site, sms_webhook, workspace
@@ -213,6 +214,7 @@ for r in (
     ai_cost.router,
     offers.router,
     validation.router,
+    vision_cutover.router,
     albums.router,
     inbox.router,
     settings.router,

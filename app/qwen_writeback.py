@@ -28,7 +28,11 @@ from pathlib import Path
 
 from . import config, db
 from .providers import registry
-from .providers.vision_challenger import _gather_image_paths, chat_completion
+from .providers.vision_challenger import (
+    InternalVisionChallengerAdapter,
+    _gather_image_paths,
+    chat_completion,
+)
 
 log = logging.getLogger("mise.qwen_writeback")
 
@@ -217,3 +221,123 @@ def writeback_gallery(gallery_id: int) -> dict:
     except Exception as exc:
         log.warning("qwen writeback failed for gallery %s: %s", gallery_id, exc)
         return {"error": str(exc)[:200]}
+
+
+def enqueue_writeback(gallery_id: int) -> int | None:
+    """Queue a production Qwen writeback for a gallery — the trigger half of the cutover.
+
+    Returns the job id, or ``None`` when the interlock does not currently make Qwen the
+    eligible production provider (so a caller gets immediate "not promoted" feedback instead
+    of a job that silently skips). The handler (:func:`writeback_gallery`) is itself
+    interlocked, so this is safe either way; checking here just avoids queueing a guaranteed
+    no-op. This is what a live trigger (or the operator's manual button) calls — wiring it
+    into the automatic analyze path is the deliberate promote-time step (see ADR 0017)."""
+    status = registry.active_vision_provider()
+    if status["effective"] != _QWEN or not status["eligible"]:
+        return None
+    from . import jobs
+
+    return jobs.enqueue("qwen_writeback_gallery", {"gallery_id": gallery_id})
+
+
+def preview_gallery(gallery_id: int) -> dict:
+    """Asset-safe DRY RUN: fetch Qwen's structured signals for a gallery and validate them
+    WITHOUT writing anything — the prompt-tuning loop (audit §9.5). Lets the operator see the
+    parsed per-photo signals (and any validation rejection) against the live endpoint before
+    promotion, so tuning ``STRUCTURED_PROMPT`` is a tight loop, not a guess.
+
+    Requires only that the challenger endpoint is configured — independent of the production
+    interlock, because tuning necessarily happens *before* the flag flip. Never mutates an
+    asset, never raises; returns ``{"ok": True, "photos", "count"}`` or ``{"ok": False,
+    "error"}``."""
+    if not config.VISION_CHALLENGER_URL:
+        return {
+            "ok": False,
+            "error": "challenger endpoint not configured (set MISE_VISION_CHALLENGER_URL)",
+        }
+    try:
+        photos = _fetch_structured(gallery_id)
+    except QwenWritebackError as exc:
+        return {"ok": False, "error": f"validation rejected the reply: {exc}"}
+    except Exception as exc:
+        return {"ok": False, "error": f"challenger call failed: {str(exc)[:200]}"}
+    return {"ok": True, "photos": photos, "count": len(photos)}
+
+
+def readiness() -> dict:
+    """Report what remains before Qwen can serve production vision — the cutover checklist.
+
+    Read-only and non-raising. Each check is ``{key, label, ok, detail}``; ``ready`` is True
+    only when *every* check passes (the interlock is eligible AND the validation gate is
+    green). It turns promotion from "remember four steps" into an in-app preflight; it decides
+    and changes nothing. ``next_step`` is the first unmet check's action."""
+    from . import validation  # local import keeps the module import graph flat
+
+    status = registry.active_vision_provider()
+    challenger = InternalVisionChallengerAdapter()
+    endpoint_ok = bool(config.VISION_CHALLENGER_URL)
+    prod_capable = bool(getattr(challenger, "serves_production", False))
+    flag_qwen = config.VISION_PROVIDER in ("qwen", "qwen3-vl", "challenger")
+    interlock_ok = status["eligible"] and status["effective"] == _QWEN
+
+    try:
+        rep = validation.promotion_report("vision", "argus", config.VISION_CHALLENGER_MODEL)
+        gate_ok = rep.ready
+        gate_detail = f"paired {rep.paired}/{rep.min_paired} · " + (
+            "ready" if rep.ready else "not ready"
+        )
+    except Exception as exc:  # gate is informational here — never let it break the preflight
+        gate_ok = False
+        gate_detail = f"gate unavailable: {str(exc)[:120]}"
+
+    checks = [
+        {
+            "key": "endpoint",
+            "label": "Challenger endpoint configured",
+            "ok": endpoint_ok,
+            "detail": config.VISION_CHALLENGER_URL
+            or "set MISE_VISION_CHALLENGER_URL to a trusted local endpoint",
+        },
+        {
+            "key": "writeback",
+            "label": "Challenger declares a production writeback",
+            "ok": prod_capable,
+            "detail": "serves_production is True"
+            if prod_capable
+            else "after validating STRUCTURED_PROMPT against the live endpoint, set "
+            "InternalVisionChallengerAdapter.serves_production = True (a reviewed code change)",
+        },
+        {
+            "key": "flag",
+            "label": "MISE_VISION_PROVIDER points at Qwen",
+            "ok": flag_qwen,
+            "detail": f"MISE_VISION_PROVIDER={config.VISION_PROVIDER!r}",
+        },
+        {
+            "key": "interlock",
+            "label": "Interlock routes production to Qwen",
+            "ok": interlock_ok,
+            "detail": status["reason"],
+        },
+        {
+            "key": "gate",
+            "label": "Validation gate is green",
+            "ok": gate_ok,
+            "detail": gate_detail,
+        },
+    ]
+    ready = all(c["ok"] for c in checks)
+    unmet = [c for c in checks if not c["ok"]]
+    next_step = (
+        "Qwen is the eligible production provider — writeback runs when triggered."
+        if ready
+        else f"{unmet[0]['label']}: {unmet[0]['detail']}"
+    )
+    return {
+        "checks": checks,
+        "ready": ready,
+        "effective": status["effective"],
+        "eligible": status["eligible"],
+        "remaining": len(unmet),
+        "next_step": next_step,
+    }

@@ -7,8 +7,9 @@ the eligible production provider — so the scaffold mutates nothing today.
 """
 
 import json
+from types import SimpleNamespace
 
-from app import config, db, qwen_writeback
+from app import config, db, jobs, qwen_writeback, validation
 from app.providers.vision_challenger import InternalVisionChallengerAdapter
 
 
@@ -176,3 +177,85 @@ def test_writeback_gallery_runs_once_qwen_is_promoted(tmp_path, monkeypatch):
         db.one("SELECT argus_keeper_score FROM assets WHERE id=?", (a1,))["argus_keeper_score"]
         == 0.95
     )
+
+
+def _promote(monkeypatch):
+    """Make the interlock treat Qwen as the eligible production provider (mirrors the
+    promoted-writeback test): challenger configured + flagged + production-capable."""
+    monkeypatch.setattr(config, "VISION_PROVIDER", "qwen")
+    monkeypatch.setattr(config, "VISION_CHALLENGER_URL", "http://mickeybot:11434/v1")
+    monkeypatch.setattr(InternalVisionChallengerAdapter, "serves_production", True, raising=False)
+
+
+def test_readiness_lists_steps_remaining_by_default(tmp_path, monkeypatch):
+    _configure_tmp_db(tmp_path, monkeypatch)
+    r = qwen_writeback.readiness()
+    assert r["ready"] is False
+    keys = {c["key"]: c["ok"] for c in r["checks"]}
+    # default posture: no endpoint, eval-only challenger, flag still argus -> nothing satisfied
+    assert keys == {
+        "endpoint": False,
+        "writeback": False,
+        "flag": False,
+        "interlock": False,
+        "gate": False,
+    }
+    assert r["remaining"] == 5 and r["effective"] == "argus" and r["next_step"]
+
+
+def test_readiness_ready_once_promoted_and_gate_green(tmp_path, monkeypatch):
+    _configure_tmp_db(tmp_path, monkeypatch)
+    _promote(monkeypatch)
+    # green gate is the human-scored half — stub the deterministic report as ready
+    monkeypatch.setattr(
+        validation,
+        "promotion_report",
+        lambda *a, **k: SimpleNamespace(ready=True, paired=20, min_paired=20),
+    )
+    r = qwen_writeback.readiness()
+    assert r["ready"] is True and r["remaining"] == 0
+    assert r["effective"] == "qwen3-vl" and r["eligible"] is True
+
+
+def test_preview_is_asset_safe(tmp_path, monkeypatch):
+    _configure_tmp_db(tmp_path, monkeypatch)
+    gid = _gallery()
+    a1 = _asset(gid, "p1.jpg")
+    # endpoint unset -> a clear non-mutating error, no call attempted
+    assert qwen_writeback.preview_gallery(gid)["ok"] is False
+    # with an endpoint, preview parses (mocked) signals but writes NOTHING
+    monkeypatch.setattr(config, "VISION_CHALLENGER_URL", "http://mickeybot:11434/v1")
+    monkeypatch.setattr(
+        qwen_writeback,
+        "_fetch_structured",
+        lambda g: [
+            {
+                "basename": "p1.jpg",
+                "keywords": ["k"],
+                "alt_text": "alt",
+                "keeper_score": 0.9,
+                "hero_potential": 0.9,
+            }
+        ],
+    )
+    res = qwen_writeback.preview_gallery(gid)
+    assert res["ok"] is True and res["count"] == 1 and res["photos"][0]["basename"] == "p1.jpg"
+    assert (
+        db.one("SELECT argus_keeper_score FROM assets WHERE id=?", (a1,))["argus_keeper_score"]
+        is None
+    )
+
+
+def test_enqueue_writeback_refused_until_eligible(tmp_path, monkeypatch):
+    _configure_tmp_db(tmp_path, monkeypatch)
+    gid = _gallery()
+    assert qwen_writeback.enqueue_writeback(gid) is None  # interlock refuses by default
+    _promote(monkeypatch)
+    captured = {}
+    monkeypatch.setattr(
+        jobs, "enqueue", lambda kind, payload: captured.update(kind=kind, payload=payload) or 7
+    )
+    assert qwen_writeback.enqueue_writeback(gid) == 7
+    assert captured["kind"] == "qwen_writeback_gallery" and captured["payload"] == {
+        "gallery_id": gid
+    }

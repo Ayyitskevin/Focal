@@ -1,0 +1,120 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Vision cutover · Mise{% endblock %}
+{% block topbar %}
+<header class="admin-topbar pgtop">
+  <div class="pgtop-lead">
+    <h1>Vision cutover</h1>
+    <p class="pgtop-sub">
+      Preflight for promoting the Qwen3-VL challenger over Argus — the readiness checklist, an
+      asset-safe dry-run of Qwen's signals, and a manual writeback the interlock refuses until
+      Qwen is promoted. Nothing here flips the provider; that stays a deliberate change.
+    </p>
+  </div>
+  <div class="pgtop-actions">
+    <a class="pgtop-link" href="/admin/validation">Validation gate →</a>
+  </div>
+</header>
+{% endblock %}
+{% block admin_body %}
+<main class="admin-main">
+  {% if msg %}<div style="margin:.4rem 0; padding:.5rem .8rem; border-radius:6px; background:#e1f2e9; color:#2f7d57">{{ msg }}</div>{% endif %}
+  {% if err %}<div style="margin:.4rem 0; padding:.5rem .8rem; border-radius:6px; background:#f3e3e5; color:#7C2F38">{{ err }}</div>{% endif %}
+
+  <section class="audit-feed">
+    <div class="airuns-shadow" style="border-left:3px solid {{ '#2f7d57' if readiness.ready else '#9a7a2c' }}; padding-left:.7rem; margin:.5rem 0">
+      <div class="audit-head">
+        <span class="audit-title">Promotion readiness</span>
+        <span class="audit-amount"
+              style="background:{{ '#e1f2e9' if readiness.ready else '#f7ecd2' }};color:{{ '#2f7d57' if readiness.ready else '#9a7a2c' }}">
+          {{ "Ready to promote" if readiness.ready else (readiness.remaining ~ " step" ~ ("s" if readiness.remaining != 1 else "") ~ " remaining") }}
+        </span>
+      </div>
+      <div class="audit-detail" style="margin:.4rem 0">
+        {% for c in readiness.checks %}
+        <div style="display:flex; gap:.55rem; align-items:flex-start; margin:.25rem 0">
+          <span aria-hidden="true" style="flex:0 0 auto; width:1.1rem; text-align:center; font-weight:700;
+                color:{{ '#2f7d57' if c.ok else '#9a7a2c' }}">{{ "✓" if c.ok else "○" }}</span>
+          <span style="font-size:.9rem">
+            {{ c.label }}
+            <span class="muted" style="display:block; font-size:.8rem">{{ c.detail }}</span>
+          </span>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="audit-foot" style="display:block">
+        <div class="muted" style="margin:.2rem 0; font-size:.82rem">
+          Production provider now: <b>{{ readiness.effective }}</b>{% if not readiness.eligible %} (Argus — interlock not yet satisfied){% endif %}
+        </div>
+        <div style="font-size:.85rem; margin:.1rem 0"><b>Next:</b> {{ readiness.next_step }}</div>
+      </div>
+    </div>
+  </section>
+
+  <section style="margin:.6rem 0">
+    <div class="muted" style="font-size:.8rem; margin:.2rem 0">Dry-run preview — asset-safe; writes nothing</div>
+    <form method="post" action="/admin/vision-cutover/preview" style="display:flex; gap:.5rem; align-items:end; flex-wrap:wrap">
+      <label style="font-size:.8rem">Gallery id<br>
+        <input name="gallery_id" type="number" min="1" required value="{{ preview_gid or '' }}"
+               style="padding:.3rem; width:7rem"></label>
+      <button type="submit" style="padding:.35rem .8rem">Preview Qwen signals</button>
+      <span class="muted" style="font-size:.78rem">Calls the configured local endpoint with the gallery's web derivatives and validates the reply — without touching any asset.</span>
+    </form>
+  </section>
+
+  {% if preview is not none %}
+  <section class="audit-feed" style="margin:.2rem 0 .6rem">
+    {% if preview.ok %}
+    <div class="muted" style="font-size:.8rem; margin:.2rem 0">
+      Gallery #{{ preview_gid }} — {{ preview.count }} photo signal{{ "s" if preview.count != 1 }} parsed (not written)
+    </div>
+    {% if preview.photos %}
+    <table style="border-collapse:collapse; font-size:.85rem; width:100%">
+      <tr style="text-align:left; color:#5b6b73">
+        <th style="padding:.2rem .6rem .2rem 0">Basename</th>
+        <th style="padding:.2rem .6rem">Keeper</th>
+        <th style="padding:.2rem .6rem">Hero</th>
+        <th style="padding:.2rem .6rem">Alt text</th>
+        <th style="padding:.2rem .6rem">Keywords</th>
+      </tr>
+      {% for p in preview.photos %}
+      <tr style="border-top:1px solid #eceff1">
+        <td style="padding:.2rem .6rem .2rem 0"><code>{{ p.basename }}</code></td>
+        <td style="padding:.2rem .6rem">{{ "%.2f"|format(p.keeper_score) if p.keeper_score is not none else "—" }}</td>
+        <td style="padding:.2rem .6rem">{{ "%.2f"|format(p.hero_potential) if p.hero_potential is not none else "—" }}</td>
+        <td style="padding:.2rem .6rem">{{ p.alt_text or "—" }}</td>
+        <td class="muted" style="padding:.2rem .6rem">{{ p.keywords|join(", ") if p.keywords else "—" }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="muted">No signals returned (no web derivatives for this gallery, or an empty reply).</p>
+    {% endif %}
+    {% else %}
+    <div style="padding:.5rem .8rem; border-radius:6px; background:#f3e3e5; color:#7C2F38; font-size:.88rem">
+      {{ preview.error }}
+    </div>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  <details style="margin:.6rem 0">
+    <summary style="cursor:pointer; font-size:.9rem; color:#3B5A48">Run a production writeback (manual trigger)</summary>
+    <p class="muted" style="font-size:.82rem; margin:.4rem 0">
+      Queues the deterministic Qwen writeback for one gallery — the same asset columns Argus
+      writes. The interlock <b>refuses</b> this unless every check above passes, so it does
+      nothing until Qwen is promoted.
+    </p>
+    <form method="post" action="/admin/vision-cutover/run"
+          onsubmit="return confirm('Queue a Qwen production writeback for this gallery? It overwrites the vision signals on its assets when Qwen is the active provider.')"
+          style="display:flex; gap:.5rem; align-items:end; flex-wrap:wrap">
+      <label style="font-size:.8rem">Gallery id<br>
+        <input name="gallery_id" type="number" min="1" required style="padding:.3rem; width:7rem"></label>
+      <button type="submit" style="padding:.35rem .8rem">Queue writeback</button>
+    </form>
+  </details>
+
+  <p class="audit-note muted">This page only <em>reports</em> readiness and lets you dry-run.
+    Promoting Qwen over Argus is a deliberate flag + reviewed code change; the preview writes
+    nothing, and the manual writeback is interlocked off until that promotion (ADRs 0016, 0017).</p>
+</main>
+{% endblock %}
