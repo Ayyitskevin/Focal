@@ -17,6 +17,7 @@ states context, the decision, consequences, measured reopen criteria, and altern
 | [0010](0010-validation-scoring-promotion-gate.md) | Validation-scoring harness: a deterministic promotion gate | Accepted |
 | [0011](0011-album-proposer-and-review-workflow.md) | Mnemosyne albums: deterministic baseline proposer + human review workflow | Accepted |
 | [0012](0012-offer-approval-state.md) | Plutus offers: persisted operator approve/reject state | Accepted |
+| [0013](0013-ai-operations-dashboard.md) | AI operations dashboard: one read-only pane over the consolidated capabilities | Accepted |
 
 See also [`../MISE-SOLO-STUDIO-OS.md`](../MISE-SOLO-STUDIO-OS.md),
 [`../REPO-CONSOLIDATION-MATRIX.md`](../REPO-CONSOLIDATION-MATRIX.md),
