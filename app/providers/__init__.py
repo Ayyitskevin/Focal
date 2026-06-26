@@ -27,6 +27,7 @@ from .contracts import (
 )
 from .registry import challenger, reset, resolve, use, use_challenger
 from .shadow import compare
+from .vision_challenger import InternalVisionChallengerAdapter
 
 __all__ = [
     "Capability",
@@ -37,6 +38,7 @@ __all__ = [
     "LegacyPlutusOffersAdapter",
     "LegacyOdysseusCaptionAdapter",
     "LegacyDionysusPackAdapter",
+    "InternalVisionChallengerAdapter",
     "resolve",
     "use",
     "reset",
