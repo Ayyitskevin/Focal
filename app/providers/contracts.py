@@ -30,15 +30,15 @@ from typing import Any
 class Capability(enum.Enum):
     """The photography-AI capabilities Mise consumes. Each maps to one sibling.
 
-    PRODUCTS (Aphrodite) is a roadmap capability not yet integrated in Mise and is
-    intentionally absent until it earns a slice. ALBUMS (Mnemosyne) has a dormant
-    foundation — schema + deterministic layout validator — but no production path yet.
+    ALBUMS (Mnemosyne) and PRODUCTS (Aphrodite) have dormant foundations — schema +
+    deterministic guards — but no production path yet; both stay inert until armed.
     """
 
     VISION = "vision"  # Argus: keywords, alt text, IPTC, culling / hero signals
     OFFERS = "offers"  # Plutus: print / album bundle recommendations
     CONTENT = "content"  # Odysseus caption / Dionysus packs: captions, copy drafts
     ALBUMS = "albums"  # Mnemosyne: curated album-spread layout proposals (human-approved)
+    PRODUCTS = "products"  # Aphrodite: product-image renders (budget-capped, export-gated)
 
 
 class ResultStatus(enum.Enum):

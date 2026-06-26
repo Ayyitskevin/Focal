@@ -21,14 +21,17 @@ from .adapters import (
     LegacyPlutusOffersAdapter,
 )
 from .contracts import Capability
+from .products_render import ProductsRenderAdapter
 from .vision_challenger import InternalVisionChallengerAdapter
 
 # The default (legacy) provider for each capability. CONTENT defaults to the Odysseus
-# caption drafter; the Dionysus pack reader is addressed by name where needed.
+# caption drafter; the Dionysus pack reader is addressed by name where needed. PRODUCTS
+# resolves to the dormant Aphrodite render adapter (no production path yet — ADR 0021).
 _DEFAULT_FACTORIES = {
     Capability.VISION: LegacyArgusVisionAdapter,
     Capability.OFFERS: LegacyPlutusOffersAdapter,
     Capability.CONTENT: LegacyOdysseusCaptionAdapter,
+    Capability.PRODUCTS: ProductsRenderAdapter,
 }
 
 # Per-capability overrides (test / shadow only). Empty in production.

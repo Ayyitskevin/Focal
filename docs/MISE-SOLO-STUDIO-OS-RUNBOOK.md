@@ -112,6 +112,21 @@ nothing until you set the relevant flag. Flags live in flow's `.env`
   behavior, no ledger rows.
 - **Bounded:** every caption is a draft requiring your approval where it's used.
 
+### Products (Aphrodite) — ADR 0021 — **foundation only, dormant**
+
+- **What it does (when armed):** renders product-image variants from source photos. Today
+  only the **foundation** ships — the deterministic guards, not a render backend.
+- **Dormant by default:** with no `MISE_PRODUCTS_RENDER_URL` and a 0 budget, the capability
+  is disabled and `products.create_render` refuses everything; nothing in the app calls it.
+- **The guards (enforced in code, migration 071):** total spend is **hard-capped** by
+  `MISE_PRODUCTS_BUDGET_USD` (a render that would exceed it is refused); every render is a
+  **draft** (no automatic client publication); export is refused unless the render is
+  **approved AND** rights/**consent confirmed** — the single, human-gated outbound step.
+- **Deferred to activation (your calls):** the render backend/worker, what a "product"
+  variant is, the budget number, and the written consent/licensing policy. The foundation
+  enforces *that* consent is confirmed; *which* policy is yours to set.
+- **Rollback:** migration 071 is additive and dormant; see §6.
+
 ---
 
 ## 3. Promoting the vision challenger over Argus (the gate workflow)
@@ -182,6 +197,8 @@ arm it. The controlled cutover to `2025-09-03` (data-source model) is its own ru
 | `MISE_VALIDATION_MIN_PAIRED` | `20` | Paired scores required before the gate evaluates parity |
 | `MISE_VALIDATION_PARITY_MARGIN` | `0.0` | How far the challenger must clear the baseline (0 = parity) |
 | `MISE_PROVIDER_FACADE_OFFERS` | `false` | Route Plutus offers through the facade + ledger provenance |
+| `MISE_PRODUCTS_RENDER_URL` | — | Aphrodite render backend; unset = products dormant |
+| `MISE_PRODUCTS_BUDGET_USD` | `0` | Hard cap on total product-render spend (0 = disabled) |
 | `MISE_NOTION_VERSION` | `2022-06-28` | Notion API version (set `2025-09-03` only after staging validation) |
 | `MISE_NOTION_BOOKINGS_DS` / `…_SESSIONS_DS` | — | Data-source ids for the 2025-09-03 create path |
 
