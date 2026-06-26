@@ -110,3 +110,24 @@ def test_inactive_items_excluded_from_report(tmp_path, monkeypatch):
     db.run("UPDATE validation_items SET active=0 WHERE id=?", (item,))
     rep = validation.promotion_report("vision", "argus", "qwen3-vl:32b")
     assert rep.total_items == 0 and rep.paired == 0 and rep.ready is False
+
+
+def test_scores_map_groups_by_item_and_model(tmp_path, monkeypatch):
+    _configure_tmp_db(tmp_path, monkeypatch)
+    a = validation.add_item("vision", "gallery", 10)
+    b = validation.add_item("vision", "gallery", 11)
+    validation.record_score(a, "argus", "argus", 0.5)
+    validation.record_score(a, "qwen", "qwen3-vl:32b", 0.8)
+    validation.record_score(b, "argus", "argus", 0.6)
+    smap = validation.scores_map("vision")
+    assert smap[a] == {"argus": 0.5, "qwen3-vl:32b": 0.8}
+    assert smap[b] == {"argus": 0.6}
+
+
+def test_deactivate_item_drops_it_from_listing(tmp_path, monkeypatch):
+    _configure_tmp_db(tmp_path, monkeypatch)
+    item = validation.add_item("vision", "gallery", 10)
+    validation.deactivate_item(item)
+    assert validation.list_items("vision") == []
+    # the row (and any scores) survive for the record — only active flips
+    assert db.one("SELECT active FROM validation_items WHERE id=?", (item,))["active"] == 0

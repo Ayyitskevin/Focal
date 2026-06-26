@@ -94,3 +94,79 @@ def test_validation_requires_admin(tmp_path, monkeypatch):
         assert r.status_code == 303
         assert r.headers["location"] == "/admin/login"
         jobs.stop()
+
+
+# ── scoring-entry write routes ───────────────────────────────────────────────────
+
+
+def test_add_item_via_form(admin_client):
+    r = admin_client.post(
+        "/admin/validation/items",
+        data={
+            "subject_type": "gallery",
+            "subject_id": "42",
+            "label": "Spring A",
+            "expected": "warm",
+        },
+    )
+    assert r.status_code == 200  # followed the 303 back to the page
+    assert "Spring A" in r.text and "Added to the validation set" in r.text
+    assert validation.list_items("vision")[0]["subject_id"] == 42
+
+
+def test_add_item_rejects_non_numeric_subject(admin_client):
+    r = admin_client.post(
+        "/admin/validation/items", data={"subject_type": "gallery", "subject_id": "nope"}
+    )
+    assert "numeric subject id is required" in r.text
+    assert validation.list_items("vision") == []
+
+
+def test_record_scores_via_form_drives_verdict(admin_client):
+    # the fixture sets MIN_PAIRED=2, so score two items to satisfy the gate's coverage bar.
+    for g, b, c in ((10, 0.6, 0.9), (11, 0.7, 0.95)):
+        it = validation.add_item("vision", "gallery", g, label=f"Case {g}")
+        r = admin_client.post(
+            f"/admin/validation/items/{it}/scores",
+            data={"baseline_score": str(b), "challenger_score": str(c)},
+        )
+        assert "Score saved" in r.text
+    body = admin_client.get("/admin/validation").text
+    assert "Ready to promote" in body  # both paired, challenger better, min_paired=2 met
+
+
+def test_record_scores_one_side_only(admin_client):
+    it = validation.add_item("vision", "gallery", 10)
+    r = admin_client.post(
+        f"/admin/validation/items/{it}/scores",
+        data={"baseline_score": "0.5", "challenger_score": ""},
+    )
+    assert "Score saved" in r.text
+    smap = validation.scores_map("vision")
+    assert smap[it] == {"argus": 0.5}  # only baseline recorded
+
+
+def test_record_scores_rejects_out_of_range_and_stores_nothing(admin_client):
+    it = validation.add_item("vision", "gallery", 10)
+    r = admin_client.post(
+        f"/admin/validation/items/{it}/scores",
+        data={"baseline_score": "1.5", "challenger_score": "0.3"},
+    )
+    assert "between 0.00 and 1.00" in r.text
+    # the whole submission is rejected — baseline out of range, so nothing is stored
+    assert validation.scores_map("vision").get(it) is None
+
+
+def test_deactivate_item_drops_it_from_the_set(admin_client):
+    it = validation.add_item("vision", "gallery", 10, label="Doomed")
+    r = admin_client.post(f"/admin/validation/items/{it}/deactivate")
+    assert "Removed from the validation set" in r.text
+    assert validation.list_items("vision") == []
+
+
+def test_write_routes_require_admin(tmp_path, monkeypatch):
+    _configure_tmp_db(tmp_path, monkeypatch)
+    with TestClient(app) as anon:
+        r = anon.post("/admin/validation/items", data={"subject_id": "1"}, follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"] == "/admin/login"
+        jobs.stop()
