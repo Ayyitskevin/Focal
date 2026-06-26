@@ -1,0 +1,86 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}AI cost · Mise{% endblock %}
+{% block topbar %}
+<header class="admin-topbar pgtop">
+  <div class="pgtop-lead">
+    <h1>AI cost &amp; activity</h1>
+    <p class="pgtop-sub">
+      Provider spend and run volume from the ai_runs ledger — by capability and by day.
+      A COGS monitor; cost is informational and drives no action.
+    </p>
+  </div>
+  <div class="pgtop-actions">
+    <a class="pgtop-link" href="/admin/ai-cost.csv?days={{ days }}">&#10515; Export ({{ days }}d)</a>
+  </div>
+</header>
+{% endblock %}
+{% block admin_body %}
+<main class="admin-main">
+  <div class="audit-filters">
+    {% for w in windows %}
+    <a class="audit-chip{% if w == days %} is-active{% endif %}" href="/admin/ai-cost?days={{ w }}">
+      Last {{ w }}d
+    </a>
+    {% endfor %}
+  </div>
+
+  <div style="display:flex; gap:.6rem; flex-wrap:wrap; margin:.5rem 0">
+    <div style="flex:1 1 150px; border:1px solid #e2e6e8; border-radius:8px; padding:.7rem .8rem">
+      <div style="font-size:1.5rem; font-weight:600">{{ totals.cost }}</div>
+      <div class="muted" style="font-size:.8rem">spend · {{ totals.costed }} of {{ totals.runs }} runs reported a cost</div>
+    </div>
+    <div style="flex:1 1 150px; border:1px solid #e2e6e8; border-radius:8px; padding:.7rem .8rem">
+      <div style="font-size:1.5rem; font-weight:600">{{ totals.runs }}</div>
+      <div class="muted" style="font-size:.8rem">runs · {{ totals.errors }} non-OK</div>
+    </div>
+  </div>
+
+  <section style="margin-top:.6rem">
+    <div class="muted" style="font-size:.8rem; margin:.3rem 0">By capability</div>
+    {% if by_capability %}
+    <table style="border-collapse:collapse; font-size:.9rem; width:100%; max-width:520px">
+      <tr style="text-align:left; color:#5b6b73">
+        <th style="padding:.2rem .8rem .2rem 0">Capability</th>
+        <th style="padding:.2rem .8rem">Spend</th>
+        <th style="padding:.2rem .8rem">Runs</th>
+        <th style="padding:.2rem .8rem">Errors</th>
+      </tr>
+      {% for c in by_capability %}
+      <tr>
+        <td style="padding:.2rem .8rem .2rem 0">{{ c.label }}</td>
+        <td style="padding:.2rem .8rem">{{ c.cost }}</td>
+        <td style="padding:.2rem .8rem">{{ c.runs }}</td>
+        <td style="padding:.2rem .8rem">{{ c.errors }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="muted">No AI runs in this window yet.</p>
+    {% endif %}
+  </section>
+
+  {% if by_day %}
+  <section style="margin-top:.8rem">
+    <div class="muted" style="font-size:.8rem; margin:.3rem 0">By day</div>
+    <table style="border-collapse:collapse; font-size:.88rem; width:100%; max-width:420px">
+      <tr style="text-align:left; color:#5b6b73">
+        <th style="padding:.15rem .8rem .15rem 0">Day</th>
+        <th style="padding:.15rem .8rem">Spend</th>
+        <th style="padding:.15rem .8rem">Runs</th>
+      </tr>
+      {% for d in by_day %}
+      <tr>
+        <td style="padding:.15rem .8rem .15rem 0">{{ d.day }}</td>
+        <td style="padding:.15rem .8rem">{{ d.cost }}</td>
+        <td style="padding:.15rem .8rem">{{ d.runs }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </section>
+  {% endif %}
+
+  <p class="audit-note muted">Spend is summed from <code>cost_usd</code> in the append-only
+    provenance ledger; local providers report $0. This view monitors COGS — it never caps,
+    throttles, or disables a provider. See <a href="/admin/ai-ops">AI operations</a>.</p>
+</main>
+{% endblock %}
