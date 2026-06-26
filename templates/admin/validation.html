@@ -79,6 +79,35 @@
     </form>
   </details>
 
+  {% if candidates %}
+  <section style="margin:.2rem 0 .6rem">
+    <div class="muted" style="font-size:.8rem; margin:.2rem 0">
+      From vision shadow runs — {{ candidates|length }} galler{{ "ies" if candidates|length != 1 else "y" }}
+      compared but not yet in the set. Add the ones worth scoring.
+    </div>
+    {% for c in candidates %}
+    <div class="audit-row">
+      <span class="audit-ic" aria-hidden="true" style="background:#e7eef2;color:#2f6d8a">⇄</span>
+      <div class="audit-body">
+        <div class="audit-head">
+          <span class="audit-title">{{ c.label }}</span>
+          <span class="audit-time">{{ c.last_shadow | localtime }}</span>
+        </div>
+        <div class="audit-foot" style="display:flex; gap:.6rem; align-items:center">
+          <span class="muted" style="font-size:.78rem">gallery #{{ c.gallery_id }} · {{ c.runs }} shadow run{{ "s" if c.runs != 1 }}</span>
+          <form method="post" action="/admin/validation/items" style="display:inline">
+            <input type="hidden" name="subject_type" value="gallery">
+            <input type="hidden" name="subject_id" value="{{ c.gallery_id }}">
+            <input type="hidden" name="label" value="{{ c.label }}">
+            <button type="submit" style="padding:.25rem .7rem">Add to set</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
   {% if items %}
   <section class="audit-feed" style="margin-top:.4rem">
     <div class="muted" style="font-size:.8rem; margin:.2rem 0">Validation set ({{ item_count }}) — score each model 0.00–1.00</div>

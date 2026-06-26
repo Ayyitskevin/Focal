@@ -259,6 +259,32 @@ def deactivate_item(item_id: int) -> None:
     db.run("UPDATE validation_items SET active=0 WHERE id=?", (item_id,))
 
 
+def shadow_candidates(capability: str = "vision") -> list[dict]:
+    """Galleries that have shadow runs in the ai_runs ledger but are NOT yet enrolled in the
+    validation set — the natural candidates to add and score next.
+
+    Bridges the shadow ledger to the gate: shadow mode already recorded which galleries were
+    compared (correlation_id ``shadow:gallery:…``), so 'what should I score?' is
+    discoverable instead of re-typed. Read-only; one click enrolls a candidate via the
+    existing add-item route, after which it drops off this list.
+    """
+    rows = db.all_(
+        """SELECT r.subject_id AS gallery_id, g.slug, g.title,
+                  COUNT(*) AS runs, MAX(r.created_at) AS last_shadow
+           FROM ai_runs r JOIN galleries g ON g.id = r.subject_id
+           WHERE r.capability = ? AND r.subject_type = 'gallery'
+                 AND r.correlation_id LIKE 'shadow:%'
+                 AND NOT EXISTS (
+                     SELECT 1 FROM validation_items vi
+                     WHERE vi.capability = r.capability AND vi.subject_type = 'gallery'
+                           AND vi.subject_id = r.subject_id AND vi.active = 1)
+           GROUP BY r.subject_id, g.slug, g.title
+           ORDER BY last_shadow DESC""",
+        (capability,),
+    )
+    return [dict(r) for r in rows]
+
+
 def _run_metrics(capability: str, model: str) -> dict:
     """Average ok-run latency/cost for ``model`` from the ai_runs ledger (the cost/latency
     half of the audit's evaluation; quality comes from human scores)."""
