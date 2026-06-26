@@ -21,6 +21,7 @@ states context, the decision, consequences, measured reopen criteria, and altern
 | [0014](0014-shadow-to-validation-bridge.md) | Shadow→validation bridge: enrol shadowed galleries into the gate from the ledger | Accepted |
 | [0015](0015-ai-cost-report.md) | AI cost & activity report: COGS monitoring over the ledger | Accepted |
 | [0016](0016-vision-cutover-seam.md) | Vision cutover seam: interlocked production-provider selection | Accepted |
+| [0017](0017-qwen-production-writeback-scaffold.md) | Qwen vision production-writeback (dormant scaffold) | Accepted |
 
 See also the operator runbook [`../MISE-SOLO-STUDIO-OS-RUNBOOK.md`](../MISE-SOLO-STUDIO-OS-RUNBOOK.md)
 (how to run it day to day), [`../MISE-SOLO-STUDIO-OS.md`](../MISE-SOLO-STUDIO-OS.md),

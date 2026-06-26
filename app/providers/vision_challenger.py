@@ -51,6 +51,36 @@ def _gather_image_paths(gallery_id: int, limit: int) -> list[Path]:
     return sorted(p for p in web.glob("*.jpg") if p.is_file())[: max(0, limit)]
 
 
+def chat_completion(image_paths: list[Path], prompt: str) -> dict:
+    """POST one OpenAI-compatible chat-completion with ``prompt`` + the given web
+    derivatives (base64 data URLs) to the configured local endpoint; return the parsed JSON.
+    Shared by the shadow adapter and the (dormant) structured writeback path so the endpoint
+    plumbing lives in one place."""
+    content: list[dict] = [{"type": "text", "text": prompt}]
+    for p in image_paths:
+        b64 = base64.b64encode(p.read_bytes()).decode()
+        content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+    body = json.dumps(
+        {
+            "model": config.VISION_CHALLENGER_MODEL,
+            "messages": [{"role": "user", "content": content}],
+            "temperature": 0,
+            "stream": False,
+        }
+    ).encode()
+    headers = {"Content-Type": "application/json"}
+    if config.VISION_CHALLENGER_TOKEN:
+        headers["Authorization"] = f"Bearer {config.VISION_CHALLENGER_TOKEN}"
+    req = urllib.request.Request(
+        f"{config.VISION_CHALLENGER_URL}/chat/completions",
+        method="POST",
+        data=body,
+        headers=headers,
+    )
+    with urllib.request.urlopen(req, timeout=config.VISION_CHALLENGER_TIMEOUT) as resp:
+        return json.loads(resp.read().decode())
+
+
 class InternalVisionChallengerAdapter:
     """VISION challenger via a local OpenAI-compatible (Qwen3-VL) endpoint."""
 
@@ -66,31 +96,7 @@ class InternalVisionChallengerAdapter:
         return bool(config.VISION_CHALLENGER_URL)
 
     def _analyze(self, image_paths: list[Path]) -> dict:
-        content: list[dict] = [{"type": "text", "text": _PROMPT}]
-        for p in image_paths:
-            b64 = base64.b64encode(p.read_bytes()).decode()
-            content.append(
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
-            )
-        body = json.dumps(
-            {
-                "model": config.VISION_CHALLENGER_MODEL,
-                "messages": [{"role": "user", "content": content}],
-                "temperature": 0,
-                "stream": False,
-            }
-        ).encode()
-        headers = {"Content-Type": "application/json"}
-        if config.VISION_CHALLENGER_TOKEN:
-            headers["Authorization"] = f"Bearer {config.VISION_CHALLENGER_TOKEN}"
-        req = urllib.request.Request(
-            f"{config.VISION_CHALLENGER_URL}/chat/completions",
-            method="POST",
-            data=body,
-            headers=headers,
-        )
-        with urllib.request.urlopen(req, timeout=config.VISION_CHALLENGER_TIMEOUT) as resp:
-            return json.loads(resp.read().decode())
+        return chat_completion(image_paths, _PROMPT)
 
     def analyze_gallery(self, gallery_id: int, *, skip_dedup: bool = False) -> ProviderResult:
         if not self.is_enabled():
