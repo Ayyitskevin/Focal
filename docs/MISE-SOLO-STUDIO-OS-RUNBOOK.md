@@ -73,6 +73,11 @@ nothing until you set the relevant flag. Flags live in flow's `.env`
   configured (`MISE_GMAIL_USER` / `MISE_GMAIL_APP_PASSWORD`). Optional Phase-3 facade
   provenance into the ledger: `MISE_PROVIDER_FACADE_OFFERS=true` (legacy path runs unchanged
   when off).
+- **Scorecard:** `/admin/offers-scorecard` answers "is this capability earning its keep?"
+  (audit §19.4) — the proposed → approved → sent funnel (all-time / 60d / 30d) plus a
+  **project-level revenue attribution proxy** (payments on offered projects after the send;
+  labelled a proxy because there's no offer→sale link). Read-only; it informs the keep/retire
+  call, never decides it. ADR 0020.
 - **Bounded:** approving records your call; sending emails the **link** only. Neither charges
   the client nor creates an invoice — acceptance flows through your existing, human-initiated
   invoice workflow. The money path is never touched by an AI proposal.
