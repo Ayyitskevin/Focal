@@ -25,6 +25,7 @@ from .contracts import (
     ResultStatus,
     ReviewRequirement,
 )
+from .products_render import ProductsRenderAdapter
 from .registry import challenger, reset, resolve, use, use_challenger
 from .shadow import compare
 from .vision_challenger import InternalVisionChallengerAdapter
@@ -39,6 +40,7 @@ __all__ = [
     "LegacyOdysseusCaptionAdapter",
     "LegacyDionysusPackAdapter",
     "InternalVisionChallengerAdapter",
+    "ProductsRenderAdapter",
     "resolve",
     "use",
     "reset",

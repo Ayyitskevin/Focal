@@ -178,6 +178,17 @@ VISION_PROVIDER = os.environ.get("MISE_VISION_PROVIDER", "argus").strip().lower(
 VALIDATION_MIN_PAIRED = int(os.environ.get("MISE_VALIDATION_MIN_PAIRED", "20"))
 VALIDATION_PARITY_MARGIN = float(os.environ.get("MISE_VALIDATION_PARITY_MARGIN", "0.0"))
 
+# Aphrodite product-image generation (Phase 6) — DORMANT by default. A render backend is
+# consulted ONLY when PRODUCTS_RENDER_URL is set, and total spend is HARD-CAPPED by
+# PRODUCTS_BUDGET_USD (default 0 = disabled: products.create_render refuses every render).
+# Nothing is ever published to a client automatically — every render is a human-approved,
+# consent-confirmed, export-gated draft (audit §13.5). The number + the consent/licensing
+# policy are the operator's to set when arming this; the guards are enforced in code.
+PRODUCTS_RENDER_URL = os.environ.get("MISE_PRODUCTS_RENDER_URL", "").rstrip("/")
+PRODUCTS_RENDER_MODEL = os.environ.get("MISE_PRODUCTS_RENDER_MODEL", "")
+PRODUCTS_RENDER_TOKEN = os.environ.get("MISE_PRODUCTS_RENDER_TOKEN", "")
+PRODUCTS_BUDGET_USD = float(os.environ.get("MISE_PRODUCTS_BUDGET_USD", "0") or "0")
+
 # Plutus print upsell (Phase 1). BOTH url+token arm post-Argus recommend hooks.
 PLUTUS_URL = os.environ.get("MISE_PLUTUS_URL", "").rstrip("/")
 PLUTUS_TOKEN = os.environ.get("MISE_PLUTUS_TOKEN", "")
