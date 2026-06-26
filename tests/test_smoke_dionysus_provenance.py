@@ -51,6 +51,29 @@ def test_status_mapping_error_and_skipped(tmp_path, monkeypatch):
     assert db.one("SELECT status FROM ai_runs WHERE subject_id=?", (g2,))["status"] == "disabled"
 
 
+def test_provenance_failure_never_raises_and_legacy_write_survives(tmp_path, monkeypatch):
+    """The provenance record runs inside _record, called from a fire-and-forget hook, so a
+    ledger failure must be swallowed AND must not corrupt the primary platekit_last_* write
+    (which runs first)."""
+    from app import ai_runs
+
+    _configure_tmp_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "PROVIDER_FACADE_CONTENT", True)
+    gid = _gallery()
+
+    def boom(*a, **k):
+        raise RuntimeError("ledger down")
+
+    monkeypatch.setattr(ai_runs, "record", boom)
+    # must not propagate
+    platekit._record(gid, status="done", job_id="j1")
+    # primary write still landed
+    row = db.one(
+        "SELECT platekit_last_status, platekit_last_job_id FROM galleries WHERE id=?", (gid,)
+    )
+    assert row["platekit_last_status"] == "done" and row["platekit_last_job_id"] == "j1"
+
+
 def test_no_provenance_when_flag_off(tmp_path, monkeypatch):
     _configure_tmp_db(tmp_path, monkeypatch)
     monkeypatch.setattr(config, "PROVIDER_FACADE_CONTENT", False)

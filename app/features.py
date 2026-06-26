@@ -23,8 +23,12 @@ def odysseus_caption_enabled() -> bool:
 
 
 def content_provider_facade_enabled() -> bool:
-    """Phase 1: route caption drafting through the app/providers facade and record
-    ai_runs provenance. Default off — the legacy caption_ai path stays production."""
+    """Content-capability facade flag (default off — legacy paths stay production).
+
+    Gates two provenance behaviors, both additive and ai_runs-only:
+    - Phase 1: route caption drafting through the app/providers facade.
+    - Phase 4: record Dionysus pack-draft outcomes to the ai_runs ledger (platekit).
+    """
     return bool(config.PROVIDER_FACADE_CONTENT)
 
 
