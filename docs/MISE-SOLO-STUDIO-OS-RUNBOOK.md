@@ -138,9 +138,9 @@ nothing until you set the relevant flag. Flags live in flow's `.env`
 This is the one workflow that decides a provider cutover. It is deliberately
 human-scored and never automatic (ADR 0010).
 
-1. **Arm shadow** (§2, Vision) so comparisons accumulate in the ledger as galleries are
-   analyzed. Check they're landing at `/admin/ai-runs` (filter: Vision; look for ⇄ shadow
-   pairs).
+1. **Arm shadow** (§2, Vision; full startup in §3.0) so comparisons accumulate in the ledger
+   as galleries are analyzed. Check they're landing at `/admin/ai-runs` (filter: Vision; look
+   for ⇄ shadow pairs).
 2. **Enrol** the galleries to evaluate. On `/admin/validation`, the **"From vision shadow
    runs"** section lists shadowed galleries not yet in the set — click **Add to set** on a
    representative spread of them (ADR 0014). Keep the set *representative*, not exhaustive.
@@ -154,6 +154,62 @@ human-scored and never automatic (ADR 0010).
    deliberately-reviewed change; the gate only tells you the evidence supports it.
 
 Tune the bar without code via `MISE_VALIDATION_MIN_PAIRED` / `MISE_VALIDATION_PARITY_MARGIN`.
+
+### 3.0 Starting shadow mode and accumulating paired data (the precondition phase)
+
+Before the gate (§3) can read **Ready** or the cutover (§3.1) can even be attempted, the
+challenger has to run alongside Argus long enough to produce paired, human-scored evidence.
+This is its own phase. Shadow recording is **asset-safe** — it writes only `ai_runs` ledger
+rows, never assets/galleries, never re-calls Argus, and cannot crash the analyze/publish path.
+
+**What is automatic.** There is **no admin button** for shadow — it auto-enqueues a one-shot
+job after **each *completed* Argus analysis** (sync `done` result, or the async completion
+webhook `POST /api/argus/callback`). The job snapshots the finished Argus run (no second cloud
+call, no extra cost), calls the challenger once with up to `MISE_VISION_CHALLENGER_MAX_IMAGES`
+(default 4) downsized **web derivatives**, and records **exactly two `ai_runs` rows per
+gallery** (legacy + challenger) linked by `correlation_id` `shadow:gallery:{id}:{run_id}` —
+metadata only, **per gallery, not per image**. A *queued* (async) Argus run shadows **later**,
+when its callback lands; a run that never completes is never shadowed.
+
+**Arming it needs BOTH (a silent no-op otherwise):**
+1. `MISE_VISION_CHALLENGER_URL` — a **trusted local** endpoint (e.g. `http://mickeybot:11434/v1`).
+2. `MISE_VISION_SHADOW=true`.
+
+Setting the flag **alone** changes nothing — with no URL the registry resolves no challenger
+and the runner no-ops. This is the #1 "I turned it on but nothing happens" trap.
+
+**Apply it (systemd):** edit the production env file, then **restart the service** so systemd
+re-reads `EnvironmentFile`. Editing `/opt/mise/.env` does **not** hot-reload — the in-process
+read is a deliberate no-op under systemd. No code change; rollback is `MISE_VISION_SHADOW=false`
+(or unset the URL), and Argus is unaffected.
+
+**Confirm pairs are landing:** `/admin/ai-runs`, filter **Vision**, look for ⇄ shadow pairs
+(`shadow:gallery:…`). Expect **two** rows per gallery. A failed/empty challenger call still
+records a **non-OK** second row — failure stays visible, it is not silently dropped.
+
+**How much to accumulate:** pairs accrue only as galleries get a *completed* Argus analysis, so
+volume is bounded by analysis throughput and by your manual scoring effort — not elapsed time.
+Aim for at least `MISE_VALIDATION_MIN_PAIRED` (default 20) galleries you are willing to **fully
+score on both sides**, plus a little headroom. Keep the set *representative*, not exhaustive.
+
+**The bridge is two manual steps (this is the part operators miss):** a shadow run **never**
+auto-becomes a scorable item (ADR 0014).
+- **Enrol** each gallery — one click **"Add to set"** in the *From vision shadow runs* section
+  of `/admin/validation`. This creates an item with **zero** scores, and the gallery then
+  **drops off** the candidate list — track which enrolled items still need scoring.
+- **Score both sides** — enter a 0.00–1.00 quality number for **`argus` AND the challenger** on
+  each item. The gate counts an item as **paired** only when **both** are scored; a one-sided
+  or blank score advances nothing. So "shadow ran on N galleries" yields **0** gate-countable
+  items until **N enrolments + 2N scores** are entered.
+
+The challenger model string you score must match `MISE_VISION_CHALLENGER_MODEL` (default
+`qwen3-vl:32b`) exactly, or those scores are ignored by the gate. Then proceed to §3 step 4
+(read the verdict).
+
+**Troubleshooting — flag set but no pairs landing:** (a) URL also set? (b) service restarted
+after the env change? (c) a challenger registered? (d) does the gallery have a **completed**
+(`done`) Argus run with a non-null run id? (e) does it have web derivatives? Any one missing
+makes shadow inert for that gallery.
 
 ### 3.1 Executing the cutover — `/admin/vision-cutover` (ADRs 0016, 0017)
 
