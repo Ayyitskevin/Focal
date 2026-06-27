@@ -58,7 +58,7 @@ ranked plan; the cost-reporting + idempotency design; the 3 activation gates —
 
 ## Mode B — discrete sequence
 
-### #1 — Conform: renders schema + REAL cost + spend-safe failure
+### #1 — Conform: renders schema + REAL cost + spend-safe failure + CLAUDE.md
 ````
 Make Aphrodite emit strict JSON: {"renders":[{"source_asset_id":<int>,"kind":"...",
 "spec":{...} or "...","output_path":"... or null","cost_usd":<number >= 0>}]}, where cost_usd
@@ -66,6 +66,15 @@ is the ACTUAL per-render spend (never under-report — Mise sums it against a ha
 anything over). Add provenance (model/latency_ms/cost_usd). Fail SAFE: on any error, do not
 charge / do not emit a partial result. Keep the existing path working. Plan first; draft PR on a
 claude/ branch; mock-only CI (no live generation); wait for go.
+
+Also include a CLAUDE.md at the repo root in the same PR. It should capture: Aphrodite's role
+as Mise's PRODUCTS worker (render variants — NEVER auto-publish; every render is an
+explicit-commit draft a human approves + confirms consent); the three ACTIVATION GATES (not code
+decisions — the operator must set them before arming): budget number
+(MISE_PRODUCTS_BUDGET_USD), written consent/licensing policy, render backend choice; the money
++ rights guardrails (report REAL cost_usd, fail safe on error, no partial charge); the 7-point
+worker contract in brief; and the branch/PR convention. This becomes the bootstrap for every
+future Claude Code session in this repo.
 ````
 
 ### #2 — Idempotency (no double-charge) + no-auto-publish/consent posture

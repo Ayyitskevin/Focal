@@ -54,7 +54,7 @@ gallery/asset ids + signals — then wait for go.
 
 ## Mode B — discrete sequence
 
-### #1 — Conform: valid placements, validator, signals, idempotency
+### #1 — Conform: valid placements, validator, signals, idempotency + CLAUDE.md
 ````
 Make Mnemosyne emit strict JSON: {"placements":[{"asset_id":<int>,"spread":<int>=0>,
 "slot":<int>=0>}],"provider":"...","model":"...","notes":"optional"}. Every placement must
@@ -64,6 +64,15 @@ Mise's per-photo hero_potential/keeper_score signals rather than recomputing vis
 duplicate originals. Add provenance (model/latency_ms/cost_usd, 0 for local) and idempotency
 (stable proposal per gallery/request). Output is a proposal in review state — nothing prints.
 Plan first; draft PR on a claude/ branch; mock-only CI; wait for go.
+
+Also include a CLAUDE.md at the repo root in the same PR. It should capture: Mnemosyne's role
+as Mise's ALBUMS worker (layout proposer — human approves every layout before print/export);
+the correctness invariant (NEVER silently omit, duplicate, or misassign a photo — Mise
+re-validates and rejects); the adopt-only-if-better bar (Mise ships a deterministic baseline
+proposer; Mnemosyne only gets adopted if its layouts beat it); the 7-point worker contract in
+brief; the branch/PR convention; and the note that Mise's gallery/asset ids + hero/keeper
+signals are the inputs. This becomes the bootstrap for every future Claude Code session in this
+repo.
 ````
 
 ### #2 — Layout quality + beat-the-baseline evidence  *(the reason to adopt it)*

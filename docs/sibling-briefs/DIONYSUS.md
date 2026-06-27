@@ -57,7 +57,7 @@ recommendation with evidence; the local model/endpoint config — then wait for 
 
 ## Mode B — discrete sequence
 
-### #1 — Audit + keep-or-retire + structured drafts on a local model
+### #1 — Audit + keep-or-retire + structured drafts on a local model + CLAUDE.md
 ````
 Audit Dionysus against the Mise content contract and decide keep-vs-retire FIRST: could its
 drafts be produced by the same local content/caption endpoint Mise already calls? If yes,
@@ -66,6 +66,14 @@ deliver a retirement path. If keep: emit strict JSON drafts —
 "body":"draft text","alt_text":"optional"}],"model":"...","cost_usd":0.0} — generated via a
 CONFIGURABLE LOCAL model endpoint (no hard cloud dependency), with cost/latency. Keep the
 existing path working. Deliver the audit + keep/retire recommendation + plan FIRST; wait for go.
+
+Also include a CLAUDE.md at the repo root in the same PR. It should capture: Dionysus's role as
+Mise's CONTENT worker (drafts only — never auto-publish, never overwrite human-edited content);
+the keep-vs-retire context (alignment is done; Dionysus is retained only if it adds value over
+the local caption endpoint); the 7-point worker contract in brief; the branch/PR convention
+(claude/ branches, draft PRs, never push to main); and the content guardrail (reversible draft,
+human-edit guard in code, failure writes nothing). This becomes the bootstrap for every future
+Claude Code session in this repo.
 ````
 
 ### #2 — Draft-only + human-edit guard (the safety core)
