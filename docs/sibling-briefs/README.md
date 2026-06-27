@@ -38,9 +38,14 @@ sibling session can't see this repo. Copy one block at a time.
 - **Keep the existing production path working** until a flagged, measured cutover proves the
   replacement; rollback is always a flag.
 
+## Doctrine (not a worker)
+
+- **Hestia** — [HESTIA.md](HESTIA.md): a **doctrine** brief, not a worker brief. Review &
+  update the architecture north star to match what the consolidation proved. Docs only; Hestia
+  never becomes a Mise runtime dependency. Run anytime — no dependency on the cutover.
+
 ## Do NOT build briefs for these
 
 - **Odysseus** — third-party local AI UI (an inference endpoint you self-host); nothing to
   improve, Mise just points at it.
-- **Hestia** — doctrine only; no runtime worker.
 - **Athena / Midas** — do not integrate (second source of truth / out of scope).

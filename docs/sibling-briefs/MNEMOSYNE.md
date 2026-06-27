@@ -91,3 +91,16 @@ turn off, rollback). Expose /healthz. Ensure CI is mock-only / reproducible and 
 validate output against the albums schema AND assert validator-conformance (no omit/dup/
 misassign) on representative fixtures. Plan first; draft PR; wait for go.
 ````
+
+### #4 — Self-review + adopt-readiness package
+````
+Re-audit everything changed in #1–#3 against the 7-point worker contract, then produce the
+ADOPT-READINESS PACKAGE Mise needs to flip its album proposer from the deterministic baseline
+to Mnemosyne behind a flag (the album analog of the vision validation gate):
+- eval-harness results on a representative set (Mnemosyne vs baseline, human-scored) showing it
+  meets the bar: reviewable in <30 min, >=~70% placements acceptable, rated >= baseline;
+- proof every output passes the validator (no omit/dup/misassign), omissions surfaced;
+- a determinism proof (same input+seed -> same layout) and confirmation it is fully local;
+- the documented rollback (Mise flips back to the baseline proposer).
+List any remaining gaps as small draft PRs. Report the package first; wait for go before fixing.
+````
