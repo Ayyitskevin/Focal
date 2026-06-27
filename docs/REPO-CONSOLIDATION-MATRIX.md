@@ -145,3 +145,13 @@ reduce repo count. Inside Mise this means every capability uses:
 What stays **separate by design**: human auth (no new identity platform yet), payment
 tables/webhook state (legal/financial blast radius), broad worker media access (least
 privilege). (audit §19.3)
+
+## Making each engine a better worker
+
+The per-repo improvements that make a sibling more useful to the OS — and the order to do
+them in — are specified as executable work-orders in
+[`SIBLING-IMPROVEMENT-PLAN.md`](SIBLING-IMPROVEMENT-PLAN.md), all conforming to the
+[`WORKER-CONTRACT.md`](WORKER-CONTRACT.md) and the machine-checkable
+[`../schemas/`](../schemas/) (vision / offers / albums / products). The throughline: turn
+each engine into a **stateless, contract-true worker** Mise can drive, compare, meter, and
+retire — never merge codebases.

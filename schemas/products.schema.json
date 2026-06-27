@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mise.kleephotography/schemas/products.schema.json",
+  "title": "Mise products render worker output",
+  "description": "An Aphrodite product-image render result. Mirrors app/products.create_render: a source asset, a free-form spec, the generated file, and the ACTUAL per-call cost the deterministic budget cap sums against. A render is EXPLICIT_COMMIT review state — never published automatically; a human approves, confirms consent/rights (audit §13.5), then exports.",
+  "type": "object",
+  "required": ["renders"],
+  "additionalProperties": true,
+  "properties": {
+    "renders": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source_asset_id", "cost_usd"],
+        "additionalProperties": true,
+        "properties": {
+          "source_asset_id": {"type": "integer", "description": "The source photo this variant was rendered from."},
+          "kind": {"type": "string", "description": "What was requested (variant catalogue is operator-defined)."},
+          "spec": {"type": ["object", "string", "null"], "description": "JSON spec / prompt of the render."},
+          "output_path": {"type": ["string", "null"], "description": "Where the generated file landed, if any."},
+          "cost_usd": {"type": "number", "minimum": 0, "description": "ACTUAL spend for this render; refused if it would exceed MISE_PRODUCTS_BUDGET_USD."}
+        }
+      }
+    }
+  }
+}
