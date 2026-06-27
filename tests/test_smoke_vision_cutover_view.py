@@ -108,3 +108,17 @@ def test_vision_cutover_requires_admin(tmp_path, monkeypatch):
         assert r.status_code == 303
         assert r.headers["location"] == "/admin/login"
         jobs.stop()
+
+
+def test_vision_cutover_post_routes_require_admin(tmp_path, monkeypatch):
+    """The two POST routes are gated only by the shared router-level require_admin; the GET
+    landing is the only one with an explicit anon test. /run is the manual production-
+    writeback trigger and /preview hits the (potentially live) challenger endpoint — a
+    refactor that re-routed either must not expose it unauthenticated. Lock both."""
+    _configure_tmp_db(tmp_path, monkeypatch)
+    with TestClient(app) as anon:
+        for path in ("/admin/vision-cutover/run", "/admin/vision-cutover/preview"):
+            r = anon.post(path, data={"gallery_id": 1}, follow_redirects=False)
+            assert r.status_code == 303, path
+            assert r.headers["location"] == "/admin/login", path
+        jobs.stop()

@@ -12,7 +12,8 @@ import pytest
 from app import config, db, jobs, vision_shadow
 from app.providers import Capability, registry
 from app.providers import vision_challenger as vc
-from app.providers.mocks import MockVisionChallengerAdapter
+from app.providers.contracts import ResultStatus
+from app.providers.mocks import FailingAdapter, MockVisionChallengerAdapter
 
 
 def _configure_tmp_db(tmp_path, monkeypatch):
@@ -152,6 +153,65 @@ def test_completed_argus_run_no_shadow_when_flag_off(tmp_path, monkeypatch):
     _fake_sync_argus(monkeypatch)
     argus_analyze.run_for_gallery(gid)
     assert ("vision_shadow_gallery", {"gallery_id": gid}) not in enq
+
+
+def test_async_callback_enqueues_shadow_when_flag_on(tmp_path, monkeypatch):
+    """The PRIMARY production trigger: most Argus jobs complete asynchronously via the
+    completion webhook (apply_callback), not the sync path. A 'done' callback must enqueue
+    the shadow compare when the flag is armed — the sync-path test alone would stay green
+    even if this wiring regressed and silently stopped shadowing every queued gallery."""
+    from app import argus_analyze
+
+    _configure_tmp_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "VISION_SHADOW", True)
+    gid = db.run(
+        "INSERT INTO galleries (slug, title, pin) VALUES (?,?,?)", ("ShadowCb01", "Cb", "1234")
+    )
+    enq = []
+    monkeypatch.setattr(jobs, "enqueue", lambda kind, payload: enq.append((kind, payload)) or 1)
+    argus_analyze.apply_callback(gid, {"status": "done", "run_id": 5})
+    assert ("vision_shadow_gallery", {"gallery_id": gid}) in enq
+
+
+def test_async_callback_no_shadow_when_flag_off(tmp_path, monkeypatch):
+    from app import argus_analyze
+
+    _configure_tmp_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "VISION_SHADOW", False)
+    gid = db.run(
+        "INSERT INTO galleries (slug, title, pin) VALUES (?,?,?)", ("ShadowCb02", "Cb2", "1234")
+    )
+    enq = []
+    monkeypatch.setattr(jobs, "enqueue", lambda kind, payload: enq.append((kind, payload)) or 1)
+    argus_analyze.apply_callback(gid, {"status": "done", "run_id": 5})
+    assert ("vision_shadow_gallery", {"gallery_id": gid}) not in enq
+
+
+def test_failing_challenger_still_records_two_rows(tmp_path, monkeypatch):
+    """Audit-visibility invariant (§9.5): a FAILED challenger must still record its non-OK
+    ledger row alongside the legacy snapshot — two rows, not zero. If a failure silently
+    recorded nothing, the operator would see only the challenger's successes and read a
+    flaky challenger as reliable, driving a false-green cutover."""
+    _configure_tmp_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "VISION_SHADOW", True)
+    gid = _gallery_with_completed_run(run_id=77)
+
+    with registry.use_challenger(Capability.VISION, FailingAdapter(Capability.VISION)):
+        comparison = vision_shadow.run_for_gallery(gid)
+
+    assert comparison is not None
+    assert comparison["both_ok"] is False
+    assert comparison["challenger_status"] == ResultStatus.PROVIDER_ERROR.value
+
+    rows = db.all_(
+        "SELECT * FROM ai_runs WHERE subject_type='gallery' AND subject_id=? ORDER BY id", (gid,)
+    )
+    assert len(rows) == 2
+    assert {r["provider"] for r in rows} == {"argus", "mock-failing"}
+    chal = next(r for r in rows if r["provider"] == "mock-failing")
+    assert chal["status"] == "provider_error"
+    # still asset-safe even on the failure path
+    assert db.one("SELECT COUNT(*) AS n FROM assets WHERE gallery_id=?", (gid,))["n"] == 0
 
 
 def test_real_qwen_challenger_autoregisters_and_shadow_records(tmp_path, monkeypatch):

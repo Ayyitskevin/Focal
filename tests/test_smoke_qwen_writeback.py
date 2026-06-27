@@ -109,6 +109,47 @@ def test_apply_ignores_foreign_and_nonready_assets(tmp_path, monkeypatch):
     assert res["matched"] == 0  # none are eligible photo+ready assets of this gallery
 
 
+def test_apply_is_scoped_to_one_gallery(tmp_path, monkeypatch):
+    """apply_to_gallery touches ONLY this gallery's assets. A same-basename asset in a
+    DIFFERENT gallery must never be written — the `WHERE gallery_id=?` scoping is the only
+    thing preventing one client's Qwen writeback from overwriting another client's signals
+    (alt text, keeper/hero scores) in money/rights-adjacent metadata. The existing
+    foreign-asset test only covers UNKNOWN basenames, not gallery scoping."""
+    _configure_tmp_db(tmp_path, monkeypatch)
+    ga = db.run("INSERT INTO galleries (slug, title, pin) VALUES (?,?,?)", ("GalA", "A", "1"))
+    gb = db.run("INSERT INTO galleries (slug, title, pin) VALUES (?,?,?)", ("GalB", "B", "1"))
+    a_asset = _asset(ga, "p1.jpg")  # same basename in both galleries
+    b_asset = _asset(gb, "p1.jpg")
+    res = qwen_writeback.apply_to_gallery(
+        ga,
+        [
+            {
+                "basename": "p1.jpg",
+                "keywords": ["k"],
+                "alt_text": "alt",
+                "keeper_score": 0.9,
+                "hero_potential": 0.8,
+            }
+        ],
+    )
+    assert res["matched"] == 1
+    # gallery A's asset written; gallery B's same-named asset untouched
+    assert db.one("SELECT argus_keeper_score FROM assets WHERE id=?", (a_asset,))[
+        "argus_keeper_score"
+    ] == 0.9
+    assert (
+        db.one("SELECT argus_keeper_score FROM assets WHERE id=?", (b_asset,))["argus_keeper_score"]
+        is None
+    )
+    # B's gallery rollup is untouched too
+    assert (
+        db.one("SELECT argus_analyzed_count FROM galleries WHERE id=?", (gb,))[
+            "argus_analyzed_count"
+        ]
+        is None
+    )
+
+
 def test_apply_is_idempotent(tmp_path, monkeypatch):
     _configure_tmp_db(tmp_path, monkeypatch)
     gid = _gallery()

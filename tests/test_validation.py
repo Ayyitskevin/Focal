@@ -84,6 +84,33 @@ def test_empty_set_is_not_ready():
     assert r.paired == 0 and r.mean_delta is None and r.ready is False
 
 
+def test_scores_under_other_model_strings_are_excluded_not_bucketed():
+    # A stray score from a THIRD model (typo'd / renamed / different provider) must be
+    # DROPPED, never folded into baseline or challenger. If the `m in by_model` filter ever
+    # loosened, stray scores would inflate paired count + mean_delta and manufacture a false
+    # 'ready' — exactly what the head-to-head gate exists to prevent.
+    scores = [
+        {"item_id": 1, "model": BASE, "provider": "argus", "score": 0.6},
+        {"item_id": 1, "model": CHAL, "provider": "qwen", "score": 0.7},
+        {"item_id": 1, "model": "gpt-4o", "provider": "openai", "score": 0.99},
+        {"item_id": 2, "model": CHAL, "provider": "qwen", "score": 0.5},
+    ]
+    r = build_report(
+        capability="vision",
+        baseline_model=BASE,
+        challenger_model=CHAL,
+        total_items=2,
+        scores=scores,
+        run_metrics={},
+        min_paired=1,
+        margin=0.0,
+    )
+    # only item 1 is paired between the two NAMED models; the gpt-4o row is dropped
+    assert r.paired == 1
+    assert r.baseline.scored == 1 and r.challenger.scored == 2
+    assert r.mean_delta == pytest.approx(0.1)  # 0.7 - 0.6, the stray 0.99 ignored
+
+
 # ── per-model stats + informational cost/latency ─────────────────────────────────
 
 
