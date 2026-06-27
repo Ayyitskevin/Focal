@@ -53,7 +53,7 @@ line — then wait for go.
 
 ## Mode B — discrete sequence
 
-### #1 — Structured output + SKU/line-item linkage + cost  *(the scorecard unlock)*
+### #1 — Structured output + SKU/line-item linkage + cost + CLAUDE.md  *(the scorecard unlock)*
 ````
 Make Plutus emit strict JSON: {"run_id":<id>,"estimated_total_cents":<int>,"offer_url":"...",
 "pitch_url":"...","bundles":[{"sku":"<stable id>","label":"...","estimated_cents":<int>,
@@ -63,6 +63,13 @@ lines a human later creates in Mise, so an accepted offer can be attributed to r
 Offers stay proposal-only — never charge/send/invoice. Keep the existing recommend path working.
 Mise validates this shape and records it. Plan first; draft PR on a claude/ branch; mock-only
 CI; wait for go.
+
+Also include a CLAUDE.md at the repo root in the same PR. It should capture: Plutus's role as
+Mise's OFFERS worker (print/album bundle recommendations — NEVER charge, send, or invoice);
+the 7-point worker contract in brief; the branch/PR convention (claude/ branches, draft PRs,
+never push to main); mock-only CI rule; and Plutus-specific money guardrails (proposals only,
+no Stripe/checkout/billing surface, stable SKU maps to Mise invoice line). This becomes the
+bootstrap for every future Claude Code session in this repo.
 ````
 
 ### #2 — Idempotency + auth robustness  *(one offer per gallery; the 401 fix)*

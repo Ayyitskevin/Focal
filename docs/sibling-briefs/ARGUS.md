@@ -51,7 +51,7 @@ Grok↔Qwen config design — then wait for go before implementing beyond the fi
 
 ## Mode B — discrete sequence
 
-### #1 — Structured output + cost  *(the cutover unblocker)*
+### #1 — Structured output + cost + CLAUDE.md  *(the cutover unblocker)*
 ````
 Add a structured-output mode to Argus: every analysis emits strict JSON per photo —
 {"photos":[{"basename":"<exact file name>","keywords":["..."],"alt_text":"one line or null",
@@ -60,6 +60,14 @@ Add a structured-output mode to Argus: every analysis emits strict JSON per phot
 Keep the existing output path working; add this alongside it. Mise validates this shape
 deterministically and rejects malformed/out-of-range replies, so be strict. Propose a plan
 first, then implement on a claude/ branch as a draft PR; mock-only CI; wait for go.
+
+Also include a CLAUDE.md at the repo root in the same PR. It should capture: Argus's role as
+Mise's VISION worker (keywords, alt text, culling/hero signals); the 7-point worker contract in
+brief (structured output, provenance+cost, signed callback, idempotency, statelessness,
+privacy/spend, health/CI); the branch/PR convention (claude/ branches, draft PRs, never push to
+main); mock-only CI rule; and any Argus-specific gotchas (e.g. never send originals — web
+derivatives only; local Qwen endpoint is trusted-only). This becomes the bootstrap for every
+future Claude Code session in this repo.
 ````
 
 ### #2 — Configurable Grok|Qwen provider  *(reversible)*
