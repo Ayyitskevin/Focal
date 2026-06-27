@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mise.kleephotography/schemas/albums.schema.json",
+  "title": "Mise albums worker output",
+  "description": "A proposed album layout (Mnemosyne or the internal baseline). Mirrors what app/albums.save_draft persists and what the deterministic validator (validate_core) checks: every placement is an eligible photo of the gallery, placed exactly once, no slot collisions. The validator is authoritative — a proposal that violates it is rejected, never stored.",
+  "type": "object",
+  "required": ["placements"],
+  "additionalProperties": true,
+  "properties": {
+    "provider": {"type": "string"},
+    "model": {"type": "string"},
+    "notes": {"type": ["string", "null"]},
+    "placements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["asset_id", "spread", "slot"],
+        "additionalProperties": true,
+        "properties": {
+          "asset_id": {"type": "integer", "description": "Must be a photo+ready asset of THIS gallery."},
+          "spread": {"type": "integer", "minimum": 0, "description": "Page-pair index, 0-based."},
+          "slot": {"type": "integer", "minimum": 0, "description": "Position within the spread, 0-based; unique per (spread, slot)."}
+        }
+      }
+    }
+  }
+}

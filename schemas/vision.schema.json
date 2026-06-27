@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mise.kleephotography/schemas/vision.schema.json",
+  "title": "Mise vision worker output",
+  "description": "Structured per-photo vision signals. The shared contract BOTH Argus and the Qwen3-VL challenger must emit so the shadow/validation/cutover compare is apples-to-apples. Mirrors what app/qwen_writeback.parse_structured accepts and app/argus_writeback writes (assets.argus_*).",
+  "type": "object",
+  "required": ["photos"],
+  "additionalProperties": true,
+  "properties": {
+    "photos": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["basename"],
+        "additionalProperties": true,
+        "properties": {
+          "basename": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Exact source file name; matched to a photo+ready asset of the gallery."
+          },
+          "keywords": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "SEO keyword list (may be empty)."
+          },
+          "alt_text": {
+            "type": ["string", "null"],
+            "description": "One-line alt text, or null."
+          },
+          "keeper_score": {
+            "type": ["number", "null"],
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "Cull/keep score in [0,1], or null."
+          },
+          "hero_potential": {
+            "type": ["number", "null"],
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "Hero-pick score in [0,1], or null. Top-N >= 0.5 form the gallery hero set."
+          }
+        }
+      }
+    }
+  }
+}
