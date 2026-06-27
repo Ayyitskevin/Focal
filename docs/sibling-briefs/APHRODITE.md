@@ -87,3 +87,18 @@ output against the products schema + spend-safe failure (no charge on error). Fi
 the 3 ACTIVATION GATES as owner decisions, not code: the budget number, the written
 consent/licensing policy, and the render backend choice. Plan first; draft PR; wait for go.
 ````
+
+### #4 — Self-review + activation-readiness package
+````
+Re-audit everything changed in #1–#3 against the 7-point worker contract, with emphasis on
+spend + rights safety, then produce the ACTIVATION-READINESS PACKAGE:
+- proof of spend safety: NO charge on error, NO double-charge on retry, and cost_usd is the
+  REAL per-render spend Mise caps against;
+- proof there is NO auto-publish path and that consent/export gating is respected (output stays
+  explicit-commit review state until a human approves + confirms consent);
+- schema conformance + /healthz + mock-only CI (no live generation);
+- the 3 OWNER ACTIVATION GATES restated as a checklist for the owner to fill BEFORE arming:
+  (1) the budget number (MISE_PRODUCTS_BUDGET_USD), (2) the written consent/licensing policy,
+  (3) the render backend choice.
+List any remaining gaps as small draft PRs. Report the package first; wait for go before fixing.
+````
