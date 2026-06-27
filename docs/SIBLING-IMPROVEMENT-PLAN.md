@@ -11,6 +11,10 @@
 Ranking rule (audit §3.3, §19.3): the best improvement turns an engine into a **stateless,
 contract-true worker** Mise can drive, compare, meter, and retire.
 
+> **Ready-to-paste prompts:** the executable per-repo prompt sequences (umbrella + discrete
+> steps) live in [`sibling-briefs/`](sibling-briefs/README.md) — one file per repo, copy a
+> block into that repo's session.
+
 ---
 
 ## P0 — Shared worker contract + schemas  ✅ (this repo)
