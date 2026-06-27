@@ -134,9 +134,10 @@ def test_apply_is_scoped_to_one_gallery(tmp_path, monkeypatch):
     )
     assert res["matched"] == 1
     # gallery A's asset written; gallery B's same-named asset untouched
-    assert db.one("SELECT argus_keeper_score FROM assets WHERE id=?", (a_asset,))[
-        "argus_keeper_score"
-    ] == 0.9
+    assert (
+        db.one("SELECT argus_keeper_score FROM assets WHERE id=?", (a_asset,))["argus_keeper_score"]
+        == 0.9
+    )
     assert (
         db.one("SELECT argus_keeper_score FROM assets WHERE id=?", (b_asset,))["argus_keeper_score"]
         is None
