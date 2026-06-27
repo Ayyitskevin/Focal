@@ -175,6 +175,43 @@ When all four hold, the interlock makes Qwen the eligible production provider an
 runs when triggered. **Rollback is the flag** — set `MISE_VISION_PROVIDER=argus` (or revert
 `serves_production`); Argus assets are re-writeable from its last run.
 
+### 3.2 Decommissioning Argus (only after the cutover proves out)
+
+Promotion (§3.1) does **not** mean Argus is gone — it stays the **default and the rollback**
+until it has earned retirement. Retiring it is a separate, deliberate step gated on evidence.
+Do **not** stop the Argus service until every box below is checked (decommission gate, audit
+§16.7 / roadmap Phase 7).
+
+**Gate — all must hold before you stop Argus:**
+- [ ] **Parity proven.** The validation gate (§3) read **Ready** — Qwen met or beat Argus on a
+  representative, human-scored set — and stayed ready, not a one-off.
+- [ ] **Promoted and stable.** `MISE_VISION_PROVIDER=qwen` has served production for an
+  **observation period** (≥ ~30 days) with no quality regression you'd act on.
+- [ ] **Cost confirmed.** `/admin/ai-cost` shows the expected vision COGS under Qwen (≈0, local)
+  vs the Argus baseline — no surprise spend.
+- [ ] **Writeback verified.** Spot-check several galleries: `assets.argus_*` (keywords, alt
+  text, keeper/hero) are populated by Qwen and look right; the gallery hero set is sane.
+- [ ] **Rollback rehearsed.** You've flipped `MISE_VISION_PROVIDER=argus` once on staging/a test
+  gallery and confirmed Argus re-takes the path and re-writes from its last run. Confirm the
+  Argus URL/token are still valid so the fallback actually works.
+
+**Then retire, in this order (reversible at every step):**
+1. **Stop *new* Argus work, keep the service reachable.** Leave `MISE_ARGUS_URL`/`_TOKEN` set so
+   the legacy adapter still works as rollback; just rely on Qwen for live analysis.
+2. **Observe** for the period above. If anything regresses, `MISE_VISION_PROVIDER=argus` is the
+   instant revert — nothing else to undo.
+3. **Decommission the Argus *service*** (its own deploy/systemd, its run-store-as-authority, its
+   separate UI/auth). Mise already owns the signals and the review surface, so this removes
+   infrastructure, not data.
+4. **Keep the legacy adapter in Mise** (`LegacyArgusVisionAdapter`) and the Grok path **until**
+   you're past the observation period and confident — it is the last rollback. Removing it is a
+   final, separate cleanup, not part of the cutover.
+
+**What NOT to do:** don't delete the Argus adapter or unset `MISE_ARGUS_*` in the same change
+as the cutover; don't retire the service before the observation period; don't remove the
+rollback path until parity has held for the full window. Argus stays the safety net until it's
+provably unneeded.
+
 ---
 
 ## 4. Notion API modernization
