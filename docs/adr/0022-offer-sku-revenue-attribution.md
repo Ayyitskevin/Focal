@@ -6,6 +6,12 @@ opt-in pre-fill; the "Attributed upsell" tile). Live numbers still gated on Plut
 **Date:** 2026-06-28
 **Deciders:** Kevin (owner), principal engineer
 
+> **Update (2026-06-28):** the piece-3 "conservative floor" is closed. The Attributed-upsell
+> tile now also counts **deposit-paid** invoices, pro-rated by the fraction actually collected
+> (`paid_cents / total_cents`) — deposit-first is the studio's real billing pattern, so a paid
+> deposit attributes its share immediately instead of reading $0 until the balance clears.
+> Fully-paid invoices still count in full; unpaid (draft/sent/viewed) still count $0.
+
 ## Context
 
 The offer scorecard (ADR 0020) reports a deliberately honest **revenue proxy**: all payment

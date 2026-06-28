@@ -63,13 +63,13 @@
       </div>
     </div>
     <p class="muted" style="font-size:.78rem; margin:.4rem 0">
-      <b>Causal — counts only tagged lines.</b> This sums <em>only</em> the value of invoice line
-      items a human tagged with a SKU that Plutus offered (via the approved-offer pre-fill), on
-      fully-paid invoices — not the base shoot fee on the same invoice, and not untagged revenue.
+      <b>Causal — counts only tagged lines, by money collected.</b> This sums <em>only</em> the
+      value of invoice line items a human tagged with a SKU that Plutus offered (via the
+      approved-offer pre-fill) — not the base shoot fee on the same invoice, and not untagged
+      revenue. Fully-paid invoices count in full; <b>deposit-paid invoices are pro-rated</b> by the
+      fraction collected, so a paid deposit attributes its share now. Unpaid invoices count $0.
       {% if not attributed.has_data %}Reads $0 until Plutus emits SKUs and a SKU-tagged invoice is
-      paid; the proxy below covers the interim.{% endif %}
-      Deposit/partly-paid invoices aren't line-attributed yet, so treat this as a conservative
-      floor.
+      paid (or a deposit lands); the proxy below covers the interim.{% endif %}
     </p>
   </section>
 
