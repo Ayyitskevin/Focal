@@ -1,7 +1,8 @@
 # ADR 0022 — Offer SKU revenue attribution: proxy → real attributed upsell
 
-**Status:** Proposed (build-ready; gated on Plutus emitting `offers.schema.json` with stable
-SKUs — sibling brief PLUTUS #1)
+**Status:** Accepted — pieces 1–3 implemented (persist bundles+SKUs; sku on invoice lines +
+opt-in pre-fill; the "Attributed upsell" tile). Live numbers still gated on Plutus emitting
+`offers.schema.json` SKUs (sibling brief PLUTUS #1); the path is inert until then.
 **Date:** 2026-06-28
 **Deciders:** Kevin (owner), principal engineer
 

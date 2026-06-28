@@ -19,6 +19,7 @@ Two halves:
   such in the UI; the AI cost report carries the COGS side.
 """
 
+import json
 import logging
 
 from fastapi import APIRouter, Depends, Request
@@ -35,6 +36,28 @@ _WINDOWS = [("All time", None), ("Last 60 days", "-60 days"), ("Last 30 days", "
 
 def _dollars(cents) -> str:
     return f"${(cents or 0) / 100:,.2f}"
+
+
+def _sum_attributed(offered_skus: set, invoice_items: list) -> dict:
+    """Pure: sum the value of offer-SKU-tagged line items across paid-invoice line-item lists.
+
+    ``offered_skus`` is the set of SKUs Plutus actually proposed; ``invoice_items`` is one list
+    of line-item dicts per PAID invoice. Counts only ``qty*unit_cents`` for lines whose ``sku``
+    is in ``offered_skus`` — the real upsell a human tagged, NOT the whole invoice (the base
+    shoot fee on the same invoice is excluded), and stray/manual SKUs that match no offer are
+    ignored. Returns ``{cents, invoices, skus}``. No I/O — unit-testable (ADR 0022 piece 3)."""
+    total, invoices_n, skus = 0, 0, set()
+    for items in invoice_items:
+        inv = 0
+        for it in items or []:
+            sku = it.get("sku")
+            if sku and sku in offered_skus:
+                inv += int(it.get("qty") or 0) * int(it.get("unit_cents") or 0)
+                skus.add(sku)
+        if inv:
+            total += inv
+            invoices_n += 1
+    return {"cents": total, "invoices": invoices_n, "skus": len(skus)}
 
 
 def _pct(n: int, d: int) -> str:
@@ -109,11 +132,45 @@ def _revenue_proxy() -> dict:
     }
 
 
+def _attributed_upsell() -> dict:
+    """Real attributed upsell (ADR 0022 piece 3): the value of offer-SKU-tagged line items on
+    PAID invoices, matched against the SKUs Plutus actually offered. Unlike the proxy, this is a
+    causal link — it counts only the tagged lines a human added (via the offer pre-fill), not all
+    post-send project revenue. Deposit/partly-paid invoices aren't line-attributed yet, so this
+    is a conservative floor. Reads only; decides nothing."""
+    offered: set = set()
+    for r in db.all_(
+        "SELECT plutus_last_bundles FROM galleries WHERE plutus_last_bundles IS NOT NULL"
+    ):
+        try:
+            for b in json.loads(r["plutus_last_bundles"]) or []:
+                sku = b.get("sku")
+                if sku:
+                    offered.add(sku)
+        except (ValueError, TypeError):
+            continue
+    invoice_items: list = []
+    if offered:
+        for inv in db.all_("SELECT line_items FROM invoices WHERE status='paid'"):
+            try:
+                invoice_items.append(json.loads(inv["line_items"]) or [])
+            except (ValueError, TypeError):
+                continue
+    agg = _sum_attributed(offered, invoice_items)
+    return {
+        "revenue": _dollars(agg["cents"]),
+        "invoices": agg["invoices"],
+        "skus": agg["skus"],
+        "offered_skus": len(offered),
+        "has_data": agg["cents"] > 0,
+    }
+
+
 @router.get("", response_class=HTMLResponse)
 async def scorecard_view(request: Request):
     windows = [{"label": label, **_funnel(mod)} for label, mod in _WINDOWS]
     return templates.TemplateResponse(
         request,
         "admin/offer_scorecard.html",
-        {"windows": windows, "revenue": _revenue_proxy()},
+        {"windows": windows, "revenue": _revenue_proxy(), "attributed": _attributed_upsell()},
     )
