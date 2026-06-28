@@ -35,12 +35,15 @@ def _record(
     pitch_url: str | None = None,
     bundle_count: int | None = None,
     estimated_total_cents: int | None = None,
+    bundles: list[dict] | None = None,
 ) -> None:
-    # plutus_last_offer_url stores review_url for backward-compatible schema
+    # plutus_last_offer_url stores review_url for backward-compatible schema.
+    # plutus_last_bundles persists the validated bundle catalogue (with SKUs) for ADR 0022
+    # attribution; NULL when there is nothing valid to store, leaving the summary unaffected.
     db.run(
         """UPDATE galleries SET plutus_last_run_id=?, plutus_last_status=?,
               plutus_last_error=?, plutus_last_offer_url=?, plutus_last_pitch_url=?,
-              plutus_last_bundle_count=?, plutus_last_estimated_cents=?,
+              plutus_last_bundle_count=?, plutus_last_estimated_cents=?, plutus_last_bundles=?,
               plutus_last_at=datetime('now')
               WHERE id=?""",
         (
@@ -51,9 +54,72 @@ def _record(
             (pitch_url or None)[:500] if pitch_url else None,
             bundle_count,
             estimated_total_cents,
+            json.dumps(bundles) if bundles else None,
             gallery_id,
         ),
     )
+
+
+def parse_bundles(payload: dict | None) -> list[dict] | None:
+    """Deterministically validate Plutus's proposed ``bundles`` into a normalized list for
+    persistence (ADR 0022, piece 1) — the offers.schema.json analog of
+    ``qwen_writeback.parse_structured``.
+
+    Each bundle must have a non-empty ``label`` and an integer ``estimated_cents`` >= 0. The
+    stable ``sku`` (the key that later links an accepted offer to an invoice line) is preserved
+    when present and a non-empty string, else ``None`` — Plutus only emits SKUs after PLUTUS #1,
+    so this stays useful (and inert) before then. Optional ``line_items`` are
+    ``[{label, qty>=1, unit_cents>=0}]``.
+
+    Returns the normalized list, or ``None`` when there is nothing valid to store (no/empty
+    bundles) OR *any* bundle is malformed — a conservative all-or-nothing gate so a bad proposal
+    never persists a partial catalogue. Non-raising: recording bundles is best-effort and never
+    blocks the summary columns or touches money/invoice state.
+    """
+    if not isinstance(payload, dict):
+        return None
+    bundles = payload.get("bundles")
+    if not isinstance(bundles, list) or not bundles:
+        return None
+
+    def _nonneg_int(value) -> bool:
+        return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+    out: list[dict] = []
+    for b in bundles:
+        if not isinstance(b, dict):
+            return None
+        label = b.get("label")
+        if not isinstance(label, str) or not label.strip():
+            return None
+        if not _nonneg_int(b.get("estimated_cents")):
+            return None
+        sku = b.get("sku")
+        sku = sku.strip() if isinstance(sku, str) and sku.strip() else None
+        norm: dict = {"sku": sku, "label": label.strip(), "estimated_cents": b["estimated_cents"]}
+
+        line_items = b.get("line_items")
+        if line_items is not None:
+            if not isinstance(line_items, list):
+                return None
+            items: list[dict] = []
+            for li in line_items:
+                if not isinstance(li, dict):
+                    return None
+                li_label = li.get("label")
+                qty = li.get("qty")
+                if not isinstance(li_label, str) or not li_label.strip():
+                    return None
+                if not (isinstance(qty, int) and not isinstance(qty, bool) and qty >= 1):
+                    return None
+                if not _nonneg_int(li.get("unit_cents")):
+                    return None
+                items.append(
+                    {"label": li_label.strip(), "qty": qty, "unit_cents": li["unit_cents"]}
+                )
+            norm["line_items"] = items
+        out.append(norm)
+    return out
 
 
 def _bundle_meta(payload: dict) -> tuple[int | None, int | None]:
@@ -133,6 +199,7 @@ def apply_callback(gallery_id: int, payload: dict) -> None:
     review_url = payload.get("review_url") or payload.get("offer_url")
     pitch_url = payload.get("pitch_url")
     bundle_count, estimated_cents = _bundle_meta(payload)
+    bundles = parse_bundles(payload)
     if status == "done" and run_id is not None:
         _record(
             gallery_id,
@@ -142,6 +209,7 @@ def apply_callback(gallery_id: int, payload: dict) -> None:
             pitch_url=str(pitch_url) if pitch_url else None,
             bundle_count=bundle_count,
             estimated_total_cents=estimated_cents,
+            bundles=bundles,
         )
         return
     _record(
@@ -153,6 +221,7 @@ def apply_callback(gallery_id: int, payload: dict) -> None:
         pitch_url=str(pitch_url) if pitch_url else None,
         bundle_count=bundle_count,
         estimated_total_cents=estimated_cents,
+        bundles=bundles,
     )
 
 
@@ -181,6 +250,7 @@ def _run_via_facade(gallery_id: int) -> None:
             pitch_url=out.get("pitch_url"),
             bundle_count=out.get("bundle_count"),
             estimated_total_cents=out.get("estimated_total_cents"),
+            bundles=parse_bundles(out),
         )
     try:
         ai_runs.record(pr, subject_type="gallery", subject_id=gallery_id)
@@ -215,4 +285,5 @@ def run_for_gallery(gallery_id: int) -> None:
         pitch_url=result.get("pitch_url"),
         bundle_count=bundle_count,
         estimated_total_cents=estimated_cents,
+        bundles=parse_bundles(result),
     )
