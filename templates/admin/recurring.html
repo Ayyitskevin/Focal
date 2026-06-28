@@ -39,15 +39,25 @@
 
     <h3 style="margin-top:1.2em">Monthly quota</h3>
     <p class="muted">The deliverable commitment for this retainer — what you owe
-      each period. Advisory only; it never affects the invoice total above.</p>
+      each period. Advisory only; it never affects the invoice total above. An
+      <strong>overage rate</strong> is the per-unit price for delivery beyond target — used to
+      estimate overage below; it never bills on its own.</p>
     <table class="list">
-      <tr><th>Deliverable</th><th>Target / month</th></tr>
+      <tr><th>Deliverable</th><th>Target / mo</th><th>Unit</th><th>Overage $ / unit</th></tr>
       {% for q in quota_rows %}
       <tr>
         <td><input type="text" name="quota_label_{{ loop.index0 }}"
                    value="{{ q.label or '' }}" placeholder="e.g. Hero images"></td>
         <td><input type="number" name="quota_target_{{ loop.index0 }}" min="0"
                    value="{{ q.target if q.target is defined else '' }}" style="width:5em"></td>
+        <td><select name="quota_unit_{{ loop.index0 }}">
+              {% for u in quota_units %}
+              <option value="{{ u }}"{% if (q.unit or 'images') == u %} selected{% endif %}>{{ u }}</option>
+              {% endfor %}
+            </select></td>
+        <td><input type="number" name="quota_rate_{{ loop.index0 }}" min="0" step="0.01"
+                   value="{{ q.overage_rate_cents|usd if q.overage_rate_cents else '' }}"
+                   placeholder="0.00" style="width:7em"></td>
       </tr>
       {% endfor %}
     </table>
@@ -58,6 +68,17 @@
       <label class="row"><input type="checkbox" name="active" value="1"
              {% if d.active %}checked{% endif %}> Active</label>
     </div>
+
+    <h3 style="margin-top:1.2em">Term &amp; renewal</h3>
+    <p class="muted">Optional. Leave the renewal date blank for an evergreen retainer (keeps
+      generating monthly, today's behavior). Set it and you'll get one internal heads-up as it
+      approaches — never a message to the client.</p>
+    <div class="form-grid">
+      <label>Term start <input type="date" name="term_start" value="{{ d.term_start or '' }}"></label>
+      <label>Renews on <input type="date" name="renews_on" value="{{ d.renews_on or '' }}"></label>
+      <label class="row"><input type="checkbox" name="pause_at_term" value="1"
+             {% if d.pause_at_term %}checked{% endif %}> Pause auto-generate after the renewal month</label>
+    </div>
     <p class="muted">Cadence: monthly. Day 1–28 (kept clear of short months). On
       that day each month Mise auto-generates this period's <strong>draft</strong>
       — you still review and Send it. You can also generate on demand below.</p>
@@ -66,6 +87,24 @@
     <label>Notes <textarea name="notes" rows="2">{{ d.notes or '' }}</textarea></label>
     <button type="submit">Save plan</button>
   </form>
+
+  {% if d.renews_on %}
+  <div class="caption-card" style="max-width:680px">
+    <p>
+      <strong>Term:</strong>
+      {% if d.term_start %}{{ d.term_start }} → {% endif %}renews {{ d.renews_on }}
+      {% if days_to_renewal is not none %}
+        {% if days_to_renewal < 0 %}<span class="warn">({{ -days_to_renewal }}d overdue)</span>
+        {% else %}<span class="muted">({{ days_to_renewal }}d to go)</span>{% endif %}
+      {% endif %}
+      {% if d.pause_at_term %}<span class="muted">· pauses after the renewal month</span>{% endif %}
+    </p>
+    <form method="post" action="/admin/studio/recurring/{{ d.id }}/renew" class="inline"
+          onsubmit="return confirm('Roll this retainer’s term forward? This only moves the dates — it never bills or emails the client.')">
+      <button type="submit">Renew (roll term forward)</button>
+    </form>
+  </div>
+  {% endif %}
 
   <h2>Deliverables — {{ period }}</h2>
   {% if progress or extra %}
@@ -91,6 +130,34 @@
   </table>
   {% else %}
   <p class="muted">No quota set yet — add deliverable targets above to track progress.</p>
+  {% endif %}
+
+  {% set over_lines = overage.lines | selectattr('over', 'greaterthan', 0) | list %}
+  {% set typo_extra = overage.extra | selectattr('suggestion') | list %}
+  {% if over_lines or typo_extra %}
+  <div class="caption-card" style="max-width:680px">
+    <h3 style="margin-top:0">Overage this period <span class="muted">— advisory estimate, not billed</span></h3>
+    {% if overage.snapshot %}<p class="muted">Measured against the quota committed when {{ period }}'s draft was generated.</p>{% endif %}
+    <table class="list">
+      <tr><th>Deliverable</th><th>Over</th><th>Rate</th><th class="num">Estimate</th></tr>
+      {% for r in over_lines %}
+      <tr>
+        <td>{{ r.label }} <span class="muted">({{ r.done }}/{{ r.target }} {{ r.unit }})</span></td>
+        <td>+{{ r.over }}</td>
+        <td>{% if r.rate_cents %}${{ r.rate_cents|usd }}/{{ r.unit[:-1] if r.unit != 'other' else 'unit' }}{% else %}<span class="muted">no rate</span>{% endif %}</td>
+        <td class="num">{% if r.amount_cents %}${{ r.amount_cents|usd }}{% else %}<span class="muted">—</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% if overage.total_cents %}
+    <p><strong>Estimated overage: ${{ overage.total_cents|usd }}</strong>
+      <span class="muted">— review on the period's draft invoice; nothing is billed here.</span></p>
+    {% endif %}
+    {% for e in typo_extra %}
+    <p class="warn">Logged "{{ e.label }}" (×{{ e.done }}) isn't a quota line — did you mean
+      "{{ e.suggestion }}"? A label typo would keep it out of the overage estimate.</p>
+    {% endfor %}
+  </div>
   {% endif %}
 
   {% if credit.label %}

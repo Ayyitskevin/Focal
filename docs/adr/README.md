@@ -31,6 +31,7 @@ states context, the decision, consequences, measured reopen criteria, and altern
 | [0024](0024-money-operations-pane.md) | Money operations: one read-only money/AR pane (past-due AR + collected) | Accepted |
 | [0025](0025-b2b-invoicing-essentials.md) | B2B invoicing essentials: PO number + net terms (auto due date) on invoices, company billing details on clients | Accepted |
 | [0026](0026-decommission-albums-offers.md) | Decommission the Mnemosyne ALBUMS and Plutus OFFERS subsystems (cut consumer-upsell for the B2B/F&B niche) | Accepted |
+| [0027](0027-retainer-quota-lifecycle.md) | Retainer deepening: quota units + per-period snapshot + advisory overage + renewal (term/nudge/pause) | Accepted |
 
 See also the operator runbook [`../MISE-SOLO-STUDIO-OS-RUNBOOK.md`](../MISE-SOLO-STUDIO-OS-RUNBOOK.md)
 (how to run it day to day), [`../MISE-SOLO-STUDIO-OS.md`](../MISE-SOLO-STUDIO-OS.md),

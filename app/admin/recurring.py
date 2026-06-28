@@ -10,6 +10,7 @@ period to one draft, so a double-click OR an overlapping sweep can't duplicate.
 """
 
 import datetime as dt
+import difflib
 import json
 import logging
 import re
@@ -29,6 +30,10 @@ router = APIRouter(prefix="/admin/studio", dependencies=[Depends(security.requir
 MAX_QUOTA_ROWS = 8
 CALENDAR_STATUSES = ("planned", "shot", "delivered")
 CAPTION_STATUSES = ("draft", "approved")
+# Deliverable units for a quota line — structured-enough metadata for an F&B content retainer
+# without breaking the free-text label join deliveries/calendar/captions rely on.
+QUOTA_UNITS = ("images", "reels", "stories", "carousels", "posts", "hours", "other")
+_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 def get_plan(plan_id: int) -> "db.sqlite3.Row":
@@ -43,12 +48,16 @@ def _period(today: dt.date | None = None) -> str:
 
 
 def parse_quota(form) -> str:
-    """Collect quota_label_N / quota_target_N rows → JSON of {label, target}.
+    """Collect quota_label_N / quota_target_N / quota_unit_N / quota_rate_N rows → JSON of
+    ``{label, target, unit, overage_rate_cents}``.
 
-    The monthly deliverable commitment, separate from the invoice line items —
-    advisory only, it never affects billing. Blank-label rows are dropped; a
-    target below zero is clamped to zero (a 0-target line is a placeholder, not
-    an error)."""
+    The monthly deliverable commitment, separate from the invoice line items — advisory only,
+    it never affects the invoice total. Blank-label rows are dropped; a target below zero is
+    clamped to zero (a 0-target line is a placeholder). ``unit`` is one of QUOTA_UNITS
+    (defaults 'images'); ``overage_rate_cents`` is the per-unit charge for delivery beyond
+    target, dollars-in / cents-stored, clamped >= 0 (0 = advisory line, no dollar figure).
+    Legacy rows that stored only {label, target} parse unchanged downstream (unit defaults,
+    rate 0)."""
     quota = []
     for i in range(MAX_QUOTA_ROWS):
         label = (form.get(f"quota_label_{i}") or "").strip()
@@ -58,8 +67,115 @@ def parse_quota(form) -> str:
             target = max(0, int(form.get(f"quota_target_{i}") or "0"))
         except ValueError:
             raise HTTPException(status_code=400, detail=f"bad quota target on row {i + 1}")
-        quota.append({"label": label, "target": target})
+        unit = (form.get(f"quota_unit_{i}") or "images").strip().lower()
+        if unit not in QUOTA_UNITS:
+            unit = "images"
+        rate_raw = (form.get(f"quota_rate_{i}") or "").strip()
+        try:
+            rate_cents = max(0, round(float(rate_raw) * 100)) if rate_raw else 0
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"bad overage rate on row {i + 1}")
+        quota.append(
+            {"label": label, "target": target, "unit": unit, "overage_rate_cents": rate_cents}
+        )
     return json.dumps(quota)
+
+
+def _quota_line(q: dict) -> dict:
+    """Normalize a stored quota line to the full shape — legacy {label,target} rows get the
+    defaults (unit 'images', no overage rate), so every reader can assume all four keys."""
+    return {
+        "label": q.get("label", ""),
+        "target": int(q.get("target") or 0),
+        "unit": q.get("unit") or "images",
+        "overage_rate_cents": int(q.get("overage_rate_cents") or 0),
+    }
+
+
+def _overage_lines(quota: list[dict], delivered: dict[str, int]) -> dict:
+    """PURE advisory overage computation (no DB, no I/O — unit-tested).
+
+    Given the period's quota lines and the summed deliveries-per-label, return per-line overage
+    and the un-targeted 'extra' bucket. A dollar ``amount_cents`` is produced ONLY where
+    over > 0 AND the line's overage rate > 0; the total is the sum of those. Extra (un-targeted)
+    deliveries never carry a dollar figure but get a near-match ``suggestion`` so a label typo
+    that would silently dodge billing surfaces instead. This computes a FIGURE only — it never
+    creates, charges, or pre-fills an invoice line (§11.4)."""
+    norm = [_quota_line(q) for q in quota]
+    labels = [q["label"] for q in norm]
+    lines = []
+    total = 0
+    for q in norm:
+        done = int(delivered.get(q["label"], 0))
+        over = max(0, done - q["target"])
+        amount = over * q["overage_rate_cents"] if (over > 0 and q["overage_rate_cents"] > 0) else 0
+        total += amount
+        lines.append(
+            {
+                "label": q["label"],
+                "target": q["target"],
+                "done": done,
+                "over": over,
+                "unit": q["unit"],
+                "rate_cents": q["overage_rate_cents"],
+                "amount_cents": amount,
+            }
+        )
+    extra = []
+    for lbl, n in delivered.items():
+        if lbl in labels:
+            continue
+        near = difflib.get_close_matches(lbl, labels, n=1, cutoff=0.8)
+        extra.append({"label": lbl, "done": int(n), "suggestion": near[0] if near else None})
+    return {"lines": lines, "extra": extra, "total_cents": total}
+
+
+def _advance_term(term_start: str | None, renews_on: str | None) -> tuple[str | None, str | None]:
+    """PURE term-roll for the Renew button (unit-tested). Returns the NEXT (term_start, renews_on).
+
+    Preserves the existing term length when both dates are known (new start = old renews_on, new
+    end = old renews_on + (old renews_on - old term_start)); otherwise rolls renews_on forward by
+    12 months from itself (or from today if unset). Never auto-renews — only the explicit button
+    calls this. A Feb-29 end clamps to Feb-28 on a non-leap landing year."""
+    today = dt.date.today()
+    end = dt.date.fromisoformat(renews_on) if renews_on else today
+    start = dt.date.fromisoformat(term_start) if term_start else None
+    if start and renews_on and end > start:
+        new_start = end
+        new_end = end + (end - start)
+    else:
+        new_start = today
+        new_end = _add_year(end)
+    return new_start.isoformat(), new_end.isoformat()
+
+
+def _add_year(d: dt.date) -> dt.date:
+    try:
+        return d.replace(year=d.year + 1)
+    except ValueError:  # Feb 29 -> Feb 28
+        return d.replace(year=d.year + 1, day=28)
+
+
+def compute_overage(plan: "db.sqlite3.Row", period: str) -> dict:
+    """Advisory overage for a plan/period, against the per-period SNAPSHOT when one exists
+    (what was committed that month) else the live quota. Reads the delivery log; never writes."""
+    snap = db.one(
+        "SELECT quota_json FROM retainer_period_quota WHERE plan_id=? AND period=?",
+        (plan["id"], period),
+    )
+    try:
+        quota = json.loads(snap["quota_json"]) if snap else json.loads(plan["quota"])
+    except (ValueError, TypeError):
+        quota = []
+    delivered: dict[str, int] = {}
+    for r in db.all_(
+        "SELECT label, qty FROM retainer_deliveries WHERE plan_id=? AND period=?",
+        (plan["id"], period),
+    ):
+        delivered[r["label"]] = delivered.get(r["label"], 0) + r["qty"]
+    out = _overage_lines(quota, delivered)
+    out["snapshot"] = snap is not None
+    return out
 
 
 @router.post("/projects/{project_id}/recurring")
@@ -90,7 +206,7 @@ async def plan_detail(request: Request, plan_id: int):
     p = get_project(d["project_id"])
     items = json.loads(d["line_items"])
     rows = items + [{} for _ in range(max(0, MAX_ITEM_ROWS - len(items)))]
-    quota = json.loads(d["quota"])
+    quota = [_quota_line(q) for q in json.loads(d["quota"])]
     quota_rows = quota + [{} for _ in range(max(0, MAX_QUOTA_ROWS - len(quota)))]
     period = _period()
     deliveries = db.all_(
@@ -135,6 +251,18 @@ async def plan_detail(request: Request, plan_id: int):
         "WHERE recurring_plan_id=? ORDER BY created_at DESC",
         (plan_id,),
     )
+    # Advisory overage for this period — a read-only estimate, NOT billed (the operator acts on
+    # it from the draft invoice in a later slice). Folds in the un-targeted 'extra' bucket with a
+    # near-match typo warning so a mislabeled over-delivery surfaces instead of silently dodging.
+    overage = compute_overage(d, period)
+    # Term / renewal context. renews_on NULL = evergreen (today's behavior); days_to_renewal is
+    # informational for the Term panel.
+    days_to_renewal = None
+    if d["renews_on"]:
+        try:
+            days_to_renewal = (dt.date.fromisoformat(d["renews_on"]) - dt.date.today()).days
+        except ValueError:
+            days_to_renewal = None
     # Assisted-credit pre-fill: when a calendar slot was just flipped to
     # 'delivered', set_calendar_status redirects here with credit_* query params.
     # They seed the delivery-log form's defaults so the human commits in one click
@@ -166,6 +294,9 @@ async def plan_detail(request: Request, plan_id: int):
             "caption_error": caption_error,
             "ai_caption_enabled": caption_ai.is_enabled(),
             "quota_labels": [q["label"] for q in quota],
+            "quota_units": QUOTA_UNITS,
+            "overage": overage,
+            "days_to_renewal": days_to_renewal,
             "invoices": invoices,
             "period": period,
             "credit": credit,
@@ -189,18 +320,53 @@ async def update_plan(request: Request, plan_id: int):
     active = 1 if form.get("active") else 0
     notes = (form.get("notes") or "").strip() or None
     quota_json = parse_quota(form)
+
+    def _date_or_none(field: str) -> str | None:
+        raw = (form.get(field) or "").strip()
+        if not raw:
+            return None
+        if not _DATE_RE.fullmatch(raw):
+            raise HTTPException(status_code=400, detail=f"{field} must be YYYY-MM-DD")
+        return raw
+
+    term_start = _date_or_none("term_start")
+    renews_on = _date_or_none("renews_on")
+    pause_at_term = 1 if form.get("pause_at_term") else 0
+    # Re-arm the one-shot renewal nudge ONLY when the renewal date actually moves — so a title or
+    # quota edit doesn't silently re-trigger an already-sent nudge (mirrors contracts' one-shot).
+    nudged = 0 if renews_on != d["renews_on"] else d["nudged_renewal"]
     with db.tx() as con:
         con.execute(
             "UPDATE recurring_plans SET title=?, line_items=?, total_cents=?, "
-            "anchor_day=?, active=?, notes=?, quota=? WHERE id=?",
-            (title, items_json, total, anchor, active, notes, quota_json, plan_id),
+            "anchor_day=?, active=?, notes=?, quota=?, term_start=?, renews_on=?, "
+            "pause_at_term=?, nudged_renewal=? WHERE id=?",
+            (
+                title,
+                items_json,
+                total,
+                anchor,
+                active,
+                notes,
+                quota_json,
+                term_start,
+                renews_on,
+                pause_at_term,
+                nudged,
+                plan_id,
+            ),
         )
         audit.log(
             con,
             "recurring_plan",
             plan_id,
             "update",
-            diff={"total_cents": total, "anchor_day": anchor, "active": active},
+            diff={
+                "total_cents": total,
+                "anchor_day": anchor,
+                "active": active,
+                "renews_on": renews_on,
+                "pause_at_term": pause_at_term,
+            },
         )
     return RedirectResponse(f"/admin/studio/recurring/{plan_id}", status_code=303)
 
@@ -641,6 +807,14 @@ def generate_for_plan(plan: "db.sqlite3.Row", period: str) -> int | None:
                 "total_cents": plan["total_cents"],
             },
         )
+        # Freeze the quota committed for this period at first-generate, so the advisory overage
+        # figure is computed against what was committed — not a quota the operator later edits.
+        # INSERT OR IGNORE + the UNIQUE(plan_id, period) index make this write-once idempotent.
+        con.execute(
+            "INSERT OR IGNORE INTO retainer_period_quota (plan_id, period, quota_json) "
+            "VALUES (?,?,?)",
+            (plan["id"], period, plan["quota"]),
+        )
     log.info("recurring plan %s generated draft invoice %s for %s", plan["id"], iid, period)
     return iid
 
@@ -653,15 +827,43 @@ def run_due_plans(today: dt.date | None = None) -> int:
     """
     today = today or dt.date.today()
     period = _period(today)
+    # Soft term-end guard (opt-in per plan): the UNATTENDED sweep skips a paused-at-term plan once
+    # the period is strictly AFTER its renewal month (the renewal month itself still bills). A
+    # deliberate manual "Generate" is unaffected — that's the human override. NULL renews_on
+    # (evergreen) and pause_at_term=0 both keep today's generate-forever behavior.
     due = db.all_(
         "SELECT * FROM recurring_plans WHERE active=1 AND total_cents>0 "
-        "AND deleted_at IS NULL AND anchor_day<=? AND COALESCE(last_run_period,'')<>?",
-        (today.day, period),
+        "AND deleted_at IS NULL AND anchor_day<=? AND COALESCE(last_run_period,'')<>? "
+        "AND NOT (pause_at_term=1 AND renews_on IS NOT NULL AND ? > substr(renews_on,1,7))",
+        (today.day, period, period),
     )
     n = sum(1 for plan in due if generate_for_plan(plan, period) is not None)
     if n:
         log.info("recurring sweep: generated %d draft(s) for %s", n, period)
     return n
+
+
+@router.post("/recurring/{plan_id}/renew")
+async def renew_plan(plan_id: int):
+    """Roll a retainer's term forward — a fully human-driven renewal. Advances term_start /
+    renews_on (preserving the existing term length) and clears the one-shot nudge. Never
+    auto-bills, auto-generates, or emails the client (§11.4)."""
+    d = get_plan(plan_id)
+    new_start, new_end = _advance_term(d["term_start"], d["renews_on"])
+    with db.tx() as con:
+        con.execute(
+            "UPDATE recurring_plans SET term_start=?, renews_on=?, nudged_renewal=0 WHERE id=?",
+            (new_start, new_end, plan_id),
+        )
+        audit.log(
+            con,
+            "recurring_plan",
+            plan_id,
+            "renewed",
+            diff={"term_start": new_start, "renews_on": new_end},
+        )
+    log.info("recurring plan %s renewed -> term %s..%s", plan_id, new_start, new_end)
+    return RedirectResponse(f"/admin/studio/recurring/{plan_id}", status_code=303)
 
 
 @router.post("/recurring/{plan_id}/generate")

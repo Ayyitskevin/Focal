@@ -7079,7 +7079,11 @@ def test_retainer_deliverable_quota(admin):
     assert r.status_code == 303
     plan = db.one("SELECT * FROM recurring_plans WHERE id=?", (plan["id"],))
     quota = json.loads(plan["quota"])
-    assert quota == [{"label": "Hero images", "target": 20}, {"label": "Reels", "target": 4}]
+    # quota lines now carry unit + overage rate (migration 076); defaults when unset
+    assert quota == [
+        {"label": "Hero images", "target": 20, "unit": "images", "overage_rate_cents": 0},
+        {"label": "Reels", "target": 4, "unit": "images", "overage_rate_cents": 0},
+    ]
     assert plan["total_cents"] == 120000  # quota did NOT bleed into billing
 
     period = _period()
