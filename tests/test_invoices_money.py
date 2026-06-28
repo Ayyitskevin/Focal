@@ -14,6 +14,7 @@ import json
 import pytest
 from fastapi import HTTPException
 
+from app.admin.invoices import due_date_from_net_days
 from app.admin.proposals import parse_items
 from app.public.pay import next_payment
 
@@ -131,3 +132,30 @@ def test_line_item_sku_does_not_affect_total():
     }
     _, total = parse_items(form)
     assert total == 60000
+
+
+# --- net-terms due date (B2B invoicing, migration 073) ----------------------
+
+
+def test_net_terms_compute_due_date_from_sent_date():
+    # net-30 on an invoice sent 2026-06-01 is due 2026-07-01 — the arithmetic an AP
+    # team relies on; a drift here disputes a real payment deadline.
+    assert due_date_from_net_days("2026-06-01", 30) == "2026-07-01"
+
+
+def test_net_terms_use_only_the_date_part_of_a_datetime():
+    # sent_at is a full 'YYYY-MM-DD HH:MM:SS' timestamp; the due date is date-only.
+    assert due_date_from_net_days("2026-06-01 14:23:09", 15) == "2026-06-16"
+
+
+def test_net_terms_cross_year_boundary():
+    assert due_date_from_net_days("2026-12-20", 30) == "2027-01-19"
+
+
+def test_zero_net_days_means_no_net_terms():
+    # 0 = the operator's manually-entered due_date stands; the helper signals "don't override".
+    assert due_date_from_net_days("2026-06-01", 0) is None
+
+
+def test_negative_net_days_never_produces_a_past_due_date():
+    assert due_date_from_net_days("2026-06-01", -5) is None

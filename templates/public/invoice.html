@@ -21,10 +21,13 @@
         <p class="client-doc-kicker">Billed to</p>
         <h1>{{ d.company or d.client_name }}</h1>
         <p>{{ d.client_name }}{% if d.project_title %} · {{ d.project_title }}{% endif %}</p>
+        {% if d.billing_address %}<p class="client-doc-billaddr" style="white-space:pre-line">{{ d.billing_address }}</p>{% endif %}
+        {% if d.tax_id %}<p class="client-doc-billaddr">Tax ID {{ d.tax_id }}</p>{% endif %}
       </div>
       <div class="client-doc-meta">
         <p><span>Issued</span>{% if d.created_at %}{{ d.created_at[:10] }}{% else %}Invoice ready{% endif %}</p>
-        <p><span>Due</span>{{ d.due_date or "On delivery" }}</p>
+        <p><span>Due</span>{{ d.due_date or "On delivery" }}{% if d.net_days %} (Net {{ d.net_days }}){% endif %}</p>
+        {% if d.po_number %}<p><span>PO</span>{{ d.po_number }}</p>{% endif %}
       </div>
     </header>
 

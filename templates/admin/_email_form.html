@@ -22,7 +22,7 @@
   }
   </script>
   {% endif %}
-  <label>To <input type="email" name="to" value="{{ p.client_email or '' }}" required></label>
+  <label>To <input type="email" name="to" value="{{ email_to or p.client_email or '' }}" required></label>
   <label>Subject <input type="text" name="subject" value="{{ email_subject }}" required></label>
   <textarea name="message" rows="9" required>Hi {{ p.client_name.split(' ')[0] }},
 
