@@ -245,14 +245,15 @@ def propose_layout(eligible_ids, *, per_spread: int = 2) -> list[dict]:
 def _provider_placements(
     gallery_id: int, eligible: set[int], per_spread: int
 ) -> tuple[list[dict], str, str]:
-    """Prefer a registered ALBUMS provider's proposal — the seam a future Mnemosyne backend
-    plugs into — and fall back to the deterministic internal baseline. Returns
-    ``(placements, provider, model)``. A registered provider's output is still handed to
-    ``save_draft``'s validator, so a bad model proposal cannot become a stored draft."""
-    try:
-        adapter = registry.resolve(Capability.ALBUMS)
-    except ValueError:
-        adapter = None
+    """Prefer the *eligible production* ALBUMS proposer — the Mnemosyne adopt seam — and fall
+    back to the deterministic internal baseline. Returns ``(placements, provider, model)``.
+
+    Routing goes through the cutover interlock (``registry.album_proposer_adapter`` /
+    ``active_album_provider``): a Mnemosyne challenger is used only once it's production-capable +
+    configured + selected by ``MISE_ALBUM_PROVIDER``; otherwise this is the baseline, byte-identical
+    to before (ADR 0011/0023). A challenger's output is still handed to ``save_draft``'s validator,
+    so a bad model proposal can never become a stored draft."""
+    adapter = registry.album_proposer_adapter()
     if adapter is not None and adapter.is_enabled():
         result = adapter.propose_album(gallery_id, sorted(eligible))
         if result.ok and result.output and result.output.get("placements"):
