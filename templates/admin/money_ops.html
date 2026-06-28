@@ -1,0 +1,62 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Money operations · Mise{% endblock %}
+{% block topbar %}
+<header class="admin-topbar pgtop">
+  <div class="pgtop-lead">
+    <h1>Money operations</h1>
+    <p class="pgtop-sub">
+      One pane over the money path — what needs chasing (approved offers not sent, invoices past
+      due) and the headline numbers. Read-only; act in the linked pages.
+    </p>
+  </div>
+  <div class="pgtop-actions">
+    <a class="pgtop-link" href="/admin/financials">Financials &rarr;</a>
+  </div>
+</header>
+{% endblock %}
+{% block admin_body %}
+<main class="admin-main">
+  <section>
+    <div class="muted" style="font-size:.8rem; margin:.3rem 0">Needs attention</div>
+    <div style="display:flex; gap:.6rem; flex-wrap:wrap">
+      {% for t in attention %}
+      <a href="{{ t.href }}" style="text-decoration:none; color:inherit; flex:1 1 220px; min-width:220px;
+         border:1px solid {{ '#e0c2a6' if t.attention else '#e2e6e8' }};
+         background:{{ '#fbf3e8' if t.attention else '#fff' }};
+         border-radius:8px; padding:.7rem .8rem">
+        <div style="font-size:1.5rem; font-weight:600; color:{{ '#9a6b2c' if t.attention else '#2b3a33' }}">{{ t.value }}</div>
+        <div style="font-size:.85rem; margin-top:.15rem">{{ t.label }}</div>
+        <div class="muted" style="font-size:.75rem">{{ t.sub }}</div>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section style="margin-top:1rem">
+    <div class="muted" style="font-size:.8rem; margin:.3rem 0">Money at a glance</div>
+    <div style="display:flex; gap:.6rem; flex-wrap:wrap">
+      {% for t in summary %}
+      <div style="flex:1 1 180px; border:1px solid #e2e6e8; border-radius:8px; padding:.7rem .8rem">
+        <div style="font-size:1.5rem; font-weight:600">{{ t.value }}</div>
+        <div style="font-size:.85rem; margin-top:.15rem">{{ t.label }}</div>
+        <div class="muted" style="font-size:.75rem">{{ t.sub }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section style="margin-top:1rem">
+    <div class="muted" style="font-size:.8rem; margin:.3rem 0">Jump to</div>
+    <div style="display:flex; gap:.6rem; flex-wrap:wrap; font-size:.9rem">
+      <a class="pgtop-link" href="/admin/financials">Financials &rarr;</a>
+      <a class="pgtop-link" href="/admin/financials/clients">Client P&amp;L &rarr;</a>
+      <a class="pgtop-link" href="/admin/offers">Offers &rarr;</a>
+      <a class="pgtop-link" href="/admin/offers-scorecard">Offer scorecard &rarr;</a>
+    </div>
+  </section>
+
+  <p class="audit-note muted">Every number here is read from the real invoices, payments, and offer
+    columns — nothing on this page sends, charges, or decides. Act on each item in its own page,
+    where the human-review gate lives.</p>
+</main>
+{% endblock %}
