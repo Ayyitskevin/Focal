@@ -81,6 +81,11 @@
     <div style="margin-top:.5rem; display:flex; gap:.7rem; align-items:center; flex-wrap:wrap">
       <a class="audit-actor" href="/admin/albums/{{ draft.id }}/order-sheet" target="_blank" rel="noopener">Order sheet (print) ↗</a>
       <a class="audit-actor" href="/admin/albums/{{ draft.id }}/order.csv">Download manifest (CSV)</a>
+      {% if can_invoice %}
+      <form method="post" action="/admin/studio/invoices/from-album/{{ draft.id }}" style="display:inline">
+        <button type="submit" class="audit-actor" style="background:none; border:1px solid #d3d9dc; border-radius:5px; padding:.25rem .7rem; cursor:pointer">Add to invoice →</button>
+      </form>
+      {% endif %}
     </div>
     <div class="muted" style="font-size:.76rem; margin-top:.45rem">Record-only — this prints nothing, contacts no vendor, and charges nothing.</div>
   </section>
