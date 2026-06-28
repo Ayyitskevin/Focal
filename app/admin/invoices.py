@@ -56,12 +56,37 @@ async def create_invoice(project_id: int):
     return RedirectResponse(f"/admin/studio/invoices/{did}", status_code=303)
 
 
+def _overage_prefill_row(request: Request, d: "db.sqlite3.Row", n_items: int) -> dict | None:
+    """A SYNTHETIC, display-only invoice row pre-filled from the retainer overage button.
+
+    The retainer 'Add overage to draft' action redirects here with overage_label / overage_qty /
+    overage_unit_cents query params. On a DRAFT with room for another line, we render ONE extra
+    editable row seeded with those values — it is NOT persisted here (this is a GET). It becomes a
+    real line ONLY if the operator saves the form (update_invoice → parse_items), exactly like any
+    line they typed. Returns None on a locked invoice, a full line list, or absent/invalid params
+    (§11.4: the system proposes an editable draft row; a human commits it)."""
+    if d["status"] != "draft" or n_items >= MAX_ITEM_ROWS:
+        return None
+    label = (request.query_params.get("overage_label") or "").strip()
+    if not label:
+        return None
+    try:
+        qty = max(1, int(request.query_params.get("overage_qty") or "1"))
+        unit_cents = max(0, int(request.query_params.get("overage_unit_cents") or "0"))
+    except ValueError:
+        return None
+    return {"label": label, "qty": qty, "unit_cents": unit_cents}
+
+
 @router.get("/invoices/{invoice_id}", response_class=HTMLResponse)
 async def invoice_detail(request: Request, invoice_id: int):
     d = get_invoice(invoice_id)
     p = get_project(d["project_id"])
     items = json.loads(d["line_items"])
-    rows = items + [{} for _ in range(max(0, MAX_ITEM_ROWS - len(items)))]
+    # Optional pre-filled overage row (display-only; persisted only when the operator saves).
+    overage_row = _overage_prefill_row(request, d, len(items))
+    display_items = items + ([overage_row] if overage_row else [])
+    rows = display_items + [{} for _ in range(max(0, MAX_ITEM_ROWS - len(display_items)))]
     payments = db.all_("SELECT * FROM payments WHERE invoice_id=? ORDER BY id", (invoice_id,))
     return templates.TemplateResponse(
         request,
@@ -71,6 +96,7 @@ async def invoice_detail(request: Request, invoice_id: int):
             "p": p,
             "rows": rows,
             "payments": payments,
+            "overage_prefilled": overage_row is not None,
             "base_url": config.BASE_URL,
         },
     )

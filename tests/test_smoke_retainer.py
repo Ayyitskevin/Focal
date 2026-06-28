@@ -263,3 +263,95 @@ def test_renewal_nudge_skips_evergreen(admin_client, monkeypatch):
     monkeypatch.setattr(alerts, "notify", lambda msg: sent.append(msg))
     retainer_reminders.sweep()
     assert sent == []
+
+
+# --- overage -> draft pre-fill (the money seam; nothing is written until the human saves) ----
+
+
+def _draft_with_overage(rate_cents=1500):
+    """A plan with a rated quota, a generated draft, and a 3-over delivery this period ($45)."""
+    pid = _plan(
+        quota=[{"label": "Hero", "target": 20, "unit": "images", "overage_rate_cents": rate_cents}]
+    )
+    iid = recurring.generate_for_plan(recurring.get_plan(pid), recurring._period())
+    db.run(
+        "INSERT INTO retainer_deliveries (plan_id, period, label, qty) VALUES (?,?,?,?)",
+        (pid, recurring._period(), "Hero", 23),
+    )
+    return pid, iid
+
+
+def test_overage_to_draft_proposes_and_audits_without_writing(admin_client):
+    pid, iid = _draft_with_overage()
+    before = db.one("SELECT line_items FROM invoices WHERE id=?", (iid,))["line_items"]
+    r = admin_client.post(f"/admin/studio/recurring/{pid}/overage-to-draft", follow_redirects=False)
+    assert r.status_code == 303
+    loc = r.headers["location"]
+    assert f"/admin/studio/invoices/{iid}" in loc and "overage_unit_cents=4500" in loc
+    # the action itself writes NO invoice line — only proposes
+    assert db.one("SELECT line_items FROM invoices WHERE id=?", (iid,))["line_items"] == before
+    # ...but records the figure proposed (audit fidelity for the money path)
+    a = db.one(
+        "SELECT action FROM audit_log WHERE entity_type='invoice' AND entity_id=? "
+        "AND action='overage_proposed'",
+        (iid,),
+    )
+    assert a is not None
+
+
+def test_invoice_get_prefills_overage_row_without_persisting(admin_client):
+    pid, iid = _draft_with_overage()
+    before = db.one("SELECT line_items FROM invoices WHERE id=?", (iid,))["line_items"]
+    body = admin_client.get(
+        f"/admin/studio/invoices/{iid}?overage_label=Overage&overage_qty=1&overage_unit_cents=4500"
+    ).text
+    assert "Suggested overage line" in body
+    assert "45.00" in body  # the pre-filled unit price renders in the editable row
+    # the GET persisted nothing — the line is real only once the operator saves
+    assert db.one("SELECT line_items FROM invoices WHERE id=?", (iid,))["line_items"] == before
+
+
+def test_overage_prefill_ignored_on_locked_invoice(admin_client):
+    pid, iid = _draft_with_overage()
+    db.run("UPDATE invoices SET status='sent' WHERE id=?", (iid,))
+    body = admin_client.get(
+        f"/admin/studio/invoices/{iid}?overage_label=Overage&overage_qty=1&overage_unit_cents=4500"
+    ).text
+    assert "Suggested overage line" not in body  # never pre-fill a locked invoice
+
+
+def test_overage_to_draft_refused_without_open_draft(admin_client):
+    pid = _plan(
+        quota=[{"label": "Hero", "target": 20, "unit": "images", "overage_rate_cents": 1500}]
+    )
+    db.run(
+        "INSERT INTO retainer_deliveries (plan_id, period, label, qty) VALUES (?,?,?,?)",
+        (pid, recurring._period(), "Hero", 23),
+    )  # over-delivered, but no draft generated
+    r = admin_client.post(f"/admin/studio/recurring/{pid}/overage-to-draft", follow_redirects=False)
+    assert r.status_code == 303 and "overage_error" in r.headers["location"]
+
+
+def test_overage_to_draft_refused_when_no_billable_overage(admin_client):
+    pid, iid = _draft_with_overage(rate_cents=0)  # over, but no rate -> nothing billable
+    r = admin_client.post(f"/admin/studio/recurring/{pid}/overage-to-draft", follow_redirects=False)
+    assert r.status_code == 303 and "overage_error" in r.headers["location"]
+
+
+def test_saving_prefilled_overage_persists_the_line(admin_client):
+    # the loop closes only when the human SAVES: update_invoice writes the line + recomputes total
+    pid, iid = _draft_with_overage()
+    orig = json.loads(db.one("SELECT line_items FROM invoices WHERE id=?", (iid,))["line_items"])
+    form = {"title": "Blue Plate Monthly", "deposit": "0", "net_days": "0"}
+    for idx, it in enumerate(orig):
+        form[f"item_label_{idx}"] = it["label"]
+        form[f"item_qty_{idx}"] = str(it["qty"])
+        form[f"item_price_{idx}"] = f"{it['unit_cents'] / 100:.2f}"
+    n = len(orig)
+    form[f"item_label_{n}"] = "Overage — extra Hero images"
+    form[f"item_qty_{n}"] = "1"
+    form[f"item_price_{n}"] = "45.00"
+    r = admin_client.post(f"/admin/studio/invoices/{iid}", data=form, follow_redirects=False)
+    assert r.status_code == 303
+    items = json.loads(db.one("SELECT line_items FROM invoices WHERE id=?", (iid,))["line_items"])
+    assert any(it["label"].startswith("Overage") and it["unit_cents"] == 4500 for it in items)

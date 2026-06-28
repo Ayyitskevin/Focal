@@ -72,6 +72,11 @@
       </label>
       {% endif %}
 
+      {% if overage_prefilled %}
+      <p class="muted" style="margin:.2rem 0 .4rem">Suggested overage line added below — review it,
+        then <strong>Save draft</strong> to keep it. Nothing is saved until you do.</p>
+      {% endif %}
+
       <div class="inv-table-wrap">
       <table class="inv-line-table">
         <thead>
