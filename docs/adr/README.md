@@ -33,6 +33,7 @@ states context, the decision, consequences, measured reopen criteria, and altern
 | [0026](0026-decommission-albums-offers.md) | Decommission the Mnemosyne ALBUMS and Plutus OFFERS subsystems (cut consumer-upsell for the B2B/F&B niche) | Accepted |
 | [0027](0027-retainer-quota-lifecycle.md) | Retainer deepening: quota units + per-period snapshot + advisory overage + renewal (term/nudge/pause) | Accepted |
 | [0028](0028-retainer-overage-draft-prefill.md) | Retainer overage → draft invoice: assisted editable pre-fill, never an auto-write (§11.4) | Accepted |
+| [0029](0029-portal-license-summary.md) | Client-facing licence summary on the portal (active licences, structured, read-only, fee never shown) | Accepted |
 
 See also the operator runbook [`../MISE-SOLO-STUDIO-OS-RUNBOOK.md`](../MISE-SOLO-STUDIO-OS-RUNBOOK.md)
 (how to run it day to day), [`../MISE-SOLO-STUDIO-OS.md`](../MISE-SOLO-STUDIO-OS.md),
