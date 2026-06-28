@@ -31,10 +31,6 @@
   {% if is_draft %}
   <form id="inv-send-form" method="post" action="/admin/studio/invoices/{{ d.id }}/send"
         onsubmit="return confirm('Lock this invoice and mark it sent? It becomes payable at the client link.')"></form>
-  {% if offer_items_addable %}
-  <form id="inv-offer-form" method="post" action="/admin/studio/invoices/{{ d.id }}/add-offer-items"
-        onsubmit="return confirm('Add the approved offer’s line items (with SKU) to this draft? Save any edits first; the lines stay editable and nothing is sent.')"></form>
-  {% endif %}
   <form method="post" action="/admin/studio/invoices/{{ d.id }}" class="inv-layout">
   {% else %}
   <div class="inv-layout">
@@ -169,9 +165,6 @@
       </section>
       <section class="inv-card inv-actions">
         <button type="submit" class="primary">Save draft</button>
-        {% if offer_items_addable %}
-        <button type="submit" form="inv-offer-form" class="ghost">Add {{ offer_items_addable }} item{{ 's' if offer_items_addable != 1 else '' }} from approved offer</button>
-        {% endif %}
         <button type="submit" form="inv-send-form" class="ghost">Mark sent</button>
         <p class="muted">Sending locks the invoice and opens the client payment page.</p>
       </section>

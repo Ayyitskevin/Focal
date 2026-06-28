@@ -1,5 +1,9 @@
 # Mnemosyne brief — albums worker
 
+> **Superseded (2026-06-28, ADR 0026):** the ALBUMS capability was decommissioned — album spreads
+> are a wedding/portrait deliverable that doesn't fit Mise's solo B2B food-and-beverage workflow.
+> This brief is kept as a historical record; do not build against it without re-opening ADR 0026.
+
 **Role:** the ALBUMS worker (curated, ordered album-spread layouts). Goal: a stateless proposer
 whose layouts pass Mise's deterministic validator AND are provably better than Mise's free
 baseline proposer. Conforms to [`../WORKER-CONTRACT.md`](../WORKER-CONTRACT.md) +

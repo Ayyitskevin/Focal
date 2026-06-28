@@ -1,11 +1,10 @@
 """Money operations — one read-only pane over the studio's money path.
 
-The AR figure, collected revenue, the approved-but-unsent offer pipeline, and past-due
-invoices live on separate pages today (financials, offers, invoices). This is the money-path
-analog of /admin/ai-ops: the morning glance at what needs chasing — offers approved but never
-sent (the send-rate gap the scorecard computes but never surfaces) and invoices past due — plus
-the headline numbers (collected, outstanding AR). Pure aggregation over the REAL invoices /
-payments / offer columns; it writes nothing and every tile links to the page that owns the action.
+The AR figure, collected revenue, and past-due invoices live on separate pages today
+(financials, invoices). This is the money-path analog of /admin/ai-ops: the morning glance at
+what needs chasing — invoices past due — plus the headline numbers (collected, outstanding AR).
+Pure aggregation over the REAL invoices / payments tables; it writes nothing and every tile
+links to the page that owns the action.
 """
 
 import logging
@@ -34,18 +33,6 @@ def _collected_recent() -> dict:
     return {"cents": row["cents"] if row else 0, "n": row["n"] if row else 0}
 
 
-def _approved_unsent() -> dict:
-    """Offers the operator approved but never sent to the client — committed upsell that hasn't
-    reached the client yet. This is the actionable gap behind the scorecard's send-rate."""
-    row = db.one(
-        """SELECT COUNT(*) AS n, COALESCE(SUM(plutus_last_estimated_cents), 0) AS cents
-           FROM galleries
-           WHERE plutus_last_status = 'done' AND plutus_offer_decision = 'approved'
-                 AND plutus_offer_sent_at IS NULL"""
-    )
-    return {"count": row["n"] if row else 0, "cents": row["cents"] if row else 0}
-
-
 def _overdue() -> dict:
     """Open invoices past their due date — AR that needs chasing. A deposit_paid invoice owes
     (total - deposit); sent/viewed owe the full total (mirrors common.open_invoice_balance)."""
@@ -64,17 +51,9 @@ def _overdue() -> dict:
 async def money_ops_view(request: Request):
     ar = common.open_invoice_balance()
     collected = _collected_recent()
-    approved_unsent = _approved_unsent()
     overdue = _overdue()
     # "Needs attention" tiles, in chase order. attention=True draws the eye.
     attention = [
-        {
-            "label": "Approved offers not sent",
-            "value": f"{approved_unsent['count']}",
-            "sub": f"{_dollars(approved_unsent['cents'])} committed, not yet sent",
-            "href": "/admin/offers?decision=approved",
-            "attention": approved_unsent["count"] > 0,
-        },
         {
             "label": "Invoices past due",
             "value": f"{overdue['count']}",
@@ -94,11 +73,6 @@ async def money_ops_view(request: Request):
             "label": "Outstanding AR",
             "value": _dollars(ar["cents"]),
             "sub": f"{ar['n']} open invoice{'' if ar['n'] == 1 else 's'}",
-        },
-        {
-            "label": "Approved offer pipeline",
-            "value": _dollars(approved_unsent["cents"]),
-            "sub": "committed upsell awaiting send",
         },
     ]
     return templates.TemplateResponse(

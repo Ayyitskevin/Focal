@@ -22,7 +22,7 @@ router = APIRouter(prefix="/admin/ai-cost", dependencies=[Depends(security.requi
 
 _WINDOWS = {7: "7 days", 30: "30 days", 90: "90 days"}
 _DEFAULT_DAYS = 30
-_CAP_LABEL = {"vision": "Vision", "offers": "Offers", "content": "Content", "albums": "Albums"}
+_CAP_LABEL = {"vision": "Vision", "content": "Content"}
 
 
 def _modifier(days: int) -> str:

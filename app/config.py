@@ -178,23 +178,6 @@ VISION_PROVIDER = os.environ.get("MISE_VISION_PROVIDER", "argus").strip().lower(
 VALIDATION_MIN_PAIRED = int(os.environ.get("MISE_VALIDATION_MIN_PAIRED", "20"))
 VALIDATION_PARITY_MARGIN = float(os.environ.get("MISE_VALIDATION_PARITY_MARGIN", "0.0"))
 
-# Which provider proposes ALBUM layouts — the album-adopt switch (default 'baseline', the
-# deterministic in-app proposer). Mirrors the vision cutover interlock
-# (providers.registry.active_album_provider): a named challenger (Mnemosyne) is honored ONLY if it
-# declares it serves the production contract AND is configured; otherwise this falls back to the
-# baseline. The Mnemosyne challenger is dormant until its URL is set and eval-only until its
-# layouts beat the baseline, so 'mnemosyne' is refused (logged) until both hold — adoption stays a
-# deliberate flip (ADR 0011/0023).
-ALBUM_PROVIDER = os.environ.get("MISE_ALBUM_PROVIDER", "baseline").strip().lower()
-# Mnemosyne album-proposer backend (Phase 5) — DORMANT until the URL is set. Point ONLY at a
-# trusted LOCAL endpoint. Mise POSTs {gallery_id, asset_ids} and reads back albums.schema.json
-# placements; the deterministic validator (app.albums) still guards every proposal, so a bad
-# layout never stores. ids only, never media.
-ALBUM_CHALLENGER_URL = os.environ.get("MISE_ALBUM_CHALLENGER_URL", "").rstrip("/")
-ALBUM_CHALLENGER_MODEL = os.environ.get("MISE_ALBUM_CHALLENGER_MODEL", "mnemosyne")
-ALBUM_CHALLENGER_TOKEN = os.environ.get("MISE_ALBUM_CHALLENGER_TOKEN", "")
-ALBUM_CHALLENGER_TIMEOUT = int(os.environ.get("MISE_ALBUM_CHALLENGER_TIMEOUT", "60"))
-
 # Aphrodite product-image generation (Phase 6) — DORMANT by default. A render backend is
 # consulted ONLY when PRODUCTS_RENDER_URL is set, and total spend is HARD-CAPPED by
 # PRODUCTS_BUDGET_USD (default 0 = disabled: products.create_render refuses every render).
@@ -205,18 +188,6 @@ PRODUCTS_RENDER_URL = os.environ.get("MISE_PRODUCTS_RENDER_URL", "").rstrip("/")
 PRODUCTS_RENDER_MODEL = os.environ.get("MISE_PRODUCTS_RENDER_MODEL", "")
 PRODUCTS_RENDER_TOKEN = os.environ.get("MISE_PRODUCTS_RENDER_TOKEN", "")
 PRODUCTS_BUDGET_USD = float(os.environ.get("MISE_PRODUCTS_BUDGET_USD", "0") or "0")
-
-# Plutus print upsell (Phase 1). BOTH url+token arm post-Argus recommend hooks.
-PLUTUS_URL = os.environ.get("MISE_PLUTUS_URL", "").rstrip("/")
-PLUTUS_TOKEN = os.environ.get("MISE_PLUTUS_TOKEN", "")
-PLUTUS_TIMEOUT = int(os.environ.get("MISE_PLUTUS_TIMEOUT", "30"))
-
-# Phase 3 strangler flag (Mise Solo Studio OS). When ON, the offers recommend path routes
-# through the app/providers facade (still the legacy Plutus adapter by default) and records
-# provenance to the ai_runs ledger. Default OFF: the legacy plutus_recommend path runs
-# unchanged and writes no ai_runs rows. Offers stay PROPOSAL-ONLY either way — this never
-# charges, sends, or touches an invoice.
-PROVIDER_FACADE_OFFERS = _b("MISE_PROVIDER_FACADE_OFFERS", "false")
 
 # studio-notify-on-reopen: best-effort push to Odysseus when a client reply
 # auto-reopens a resolved video-comment thread. Both unset -> dormant, no outbound

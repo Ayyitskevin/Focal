@@ -15,7 +15,7 @@ from app import qwen_writeback
 pytestmark = pytest.mark.unit
 
 _SCHEMAS = Path(__file__).resolve().parent.parent / "schemas"
-_NAMES = ["vision", "offers", "albums", "products"]
+_NAMES = ["vision", "products"]
 
 
 def _load(name: str) -> dict:

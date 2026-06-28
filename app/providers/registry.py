@@ -16,12 +16,9 @@ from contextlib import contextmanager
 from typing import Any
 
 from .adapters import (
-    InternalAlbumBaselineAdapter,
     LegacyArgusVisionAdapter,
     LegacyOdysseusCaptionAdapter,
-    LegacyPlutusOffersAdapter,
 )
-from .album_challenger import InternalAlbumChallengerAdapter
 from .contracts import Capability
 from .products_render import ProductsRenderAdapter
 from .vision_challenger import InternalVisionChallengerAdapter
@@ -29,14 +26,11 @@ from .vision_challenger import InternalVisionChallengerAdapter
 # The default (legacy) provider for each capability. CONTENT defaults to the Odysseus
 # caption drafter; the Dionysus pack reader is addressed by name where needed. PRODUCTS
 # resolves to the dormant Aphrodite render adapter (no production path yet — ADR 0021).
-# ALBUMS resolves to the deterministic in-app baseline proposer (ADR 0011/0023) — so
-# resolve(ALBUMS) is a real adapter and adopting Mnemosyne is a registration + flag, not a rewrite.
+# (OFFERS/Plutus and ALBUMS/Mnemosyne were decommissioned — migration 075.)
 _DEFAULT_FACTORIES = {
     Capability.VISION: LegacyArgusVisionAdapter,
-    Capability.OFFERS: LegacyPlutusOffersAdapter,
     Capability.CONTENT: LegacyOdysseusCaptionAdapter,
     Capability.PRODUCTS: ProductsRenderAdapter,
-    Capability.ALBUMS: InternalAlbumBaselineAdapter,
 }
 
 # Per-capability overrides (test / shadow only). Empty in production.
@@ -51,7 +45,6 @@ _challengers: dict[Capability, Any] = {}
 
 _DEFAULT_CHALLENGER_FACTORIES = {
     Capability.VISION: InternalVisionChallengerAdapter,
-    Capability.ALBUMS: InternalAlbumChallengerAdapter,
 }
 
 
@@ -166,73 +159,3 @@ def active_vision_provider(requested: str | None = None) -> dict:
         "eligible": True,
         "reason": f"{name} serves production",
     }
-
-
-# ── production album-proposer selection (the album adopt seam, ADR 0023) ──────────
-
-# Named challengers an operator may set MISE_ALBUM_PROVIDER to. 'baseline'/'internal' mean the
-# deterministic in-app proposer (always available); a challenger is honored only if production-capable.
-_ALBUM_PROVIDER_FACTORIES = {
-    "mnemosyne": InternalAlbumChallengerAdapter,
-    "challenger": InternalAlbumChallengerAdapter,
-}
-_ALBUM_DEFAULT = "baseline"
-
-
-def active_album_provider(requested: str | None = None) -> dict:
-    """Resolve which provider proposes PRODUCTION album layouts, with a hard interlock — the
-    album analog of :func:`active_vision_provider`.
-
-    ``requested`` defaults to ``config.ALBUM_PROVIDER``. ``baseline`` (the default) is the
-    deterministic in-app proposer and is always eligible. A named challenger (Mnemosyne) is
-    honored only if it declares ``serves_production`` AND is configured; otherwise this falls
-    back to the baseline and says why. So a flag pointing at an unproven/unconfigured proposer
-    can NEVER silently replace the baseline — adoption stays a deliberate flip once the
-    challenger's layouts beat the baseline (ADR 0011/0023). Returns
-    ``{requested, effective, eligible, reason}``.
-    """
-    from .. import config
-
-    req = (requested if requested is not None else config.ALBUM_PROVIDER) or _ALBUM_DEFAULT
-    req = req.strip().lower()
-    if req in ("baseline", "internal"):
-        return {
-            "requested": req,
-            "effective": _ALBUM_DEFAULT,
-            "eligible": True,
-            "reason": "deterministic baseline proposer",
-        }
-
-    def _fallback(reason: str) -> dict:
-        return {"requested": req, "effective": _ALBUM_DEFAULT, "eligible": False, "reason": reason}
-
-    factory = _ALBUM_PROVIDER_FACTORIES.get(req)
-    if factory is None:
-        return _fallback(f"unknown album provider {req!r}; using {_ALBUM_DEFAULT}")
-    adapter = factory()
-    name = getattr(adapter, "name", req)
-    if not getattr(adapter, "serves_production", False):
-        return _fallback(f"{name} is eval-only (not proven vs baseline); using {_ALBUM_DEFAULT}")
-    if not adapter.is_enabled():
-        return _fallback(f"{name} is not configured; using {_ALBUM_DEFAULT}")
-    return {
-        "requested": req,
-        "effective": name,
-        "eligible": True,
-        "reason": f"{name} serves production",
-    }
-
-
-def album_proposer_adapter():
-    """The eligible production ALBUMS challenger adapter, or ``None`` to use the deterministic
-    baseline — the consumer twin of :func:`active_album_provider` for
-    ``app.albums._provider_placements``. A registered override (test/shadow) wins; otherwise the
-    interlock decides. ``None`` means "use the in-app baseline proposer" (the default + every
-    fallback), so the baseline path stays byte-identical until a deliberate promotion."""
-    if Capability.ALBUMS in _overrides:
-        return _overrides[Capability.ALBUMS]
-    status = active_album_provider()
-    if not status["eligible"] or status["effective"] == _ALBUM_DEFAULT:
-        return None
-    factory = _ALBUM_PROVIDER_FACTORIES.get(status["requested"])
-    return factory() if factory else None

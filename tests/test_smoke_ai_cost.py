@@ -69,12 +69,12 @@ def test_empty_state_renders(admin_client):
 def test_totals_and_by_capability(admin_client):
     _run(Capability.VISION, cost=0.0)  # local challenger, $0 but reported
     _run(Capability.VISION, cost=0.0123)
-    _run(Capability.OFFERS, cost=None)  # no cost reported -> counts as a run, $0 spend
+    _run(Capability.CONTENT, cost=None)  # no cost reported -> counts as a run, $0 spend
     _run(Capability.VISION, cost=None, status=ResultStatus.PROVIDER_ERROR)
 
     body = admin_client.get("/admin/ai-cost").text
     assert "$0.0123" in body  # summed spend
-    assert "Vision" in body and "Offers" in body
+    assert "Vision" in body and "Content" in body
     # caveat: only the runs that reported a cost are counted as costed (2 of 4)
     assert "2 of 4 runs reported a cost" in body
 
