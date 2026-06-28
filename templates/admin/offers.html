@@ -83,6 +83,11 @@
           {% elif e.decision == 'approved' and not e.client_email %}
           <span class="muted" style="font-size:.78rem">add a client email to send</span>
           {% endif %}
+          {% if e.can_build_invoice %}
+          <form method="post" action="/admin/studio/invoices/from-offer/{{ e.gallery_id }}" style="display:inline">
+            <button type="submit" class="muted" style="padding:.25rem .7rem; background:none; border:1px solid #d3d9dc; border-radius:5px; cursor:pointer">Build invoice →</button>
+          </form>
+          {% endif %}
         </div>
       </div>
     </div>

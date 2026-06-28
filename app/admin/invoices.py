@@ -68,6 +68,37 @@ async def create_invoice(project_id: int):
     return RedirectResponse(f"/admin/studio/invoices/{did}", status_code=303)
 
 
+@router.post("/invoices/from-offer/{gallery_id}")
+async def create_invoice_from_offer(gallery_id: int):
+    """One-click from the offers queue: create a draft invoice for the gallery's project,
+    pre-filled with the approved offer's line items (with SKUs) — so an approved upsell becomes an
+    editable, SKU-tagged draft in a click instead of a re-type. Mirrors create_invoice + the
+    add-offer-items pre-fill; nothing is sent or charged (audit §11.4)."""
+    g = db.one(
+        "SELECT id, project_id, plutus_offer_decision FROM galleries WHERE id=?", (gallery_id,)
+    )
+    if not g:
+        raise HTTPException(status_code=404, detail="gallery not found")
+    if g["project_id"] is None:
+        raise HTTPException(status_code=400, detail="gallery has no project to invoice")
+    if g["plutus_offer_decision"] != "approved":
+        raise HTTPException(status_code=400, detail="offer is not approved")
+    p = get_project(g["project_id"])
+    items = _approved_offer_line_items(g["project_id"])
+    total = sum(it["qty"] * it["unit_cents"] for it in items)
+    did = db.run(
+        "INSERT INTO invoices (project_id, slug, title, line_items, total_cents) VALUES (?,?,?,?,?)",
+        (g["project_id"], security.new_slug(), f"Invoice — {p['title']}", json.dumps(items), total),
+    )
+    log.info(
+        "invoice %s built from approved offer on gallery %s (%s offer lines)",
+        did,
+        gallery_id,
+        len(items),
+    )
+    return RedirectResponse(f"/admin/studio/invoices/{did}", status_code=303)
+
+
 @router.get("/invoices/{invoice_id}", response_class=HTMLResponse)
 async def invoice_detail(request: Request, invoice_id: int):
     d = get_invoice(invoice_id)
