@@ -20,7 +20,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response
 
-from .. import audit, config, db, security
+from .. import audit, config, cull_scorer, db, security
 from ..render import templates
 
 log = logging.getLogger("mise.admin.cull")
@@ -119,8 +119,24 @@ async def cull_deck(request: Request, gallery_id: int):
     return templates.TemplateResponse(
         request,
         "admin/cull.html",
-        {"g": g, "queue": queue, "counts": counts},
+        {"g": g, "queue": queue, "counts": counts, "scorer_enabled": cull_scorer.is_enabled()},
     )
+
+
+@router.post("/galleries/{gallery_id}/cull/rescore")
+async def cull_rescore(gallery_id: int):
+    """Queue a local-AI keeper-scoring pass over the gallery (per-asset Qwen → argus_keeper_score,
+    ADR 0033) so the deck can rank an otherwise-unscored gallery. Requires the cull deck (flag)
+    AND the local scorer armed; otherwise a clear 503. Read-only to delivery — it only writes the
+    ranking score; the operator still makes every keep/cut. Redirects back to the deck."""
+    _require_enabled()
+    db.get_or_404("SELECT id FROM galleries WHERE id=?", (gallery_id,))
+    if cull_scorer.enqueue(gallery_id) is None:
+        raise HTTPException(
+            status_code=503,
+            detail="local scorer not configured (set MISE_CULL_SCORER + MISE_VISION_CHALLENGER_URL)",
+        )
+    return RedirectResponse(f"/admin/galleries/{gallery_id}/cull", status_code=303)
 
 
 @router.get("/galleries/{gallery_id}/cull/preview/{asset_id}")

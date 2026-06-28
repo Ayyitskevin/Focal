@@ -135,6 +135,12 @@ PROVIDER_FACADE_CONTENT = _b("MISE_PROVIDER_FACADE_CONTENT", "false")
 # gates the operator-decision UI/routes.
 CULL_UI = _b("MISE_CULL_UI", "false")
 
+# Local keeper-scorer for culling. When on (AND a challenger endpoint is set), the cull deck can
+# score a gallery's photos through the local Qwen3-VL endpoint (per-asset, writes
+# argus_keeper_score) — independent of the Argus→Qwen production cutover. Default OFF; the rescore
+# trigger reports "not configured" until both this and MISE_VISION_CHALLENGER_URL are set.
+CULL_SCORER = _b("MISE_CULL_SCORER", "false")
+
 # Argus vision analyze (Phase 6). BOTH url+token must be set to arm publish hooks and
 # the gallery admin "Analyze now" button (see argus_analyze.is_enabled); either unset =
 # dormant, no outbound call. Mise POSTs mise_gallery_id to Argus /analyze-folder; Argus
