@@ -255,6 +255,14 @@ async def plan_detail(request: Request, plan_id: int):
     # it from the draft invoice in a later slice). Folds in the un-targeted 'extra' bucket with a
     # near-match typo warning so a mislabeled over-delivery surfaces instead of silently dodging.
     overage = compute_overage(d, period)
+    # The plan's open draft invoice (normally this period's — past periods' drafts are sent/locked).
+    # The 'Add overage to draft' button targets it; None disables the button with a hint.
+    open_draft = db.one(
+        "SELECT id FROM invoices WHERE recurring_plan_id=? AND status='draft' ORDER BY id DESC LIMIT 1",
+        (plan_id,),
+    )
+    period_draft_id = open_draft["id"] if open_draft else None
+    overage_error = request.query_params.get("overage_error", "")
     # Term / renewal context. renews_on NULL = evergreen (today's behavior); days_to_renewal is
     # informational for the Term panel.
     days_to_renewal = None
@@ -296,6 +304,8 @@ async def plan_detail(request: Request, plan_id: int):
             "quota_labels": [q["label"] for q in quota],
             "quota_units": QUOTA_UNITS,
             "overage": overage,
+            "period_draft_id": period_draft_id,
+            "overage_error": overage_error,
             "days_to_renewal": days_to_renewal,
             "invoices": invoices,
             "period": period,
@@ -880,6 +890,57 @@ async def generate_draft(plan_id: int):
     if iid is None:  # raced a concurrent sweep/click between the check and the claim
         raise HTTPException(status_code=400, detail=f"already generated a draft for {period}")
     return RedirectResponse(f"/admin/studio/invoices/{iid}", status_code=303)
+
+
+@router.post("/recurring/{plan_id}/overage-to-draft")
+async def overage_to_draft(plan_id: int):
+    """Propose this period's advisory overage as an editable line on the plan's open DRAFT invoice.
+
+    Money-safe by construction (§11.4): this writes NO invoice line. It recomputes the overage
+    server-side, records an ``overage_proposed`` audit row capturing the figure shown, and
+    redirects to the draft with the line as query params — the invoice GET renders it as an
+    editable, pre-filled row that becomes real only if the operator saves. If there's no open
+    draft (generate this period's first) or no billable overage, it bounces back with a note."""
+    d = get_plan(plan_id)
+    period = _period()
+    back = f"/admin/studio/recurring/{plan_id}"
+    draft = db.one(
+        "SELECT id FROM invoices WHERE recurring_plan_id=? AND status='draft' ORDER BY id DESC LIMIT 1",
+        (plan_id,),
+    )
+    if not draft:
+        return _redirect_err(back, "Generate this period's draft invoice first.")
+    ov = compute_overage(d, period)
+    if ov["total_cents"] <= 0:
+        return _redirect_err(
+            back, "No billable overage this period (set an overage rate on the quota)."
+        )
+    label = f"Overage — {period}"
+    with db.tx() as con:
+        # Audit the figure at click time — the proposal is recorded even though no line is written
+        # until the operator saves the draft (audit-fidelity for the money path).
+        audit.log(
+            con,
+            "invoice",
+            draft["id"],
+            "overage_proposed",
+            diff={"plan_id": plan_id, "period": period, "amount_cents": ov["total_cents"]},
+        )
+    params = urlencode(
+        {"overage_label": label, "overage_qty": 1, "overage_unit_cents": ov["total_cents"]}
+    )
+    log.info(
+        "retainer plan %s proposed overage $%.2f -> draft invoice %s (%s)",
+        plan_id,
+        ov["total_cents"] / 100,
+        draft["id"],
+        period,
+    )
+    return RedirectResponse(f"/admin/studio/invoices/{draft['id']}?{params}", status_code=303)
+
+
+def _redirect_err(path: str, msg: str) -> RedirectResponse:
+    return RedirectResponse(f"{path}?{urlencode({'overage_error': msg})}", status_code=303)
 
 
 @router.post("/recurring/{plan_id}/delete")

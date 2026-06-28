@@ -151,7 +151,16 @@
     </table>
     {% if overage.total_cents %}
     <p><strong>Estimated overage: ${{ overage.total_cents|usd }}</strong>
-      <span class="muted">— review on the period's draft invoice; nothing is billed here.</span></p>
+      <span class="muted">— nothing is billed here.</span></p>
+    {% if overage_error %}<p class="warn">{{ overage_error }}</p>{% endif %}
+    {% if period_draft_id %}
+    <form method="post" action="/admin/studio/recurring/{{ d.id }}/overage-to-draft" class="inline"
+          onsubmit="return confirm('Add the estimated overage as an editable line on this period’s draft invoice? You review and Save it there — nothing is sent.')">
+      <button type="submit">Add overage to draft invoice →</button>
+    </form>
+    {% else %}
+    <p class="muted">Generate this period's draft invoice (below) to add the overage as an editable line.</p>
+    {% endif %}
     {% endif %}
     {% for e in typo_extra %}
     <p class="warn">Logged "{{ e.label }}" (×{{ e.done }}) isn't a quota line — did you mean
