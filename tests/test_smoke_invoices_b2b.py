@@ -7,7 +7,6 @@ surface on the client-facing invoice, and that duplication carries net terms but
 order-specific PO. Nothing here sends or charges — invoices stay draft until marked sent (§11.4).
 """
 
-import json
 from datetime import date, timedelta
 
 import pytest
@@ -194,33 +193,3 @@ def test_invoice_email_defaults_to_billing_contact(admin_client):
     body = admin_client.get(f"/admin/studio/invoices/{iid}").text
     # the AP/billing contact pre-fills the invoice email recipient
     assert "ap@blueplate.example" in body
-
-
-def test_create_invoice_from_offer_unaffected(admin_client):
-    # regression guard: offer→invoice still builds a draft with default net terms / no PO
-    cid = _client()
-    pid = db.run("INSERT INTO projects (client_id, title) VALUES (?,?)", (cid, "P"))
-    db.run(
-        "INSERT INTO galleries (slug, title, pin, project_id, plutus_offer_decision, "
-        "plutus_last_bundles) VALUES (?,?,?,?, 'approved', ?)",
-        (
-            "gx",
-            "GX",
-            "1",
-            pid,
-            json.dumps(
-                [
-                    {
-                        "sku": "PRINT",
-                        "label": "Prints",
-                        "line_items": [{"label": "Prints", "qty": 1, "unit_cents": 12000}],
-                    }
-                ]
-            ),
-        ),
-    )
-    gid = db.one("SELECT id FROM galleries WHERE slug='gx'")["id"]
-    r = admin_client.post(f"/admin/studio/invoices/from-offer/{gid}", follow_redirects=False)
-    assert r.status_code == 303
-    inv = db.one("SELECT net_days, po_number FROM invoices WHERE project_id=?", (pid,))
-    assert inv["net_days"] == 0 and inv["po_number"] is None

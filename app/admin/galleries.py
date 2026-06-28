@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
-from .. import argus_analyze, audit, config, db, jobs, mailer, platekit, plutus_recommend, security
+from .. import argus_analyze, audit, config, db, jobs, mailer, platekit, security
 from ..public.gallery import _cascade_status, resolve_comment_parent
 from ..render import templates
 from . import common
@@ -343,8 +343,6 @@ async def gallery_detail(request: Request, gallery_id: int):
             "video_comments": video_comments,
             "argus_enabled": argus_analyze.is_enabled(),
             "argus_url": config.ARGUS_URL,
-            "plutus_enabled": plutus_recommend.is_enabled(),
-            "plutus_url": config.PLUTUS_URL,
             "platekit_enabled": platekit.is_enabled(),
             "platekit_url": config.PLATEKIT_API_BASE,
         },
@@ -431,16 +429,6 @@ async def update_gallery(
             "argus_analyze_gallery",
             {"gallery_id": gallery_id, "skip_dedup": skip_dedup},
         )
-    # elif, not if: when Argus runs, it chains Plutus on completion (argus_analyze
-    # apply_callback) so Plutus can use the vision tags. Plutus only fires directly
-    # here when Argus is off — making this an `if` would double-enqueue Plutus.
-    elif (
-        plutus_recommend.is_enabled()
-        and published
-        and old["type"] != "drop"
-        and (not old["published"] or old["project_id"] != project_id)
-    ):
-        jobs.enqueue("plutus_recommend_gallery", {"gallery_id": gallery_id})
     return RedirectResponse(f"/admin/galleries/{gallery_id}", status_code=303)
 
 
@@ -456,21 +444,6 @@ async def argus_analyze_now(gallery_id: int):
         raise HTTPException(status_code=503, detail="Argus is not configured")
     jobs.enqueue("argus_analyze_gallery", {"gallery_id": gallery_id, "skip_dedup": True})
     log.info("argus analyze manually queued for gallery %s", gallery_id)
-    return RedirectResponse(f"/admin/galleries/{gallery_id}", status_code=303)
-
-
-@router.post("/galleries/{gallery_id}/plutus-recommend")
-async def plutus_recommend_now(gallery_id: int):
-    """Manual re-trigger of Plutus print upsell for a published gallery."""
-    g = get_gallery(gallery_id)
-    if not g["published"]:
-        raise HTTPException(status_code=400, detail="publish the gallery first")
-    if g["type"] == "drop":
-        raise HTTPException(status_code=400, detail="transfers are not analyzed")
-    if not plutus_recommend.is_enabled():
-        raise HTTPException(status_code=503, detail="Plutus is not configured")
-    jobs.enqueue("plutus_recommend_gallery", {"gallery_id": gallery_id})
-    log.info("plutus recommend manually queued for gallery %s", gallery_id)
     return RedirectResponse(f"/admin/galleries/{gallery_id}", status_code=303)
 
 

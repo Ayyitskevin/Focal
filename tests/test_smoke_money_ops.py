@@ -49,20 +49,7 @@ def _reset_rate_limiter():
 
 def _seed():
     cid = db.run("INSERT INTO clients (name) VALUES (?)", ("Dana",))
-    pid = db.run("INSERT INTO projects (client_id, title) VALUES (?,?)", (cid, "Wedding"))
-    # an approved offer that was NEVER sent -> the actionable gap
-    db.run(
-        "INSERT INTO galleries (slug, title, pin, project_id, plutus_last_status, "
-        "plutus_offer_decision, plutus_last_estimated_cents) VALUES (?,?,?,?, 'done', 'approved', ?)",
-        ("ga", "GA", "1", pid, 30000),
-    )
-    # an approved offer that WAS sent -> not in the gap
-    db.run(
-        "INSERT INTO galleries (slug, title, pin, project_id, plutus_last_status, "
-        "plutus_offer_decision, plutus_last_estimated_cents, plutus_offer_sent_at) "
-        "VALUES (?,?,?,?, 'done', 'approved', ?, datetime('now'))",
-        ("gb", "GB", "1", pid, 9000),
-    )
+    pid = db.run("INSERT INTO projects (client_id, title) VALUES (?,?)", (cid, "Spring menu"))
     # an open invoice past its due date -> AR to chase, with a recent partial payment
     iid = db.run(
         "INSERT INTO invoices (project_id, slug, title, total_cents, status, due_date) "
@@ -74,12 +61,6 @@ def _seed():
         (iid, 20000, "deposit"),
     )
     return pid
-
-
-def test_approved_unsent_counts_only_unsent(admin_client):
-    _seed()
-    a = money_ops._approved_unsent()
-    assert a["count"] == 1 and a["cents"] == 30000  # the sent one ($90) is excluded
 
 
 def test_collected_recent_sums_last_30_days(admin_client):
@@ -98,8 +79,7 @@ def test_money_ops_renders(admin_client):
     _seed()
     body = admin_client.get("/admin/money-ops").text
     assert "Money operations" in body
-    assert "Approved offers not sent" in body
-    assert "$300.00" in body  # approved-unsent pipeline value
+    assert "Invoices past due" in body
     assert "$500.00" in body  # past-due AR
     assert "$200.00" in body  # collected in the last 30 days
 

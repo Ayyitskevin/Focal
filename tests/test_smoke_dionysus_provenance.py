@@ -80,7 +80,6 @@ def test_no_provenance_when_flag_off(tmp_path, monkeypatch):
     gid = _gallery()
     platekit._record(gid, status="done")
     # legacy platekit_last_* still written; no ai_runs row
-    assert db.one("SELECT plutus_last_status FROM galleries WHERE id=?", (gid,)) is not None
     assert (
         db.one("SELECT platekit_last_status FROM galleries WHERE id=?", (gid,))[
             "platekit_last_status"

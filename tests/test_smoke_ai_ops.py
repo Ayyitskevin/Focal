@@ -1,15 +1,14 @@
 """Operations: the AI operations dashboard (admin).
 
-DB-backed (real tmp DB + admin routes), same pattern as test_smoke_offers_view.py.
-Proves the one-pane view aggregates the four AI surfaces — needs-attention tiles, the
-ledger summary, and the vision gate verdict — reads only (writes nothing), and is
-admin-gated.
+DB-backed (real tmp DB + admin routes). Proves the one-pane view aggregates the live AI
+surfaces — needs-attention tiles, the ledger summary, and the vision gate verdict — reads
+only (writes nothing), and is admin-gated.
 """
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app import ai_runs, albums, config, db, jobs, validation
+from app import ai_runs, config, db, jobs, validation
 from app.main import app
 from app.providers import Capability, ProviderResult, ResultStatus, ReviewRequirement
 
@@ -56,20 +55,7 @@ def test_empty_state_renders(admin_client):
     assert "No runs yet" in body  # empty ledger breakdown
 
 
-def test_aggregates_pending_offer_and_album_and_ledger(admin_client):
-    # one undecided 'done' offer worth $300
-    gid = db.run("INSERT INTO galleries (slug, title, pin) VALUES (?,?,?)", ("OpsG", "G", "1"))
-    db.run(
-        "UPDATE galleries SET plutus_last_status='done', plutus_last_estimated_cents=30000, "
-        "plutus_last_at=datetime('now') WHERE id=?",
-        (gid,),
-    )
-    # one pending album draft
-    db.run(
-        "INSERT INTO assets (gallery_id, kind, filename, stored, status) VALUES (?,?,?,?,?)",
-        (gid, "photo", "p.jpg", "stored/p.jpg", "ready"),
-    )
-    albums.propose_draft(gid)
+def test_aggregates_ledger_and_errors(admin_client):
     # one OK + one error ledger row
     for status in (ResultStatus.OK, ResultStatus.PROVIDER_ERROR):
         ai_runs.record(
@@ -83,11 +69,9 @@ def test_aggregates_pending_offer_and_album_and_ledger(admin_client):
         )
 
     body = admin_client.get("/admin/ai-ops").text
-    assert "$300.00 proposed" in body  # undecided offer value tile
-    assert "Album drafts to review" in body
     assert "Provider errors in ledger" in body
-    # ledger by-capability breakdown shows the albums provenance + vision rows
-    assert "Vision" in body and "Albums" in body
+    # ledger by-capability breakdown shows the vision rows
+    assert "Vision" in body
 
 
 def test_vision_gate_ready_shows_through(admin_client, monkeypatch):

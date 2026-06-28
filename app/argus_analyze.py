@@ -12,7 +12,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from . import argus_writeback, config, db, features, platekit, plutus_recommend
+from . import argus_writeback, config, db, features, platekit
 
 log = logging.getLogger("mise.argus")
 
@@ -58,10 +58,6 @@ def apply_callback(gallery_id: int, payload: dict) -> None:
         if run_id:
             _enqueue_writeback(gallery_id, int(run_id))
             _enqueue_shadow(gallery_id)
-        if plutus_recommend.is_enabled():
-            from . import jobs
-
-            jobs.enqueue("plutus_recommend_gallery", {"gallery_id": gallery_id})
     elif status == "queued":
         _record(gallery_id, status="queued", job_id=job_id)
     elif status in ("dead_letter", "failed"):
@@ -243,7 +239,3 @@ def run_for_gallery(gallery_id: int, *, skip_dedup: bool = False) -> None:
     if status == "done" and run_id:
         _enqueue_writeback(gallery_id, int(run_id))
         _enqueue_shadow(gallery_id)
-    if status == "done" and plutus_recommend.is_enabled():
-        from . import jobs
-
-        jobs.enqueue("plutus_recommend_gallery", {"gallery_id": gallery_id})

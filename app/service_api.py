@@ -22,7 +22,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from . import argus_analyze, config, db, plutus_recommend, security
+from . import argus_analyze, config, db, security
 
 log = logging.getLogger("mise.service_api")
 router = APIRouter(prefix="/api")
@@ -96,16 +96,14 @@ async def galleries(published: bool = True):
     if published:
         rows = db.all_(
             """SELECT id, slug, title, project_id, published, client_id,
-                      argus_last_run_id, argus_last_job_id, argus_last_status, argus_last_at,
-                      plutus_last_run_id, plutus_last_status, plutus_last_at
+                      argus_last_run_id, argus_last_job_id, argus_last_status, argus_last_at
                FROM galleries WHERE published=1 AND type='gallery'
                ORDER BY id DESC""",
         )
     else:
         rows = db.all_(
             """SELECT id, slug, title, project_id, published, client_id,
-                      argus_last_run_id, argus_last_job_id, argus_last_status, argus_last_at,
-                      plutus_last_run_id, plutus_last_status, plutus_last_at
+                      argus_last_run_id, argus_last_job_id, argus_last_status, argus_last_at
                FROM galleries WHERE type='gallery' ORDER BY id DESC""",
         )
     return {
@@ -122,9 +120,6 @@ async def galleries(published: bool = True):
                 "argus_last_job_id": r["argus_last_job_id"],
                 "argus_last_status": r["argus_last_status"],
                 "argus_last_at": r["argus_last_at"],
-                "plutus_last_run_id": r["plutus_last_run_id"],
-                "plutus_last_status": r["plutus_last_status"],
-                "plutus_last_at": r["plutus_last_at"],
             }
             for r in rows
         ],
@@ -145,21 +140,4 @@ async def argus_callback(request: Request, gallery_id: int):
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="json object required")
     argus_analyze.apply_callback(gallery_id, payload)
-    return {"ok": True, "gallery_id": gallery_id}
-
-
-@router.post("/plutus/callback", dependencies=[Depends(security.require_argus_token)])
-async def plutus_callback(request: Request, gallery_id: int):
-    """Argus/Plutus hand-off completion — updates plutus_last_* on the gallery row."""
-    if gallery_id <= 0:
-        raise HTTPException(status_code=400, detail="gallery_id required")
-    if not db.one("SELECT 1 AS x FROM galleries WHERE id=?", (gallery_id,)):
-        raise HTTPException(status_code=404, detail="gallery not found")
-    try:
-        payload = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="json body required")
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail="json object required")
-    plutus_recommend.apply_callback(gallery_id, payload)
     return {"ok": True, "gallery_id": gallery_id}

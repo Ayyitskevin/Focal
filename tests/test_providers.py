@@ -14,7 +14,7 @@ monkeypatched, so these run in the fast `-m unit` gate. They prove:
 
 import pytest
 
-from app import argus_analyze, caption_ai, platekit, plutus_recommend, providers
+from app import argus_analyze, caption_ai, platekit, providers
 from app.providers import adapters, mocks, registry
 from app.providers.contracts import (
     Capability,
@@ -67,7 +67,7 @@ def test_disabled_and_failure_factories_are_not_ok():
     assert d.review is ReviewRequirement.HUMAN_REVIEW
 
     f = ProviderResult.failure(
-        Capability.OFFERS, "plutus", ResultStatus.PROVIDER_ERROR, "boom", latency_ms=3
+        Capability.VISION, "argus", ResultStatus.PROVIDER_ERROR, "boom", latency_ms=3
     )
     assert f.status is ResultStatus.PROVIDER_ERROR
     assert f.ok is False
@@ -136,17 +136,6 @@ def test_argus_adapter_maps_nontyped_exception_to_provider_error(monkeypatch):
     r = adapters.LegacyArgusVisionAdapter().analyze_gallery(5)
     assert r.status is ResultStatus.PROVIDER_ERROR
     assert "locked" in r.error and r.output is None
-
-
-def test_plutus_adapter_maps_nontyped_exception_to_provider_error(monkeypatch):
-    monkeypatch.setattr(plutus_recommend, "is_enabled", lambda: True)
-
-    def boom(gid):
-        raise RuntimeError("database is locked")
-
-    monkeypatch.setattr(plutus_recommend, "trigger_gallery_recommend", boom)
-    r = adapters.LegacyPlutusOffersAdapter().recommend_gallery(3)
-    assert r.status is ResultStatus.PROVIDER_ERROR and "locked" in r.error
 
 
 def test_caption_adapter_maps_nontyped_exception_to_provider_error(monkeypatch):
@@ -235,91 +224,6 @@ def test_argus_adapter_success_is_also_non_mutating(monkeypatch):
     assert r.ok
     assert r.output["job_id"] == "job-2"
     assert writes == [], "the provider facade never records — the caller does"
-
-
-# ── legacy OFFERS adapter (Plutus) ─────────────────────────────────────────────
-
-
-def test_plutus_adapter_ok(monkeypatch):
-    monkeypatch.setattr(plutus_recommend, "is_enabled", lambda: True)
-    monkeypatch.setattr(
-        plutus_recommend,
-        "trigger_gallery_recommend",
-        lambda gid: {
-            "run_id": 11,
-            "bundles": [{"a": 1}, {"b": 2}],
-            "estimated_total_cents": 25000,
-            "review_url": "http://plutus/runs/11",
-        },
-    )
-    r = adapters.LegacyPlutusOffersAdapter().recommend_gallery(3)
-    assert r.ok
-    assert r.capability is Capability.OFFERS
-    assert r.output["run_id"] == 11
-    assert r.output["bundle_count"] == 2
-    assert r.output["estimated_total_cents"] == 25000
-    assert r.review is ReviewRequirement.HUMAN_REVIEW
-
-
-def test_plutus_adapter_bundle_count_fallback(monkeypatch):
-    monkeypatch.setattr(plutus_recommend, "is_enabled", lambda: True)
-    monkeypatch.setattr(
-        plutus_recommend,
-        "trigger_gallery_recommend",
-        lambda gid: {"run_id": 12, "bundle_count": 4},
-    )
-    r = adapters.LegacyPlutusOffersAdapter().recommend_gallery(3)
-    assert r.output["bundle_count"] == 4
-    assert r.output["estimated_total_cents"] is None
-
-
-def test_plutus_adapter_provider_error(monkeypatch):
-    monkeypatch.setattr(plutus_recommend, "is_enabled", lambda: True)
-
-    def boom(gid):
-        raise plutus_recommend.PlutusRecommendError("Plutus returned HTTP 401")
-
-    monkeypatch.setattr(plutus_recommend, "trigger_gallery_recommend", boom)
-    r = adapters.LegacyPlutusOffersAdapter().recommend_gallery(3)
-    assert r.status is ResultStatus.PROVIDER_ERROR
-    assert "401" in r.error
-
-
-def test_plutus_adapter_disabled(monkeypatch):
-    monkeypatch.setattr(plutus_recommend, "is_enabled", lambda: False)
-    r = adapters.LegacyPlutusOffersAdapter().recommend_gallery(3)
-    assert r.status is ResultStatus.DISABLED
-
-
-def test_plutus_adapter_failure_writes_nothing(monkeypatch):
-    """Mirror of the Argus non-mutating proof for the offers path: drive the real
-    trigger_gallery_recommend with a timing-out urlopen + a db.run spy."""
-    from app import config
-
-    monkeypatch.setattr(config, "PLUTUS_URL", "http://plutus:8030")
-    monkeypatch.setattr(config, "PLUTUS_TOKEN", "secret")
-    monkeypatch.setattr(
-        plutus_recommend.db,
-        "one",
-        lambda sql, params=(): {
-            "id": 3,
-            "published": 1,
-            "type": "gallery",
-            "argus_last_run_id": None,
-        },
-    )
-    writes: list[tuple] = []
-    monkeypatch.setattr(
-        plutus_recommend.db, "run", lambda sql, params=(): writes.append((sql, params))
-    )
-
-    def timeout(req, timeout):
-        raise TimeoutError("timed out")
-
-    monkeypatch.setattr(plutus_recommend.urllib.request, "urlopen", timeout)
-    r = adapters.LegacyPlutusOffersAdapter().recommend_gallery(3)
-    assert r.status is ResultStatus.PROVIDER_ERROR
-    assert writes == [], "provider failure must not write to the database"
 
 
 # ── legacy CONTENT adapters (Odysseus caption + Dionysus packs) ─────────────────
@@ -448,10 +352,6 @@ def test_mock_adapters_are_deterministic():
     assert v.ok and v.output["run_id"] == 1005 and v.model == "mock-vision-1"
     assert mocks.MockVisionAdapter().analyze_gallery(5).output == v.output
 
-    o = mocks.MockOffersAdapter().recommend_gallery(7)
-    assert o.ok and o.output["run_id"] == 2007 and o.output["bundle_count"] == 3
-    assert mocks.MockOffersAdapter().recommend_gallery(7).output == o.output
-
     c = mocks.MockCaptionAdapter().draft({"label": "Hero"})
     assert c.ok and c.output["caption"] == "[mock caption] Hero" and c.tokens == 12
     assert mocks.MockCaptionAdapter().draft({"label": "Hero"}).output == c.output
@@ -464,7 +364,6 @@ def test_mock_adapter_disabled():
 def test_failing_adapter_is_non_ok_for_every_capability():
     for cap, call in (
         (Capability.VISION, lambda a: a.analyze_gallery(1)),
-        (Capability.OFFERS, lambda a: a.recommend_gallery(1)),
         (Capability.CONTENT, lambda a: a.draft({})),
     ):
         result = call(mocks.FailingAdapter(cap))
@@ -478,7 +377,6 @@ def test_failing_adapter_is_non_ok_for_every_capability():
 def test_registry_defaults_to_legacy():
     registry.reset()
     assert isinstance(registry.resolve(Capability.VISION), adapters.LegacyArgusVisionAdapter)
-    assert isinstance(registry.resolve(Capability.OFFERS), adapters.LegacyPlutusOffersAdapter)
     assert isinstance(registry.resolve(Capability.CONTENT), adapters.LegacyOdysseusCaptionAdapter)
 
 
@@ -503,9 +401,9 @@ def test_registry_use_nested_restores_prior_override():
 
 def test_registry_reset_clears_overrides():
     registry.reset()
-    registry._overrides[Capability.OFFERS] = mocks.MockOffersAdapter()
+    registry._overrides[Capability.VISION] = mocks.MockVisionAdapter()
     registry.reset()
-    assert isinstance(registry.resolve(Capability.OFFERS), adapters.LegacyPlutusOffersAdapter)
+    assert isinstance(registry.resolve(Capability.VISION), adapters.LegacyArgusVisionAdapter)
 
 
 # ── vision cutover seam: production-provider selection interlock ───────────────
@@ -582,7 +480,7 @@ def test_vision_trigger_defaults_to_argus_byte_identical(monkeypatch):
 
 
 def test_vision_trigger_routes_to_qwen_once_promoted(monkeypatch):
-    from app import config, jobs, plutus_recommend, qwen_writeback
+    from app import config, jobs, qwen_writeback
     from app.providers.vision_challenger import InternalVisionChallengerAdapter
 
     calls = {}
@@ -597,14 +495,11 @@ def test_vision_trigger_routes_to_qwen_once_promoted(monkeypatch):
     monkeypatch.setattr(
         qwen_writeback, "writeback_gallery", lambda gid: calls.setdefault("qwen", gid)
     )
-    monkeypatch.setattr(plutus_recommend, "is_enabled", lambda: True)
     monkeypatch.setattr(
         jobs, "enqueue", lambda kind, payload: calls.setdefault("enqueue", (kind, payload)) or 1
     )
     jobs._h_vision_analyze({"gallery_id": 9})
     assert calls.get("qwen") == 9 and "argus" not in calls
-    # the upsell hop the Argus path fires is preserved so promotion doesn't drop offers
-    assert calls.get("enqueue") == ("plutus_recommend_gallery", {"gallery_id": 9})
 
 
 def test_vision_trigger_eval_only_challenger_falls_back_to_argus(monkeypatch):

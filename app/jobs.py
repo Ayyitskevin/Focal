@@ -15,7 +15,6 @@ from . import (
     db,
     imaging,
     notion_sync,
-    plutus_recommend,
     presets,
     qwen_writeback,
     video,
@@ -160,10 +159,6 @@ def _h_vision_analyze(p: dict) -> None:
     if status["eligible"] and status["effective"] == _QWEN_VISION:
         log.info("vision analyze gallery %s -> qwen (eligible production provider)", gid)
         qwen_writeback.writeback_gallery(gid)
-        # Preserve the post-analysis upsell hop the Argus path fires, so promoting Qwen doesn't
-        # silently drop offers. Shadow is N/A once Qwen IS production (it shadows the challenger).
-        if plutus_recommend.is_enabled():
-            enqueue("plutus_recommend_gallery", {"gallery_id": gid})
     else:
         argus_analyze.run_for_gallery(gid, skip_dedup=bool(p.get("skip_dedup")))
 
@@ -182,7 +177,6 @@ HANDLERS = {
     "argus_writeback_gallery": lambda p: argus_writeback.run_for_gallery(
         p["gallery_id"], int(p["run_id"])
     ),
-    "plutus_recommend_gallery": lambda p: plutus_recommend.run_for_gallery(p["gallery_id"]),
     # Phase 2 vision shadow: ledger-only challenger comparison (no asset writes, inert
     # unless MISE_VISION_SHADOW is armed and a challenger is registered).
     "vision_shadow_gallery": lambda p: vision_shadow.run_for_gallery(p["gallery_id"]),

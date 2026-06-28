@@ -1,5 +1,10 @@
 # Plutus brief — offers worker
 
+> **Superseded (2026-06-28, ADR 0026):** the OFFERS capability was decommissioned — print/album
+> upsell bundles assume a consumer who buys prints, which doesn't fit Mise's solo B2B
+> food-and-beverage workflow. Kept as a historical record; do not build against it without
+> re-opening ADR 0026.
+
 **Role:** the OFFERS worker (print/album bundle recommendations). Goal: a stateless,
 contract-true recommendation worker — never a SaaS, never touching money. The headline change
 is **SKU/line-item linkage**, which turns Mise's offer scorecard from a revenue *proxy* into

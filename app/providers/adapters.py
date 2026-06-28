@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import time
 
-from .. import argus_analyze, caption_ai, platekit, plutus_recommend
+from .. import argus_analyze, caption_ai, platekit
 from .contracts import Capability, ProviderResult, ResultStatus, ReviewRequirement
 
 
@@ -84,72 +84,6 @@ class LegacyArgusVisionAdapter:
                 "run_id": run_id,
                 "job_id": job_id,
                 "mode": payload.get("mode") or ("queued" if job_id else "sync"),
-            },
-            model=self.name,
-            latency_ms=latency,
-        )
-
-
-class LegacyPlutusOffersAdapter:
-    """OFFERS via the external Plutus service (``app.plutus_recommend``)."""
-
-    capability = Capability.OFFERS
-    name = "plutus"
-
-    def is_enabled(self) -> bool:
-        return plutus_recommend.is_enabled()
-
-    def recommend_gallery(self, gallery_id: int) -> ProviderResult:
-        if not self.is_enabled():
-            return ProviderResult.disabled(self.capability, self.name)
-        start = time.monotonic()
-        try:
-            payload = plutus_recommend.trigger_gallery_recommend(gallery_id)
-        except plutus_recommend.PlutusRecommendError as exc:
-            return ProviderResult.failure(
-                self.capability,
-                self.name,
-                ResultStatus.PROVIDER_ERROR,
-                str(exc),
-                latency_ms=_elapsed_ms(start),
-            )
-        except Exception as exc:
-            # Map any non-typed failure (e.g. an unguarded DB read raising) to a non-OK
-            # result: the adapter must always return a ProviderResult, never raise.
-            return ProviderResult.failure(
-                self.capability,
-                self.name,
-                ResultStatus.PROVIDER_ERROR,
-                str(exc),
-                latency_ms=_elapsed_ms(start),
-            )
-        latency = _elapsed_ms(start)
-        # Mirror plutus_recommend's own bundle-count / total parsing (kept inline so
-        # the adapter does not depend on a private helper; the roadmap consolidates
-        # this normalization at cutover).
-        bundles = payload.get("bundles")
-        if bundles is not None:
-            bundle_count = len(bundles)
-        elif payload.get("bundle_count") is not None:
-            bundle_count = int(payload["bundle_count"])
-        else:
-            bundle_count = None
-        cents = payload.get("estimated_total_cents")
-        estimated_cents = int(cents) if cents is not None else None
-        return ProviderResult(
-            capability=self.capability,
-            provider=self.name,
-            status=ResultStatus.OK,
-            review=ReviewRequirement.HUMAN_REVIEW,
-            output={
-                "run_id": payload.get("run_id"),
-                "bundle_count": bundle_count,
-                "estimated_total_cents": estimated_cents,
-                "review_url": payload.get("review_url"),
-                "pitch_url": payload.get("pitch_url"),
-                # Pass the raw bundles through so the facade recording path can persist the
-                # validated catalogue (plutus_recommend.parse_bundles); ADR 0022 piece 1.
-                "bundles": bundles,
             },
             model=self.name,
             latency_ms=latency,
@@ -261,41 +195,4 @@ class LegacyDionysusPackAdapter:
             ResultStatus.PROVIDER_ERROR,
             data.get("message") or f"Dionysus status {status}",
             latency_ms=latency,
-        )
-
-
-class InternalAlbumBaselineAdapter:
-    """ALBUMS default: the deterministic in-app baseline proposer (``app.albums.propose_layout``).
-
-    The production default for albums — always available, always serves production — so
-    ``resolve(ALBUMS)`` is a real adapter (not a raise) and adopting a Mnemosyne backend is a
-    registry registration + flag flip, not a rewrite (ADR 0011/0023). The hot path in
-    ``app.albums._provider_placements`` calls ``propose_layout`` directly (preserving
-    ``per_spread``); this wrapper exists so the facade resolves ALBUMS like every other
-    capability. Pure + non-mutating: the validator still guards the layout before it persists.
-    """
-
-    capability = Capability.ALBUMS
-    name = "internal"
-    serves_production = True
-
-    def is_enabled(self) -> bool:
-        return True
-
-    def propose_album(self, gallery_id: int, asset_ids: list[int] | None = None) -> ProviderResult:
-        from .. import albums  # lazy: app.albums imports the registry — avoid an import cycle
-
-        placements = albums.propose_layout(sorted(asset_ids or []))
-        return ProviderResult(
-            capability=self.capability,
-            provider=self.name,
-            status=ResultStatus.OK,
-            review=ReviewRequirement.HUMAN_REVIEW,
-            output={
-                "placements": placements,
-                "spread_count": len({p["spread"] for p in placements}),
-            },
-            model="album-baseline-1",
-            latency_ms=0,
-            cost_usd=0.0,
         )
