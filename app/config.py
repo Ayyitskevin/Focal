@@ -257,6 +257,11 @@ GALLERY_PROOF_NUDGE_DAYS = int(os.environ.get("MISE_GALLERY_PROOF_NUDGE_DAYS", "
 # contract via the nudged_unsigned flag; never a message to the client.
 CONTRACT_NUDGE_DAYS = int(os.environ.get("MISE_CONTRACT_NUDGE_DAYS", "3"))
 
+# Internal Telegram nudge: a retainer whose renews_on is within this many days gets one
+# heads-up to Kevin (retainer_reminders). One-shot per plan via the nudged_renewal flag
+# (reset only when the renewal date actually changes); never a message to the client.
+RETAINER_RENEWAL_NUDGE_DAYS = int(os.environ.get("MISE_RETAINER_RENEWAL_NUDGE_DAYS", "14"))
+
 # Operational heartbeat (ops_monitor): a backup older than this many hours is
 # flagged. Backups run daily (~02:3x via mise-backup.timer), so 26h gives a small
 # grace past the normal 24h gap before it reads as stale/missing.
