@@ -12,6 +12,7 @@ from . import (
     argus_writeback,
     brand_kits,
     config,
+    cull_scorer,
     db,
     delivery_gate,
     imaging,
@@ -190,6 +191,10 @@ HANDLERS = {
     # interlocked — a no-op unless Qwen is the eligible production provider — so this handler
     # mutates nothing until promotion is a deliberate flag + code change (ADR 0017).
     "qwen_writeback_gallery": lambda p: qwen_writeback.writeback_gallery(p["gallery_id"]),
+    # Local keeper-scoring for the cull deck: per-asset Qwen scores into argus_keeper_score.
+    # Score-only, asset_id-keyed, inert unless MISE_CULL_SCORER + a challenger URL are set;
+    # independent of the production cutover (ADR 0033).
+    "cull_score_gallery": lambda p: cull_scorer.score_gallery(p["gallery_id"]),
 }
 
 

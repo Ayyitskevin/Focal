@@ -83,6 +83,7 @@
     padding: 2px 4px; border-radius: 4px; color: #fff; font-variant-numeric: tabular-nums;
     background: rgba(0,0,0,.55);
   }
+  .cull-rescore { display: flex; gap: 12px; align-items: center; margin: 0 0 18px; }
   .cull-empty { padding: 48px 0; text-align: center; color: #8A9183; }
 </style>
 {% endblock %}
@@ -121,6 +122,13 @@
     <span class="u">Undecided <b id="c-undecided">{{ counts.total - counts.keep - counts.cut }}</b></span>
     <span class="lo">{{ counts.scored }} of {{ counts.total }} scored by AI</span>
   </div>
+
+  {% if scorer_enabled %}
+  <form method="post" action="/admin/galleries/{{ g.id }}/cull/rescore" class="cull-rescore">
+    <button type="submit" class="cull-btn">Re-score with local AI</button>
+    <span class="lo">scores every frame on your local model — runs in the background, refresh in a moment</span>
+  </form>
+  {% endif %}
 
   <div class="cull-stage" id="cull-stage">
     <img id="cull-photo" alt="Photo being culled" decoding="async">
