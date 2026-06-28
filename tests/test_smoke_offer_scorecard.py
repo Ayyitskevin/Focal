@@ -149,6 +149,49 @@ def test_attributed_upsell_counts_only_tagged_paid_lines(admin_client):
     assert att["has_data"] is True
 
 
+def test_attributed_upsell_prorates_a_deposit(admin_client):
+    # deposit-first billing: a deposit_paid invoice attributes the COLLECTED fraction of its
+    # tagged offer line, not the full value and not zero.
+    cid = db.run("INSERT INTO clients (name) VALUES (?)", ("Dana",))
+    pid = db.run("INSERT INTO projects (client_id, title) VALUES (?,?)", (cid, "Wedding"))
+    db.run(
+        "INSERT INTO galleries (slug, title, pin, project_id, plutus_last_bundles) VALUES (?,?,?,?,?)",
+        (
+            "ga",
+            "GA",
+            "1",
+            pid,
+            json.dumps([{"sku": "ALBUM", "label": "Album", "estimated_cents": 30000}]),
+        ),
+    )
+    # $300 album line on a $1,000 invoice; client paid a $400 deposit -> 40% collected
+    iid = db.run(
+        "INSERT INTO invoices (project_id, slug, title, total_cents, status, line_items) "
+        "VALUES (?,?,?,?,?,?)",
+        (
+            pid,
+            "inv-dep",
+            "Order",
+            100000,
+            "deposit_paid",
+            json.dumps(
+                [
+                    {"label": "Coverage", "qty": 1, "unit_cents": 70000},
+                    {"label": "Album", "qty": 1, "unit_cents": 30000, "sku": "ALBUM"},
+                ]
+            ),
+        ),
+    )
+    db.run(
+        "INSERT INTO payments (invoice_id, amount_cents, kind) VALUES (?,?,?)",
+        (iid, 40000, "deposit"),
+    )
+    att = offer_scorecard._attributed_upsell()
+    # 40% of the $300 album line = $120 (the coverage line is untagged and never counts)
+    assert att["revenue"] == "$120.00"
+    assert att["invoices"] == 1 and att["skus"] == 1 and att["has_data"] is True
+
+
 def test_attributed_upsell_ignores_unpaid_invoices(admin_client):
     cid = db.run("INSERT INTO clients (name) VALUES (?)", ("Dana",))
     pid = db.run("INSERT INTO projects (client_id, title) VALUES (?,?)", (cid, "Wedding"))

@@ -39,24 +39,30 @@ def _dollars(cents) -> str:
 
 
 def _sum_attributed(offered_skus: set, invoice_items: list) -> dict:
-    """Pure: sum the value of offer-SKU-tagged line items across paid-invoice line-item lists.
+    """Pure: sum the COLLECTED value of offer-SKU-tagged line items.
 
-    ``offered_skus`` is the set of SKUs Plutus actually proposed; ``invoice_items`` is one list
-    of line-item dicts per PAID invoice. Counts only ``qty*unit_cents`` for lines whose ``sku``
-    is in ``offered_skus`` — the real upsell a human tagged, NOT the whole invoice (the base
-    shoot fee on the same invoice is excluded), and stray/manual SKUs that match no offer are
-    ignored. Returns ``{cents, invoices, skus}``. No I/O — unit-testable (ADR 0022 piece 3)."""
+    ``offered_skus`` is the set of SKUs Plutus actually proposed; ``invoice_items`` is one
+    ``(line_items, collected_fraction)`` pair per invoice that has collected money —
+    ``collected_fraction`` is paid_cents / total_cents (1.0 for a fully-paid invoice, <1 for a
+    deposit). Counts only ``qty*unit_cents`` for lines whose ``sku`` is in ``offered_skus`` — the
+    real upsell a human tagged, NOT the whole invoice (the base shoot fee is excluded) and not a
+    stray sku that matches no offer — pro-rated by the fraction collected, so a deposit attributes
+    its collected share and an unpaid line attributes nothing. Returns ``{cents, invoices, skus}``.
+    No I/O — unit-testable (ADR 0022 piece 3, deposit pro-rate per the 0022 update)."""
     total, invoices_n, skus = 0, 0, set()
-    for items in invoice_items:
+    for items, fraction in invoice_items:
         inv = 0
+        inv_skus = set()
         for it in items or []:
             sku = it.get("sku")
             if sku and sku in offered_skus:
                 inv += int(it.get("qty") or 0) * int(it.get("unit_cents") or 0)
-                skus.add(sku)
-        if inv:
-            total += inv
+                inv_skus.add(sku)
+        collected = round(inv * fraction)
+        if collected:  # an invoice converts a SKU only when it actually collected money
+            total += collected
             invoices_n += 1
+            skus |= inv_skus
     return {"cents": total, "invoices": invoices_n, "skus": len(skus)}
 
 
@@ -133,11 +139,15 @@ def _revenue_proxy() -> dict:
 
 
 def _attributed_upsell() -> dict:
-    """Real attributed upsell (ADR 0022 piece 3): the value of offer-SKU-tagged line items on
-    PAID invoices, matched against the SKUs Plutus actually offered. Unlike the proxy, this is a
-    causal link — it counts only the tagged lines a human added (via the offer pre-fill), not all
-    post-send project revenue. Deposit/partly-paid invoices aren't line-attributed yet, so this
-    is a conservative floor. Reads only; decides nothing."""
+    """Real attributed upsell (ADR 0022 piece 3): the COLLECTED value of offer-SKU-tagged invoice
+    lines, matched against the SKUs Plutus actually offered. Unlike the proxy, this is a causal
+    link — it counts only the tagged lines a human added (via the offer pre-fill), not all
+    post-send project revenue.
+
+    Counts fully-paid invoices in full and **deposit-paid invoices pro-rated** by the fraction
+    actually collected (paid_cents / total_cents) — deposit-first is the studio's real billing
+    pattern, so a paid deposit attributes its share now rather than waiting for the balance.
+    Unpaid (draft/sent/viewed) invoices attribute nothing. Reads only; decides nothing."""
     offered: set = set()
     for r in db.all_(
         "SELECT plutus_last_bundles FROM galleries WHERE plutus_last_bundles IS NOT NULL"
@@ -149,14 +159,28 @@ def _attributed_upsell() -> dict:
                     offered.add(sku)
         except (ValueError, TypeError):
             continue
-    invoice_items: list = []
+    pairs: list = []
     if offered:
-        for inv in db.all_("SELECT line_items FROM invoices WHERE status='paid'"):
+        for inv in db.all_(
+            "SELECT id, total_cents, status, line_items FROM invoices "
+            "WHERE status IN ('paid', 'deposit_paid')"
+        ):
             try:
-                invoice_items.append(json.loads(inv["line_items"]) or [])
+                items = json.loads(inv["line_items"]) or []
             except (ValueError, TypeError):
                 continue
-    agg = _sum_attributed(offered, invoice_items)
+            if inv["status"] == "paid":
+                fraction = 1.0  # the app's state machine: 'paid' == fully collected
+            else:  # deposit_paid: pro-rate by money actually collected on this invoice
+                total = inv["total_cents"] or 0
+                collected = db.one(
+                    "SELECT COALESCE(SUM(amount_cents), 0) AS c FROM payments WHERE invoice_id=?",
+                    (inv["id"],),
+                )["c"]
+                fraction = min(1.0, collected / total) if total else 0.0
+            if fraction > 0:
+                pairs.append((items, fraction))
+    agg = _sum_attributed(offered, pairs)
     return {
         "revenue": _dollars(agg["cents"]),
         "invoices": agg["invoices"],
