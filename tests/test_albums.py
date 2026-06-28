@@ -155,21 +155,25 @@ def test_failing_adapter_album_path_is_non_ok():
     assert r.status is ResultStatus.PROVIDER_ERROR and r.ok is False
 
 
-def test_albums_has_no_default_provider():
-    # ALBUMS is intentionally absent from the registry defaults: no production path yet,
-    # so resolve() must raise rather than invent one.
+def test_albums_default_is_the_baseline_proposer():
+    # ALBUMS now resolves to the deterministic in-app baseline (ADR 0023): resolve() returns a
+    # real adapter instead of raising, so adopting Mnemosyne is a registration + flag, not a
+    # rewrite. The hot path still uses propose_layout directly; this is the facade default.
+    from app.providers.adapters import InternalAlbumBaselineAdapter
+
     registry.reset()
-    with pytest.raises(ValueError):
-        registry.resolve(Capability.ALBUMS)
+    assert isinstance(registry.resolve(Capability.ALBUMS), InternalAlbumBaselineAdapter)
 
 
 def test_registry_use_can_inject_album_adapter():
+    from app.providers.adapters import InternalAlbumBaselineAdapter
+
     registry.reset()
     mock = mocks.MockAlbumAdapter()
     with registry.use(Capability.ALBUMS, mock):
         assert registry.resolve(Capability.ALBUMS) is mock
-    with pytest.raises(ValueError):
-        registry.resolve(Capability.ALBUMS)
+    # after the override, ALBUMS falls back to its registered baseline default (no longer raises)
+    assert isinstance(registry.resolve(Capability.ALBUMS), InternalAlbumBaselineAdapter)
     registry.reset()
 
 
@@ -204,3 +208,117 @@ def test_propose_layout_per_spread_one_is_one_photo_per_spread():
 def test_propose_layout_rejects_bad_per_spread():
     with pytest.raises(ValueError):
         albums.propose_layout([1, 2], per_spread=0)
+
+
+# ── the album adopt seam: interlock + proposer routing (ADR 0023) ─────────────────
+
+
+def test_active_album_provider_defaults_to_baseline(monkeypatch):
+    from app import config
+
+    monkeypatch.setattr(config, "ALBUM_PROVIDER", "baseline")
+    p = registry.active_album_provider()
+    assert p["effective"] == "baseline" and p["eligible"] is True
+
+
+def test_active_album_provider_refuses_eval_only_mnemosyne(monkeypatch):
+    # configured (URL set) but serves_production=False -> eval-only -> must fall back to baseline
+    from app import config
+
+    monkeypatch.setattr(config, "ALBUM_CHALLENGER_URL", "http://mnemo.local")
+    p = registry.active_album_provider("mnemosyne")
+    assert p["effective"] == "baseline" and p["eligible"] is False and "eval-only" in p["reason"]
+
+
+def test_active_album_provider_honors_a_production_capable_mnemosyne(monkeypatch):
+    # the interlock is a real switch: a production-capable + configured challenger is honored.
+    from app import config
+    from app.providers.album_challenger import InternalAlbumChallengerAdapter
+
+    monkeypatch.setattr(config, "ALBUM_CHALLENGER_URL", "http://mnemo.local")
+    monkeypatch.setattr(InternalAlbumChallengerAdapter, "serves_production", True, raising=False)
+    p = registry.active_album_provider("mnemosyne")
+    assert p["effective"] == "mnemosyne" and p["eligible"] is True
+
+
+def test_active_album_provider_unknown_falls_back():
+    p = registry.active_album_provider("totally-made-up")
+    assert p["effective"] == "baseline" and p["eligible"] is False and "unknown" in p["reason"]
+
+
+def test_album_proposer_adapter_none_by_default(monkeypatch):
+    from app import config
+
+    monkeypatch.setattr(config, "ALBUM_PROVIDER", "baseline")
+    assert registry.album_proposer_adapter() is None  # None -> use the baseline
+
+
+def test_album_proposer_adapter_returns_challenger_once_promoted(monkeypatch):
+    from app import config
+    from app.providers.album_challenger import InternalAlbumChallengerAdapter
+
+    monkeypatch.setattr(config, "ALBUM_PROVIDER", "mnemosyne")
+    monkeypatch.setattr(config, "ALBUM_CHALLENGER_URL", "http://mnemo.local")
+    monkeypatch.setattr(InternalAlbumChallengerAdapter, "serves_production", True, raising=False)
+    assert isinstance(registry.album_proposer_adapter(), InternalAlbumChallengerAdapter)
+
+
+def test_provider_placements_defaults_to_baseline(monkeypatch):
+    # default routing is byte-identical to the old baseline path: provider/model unchanged.
+    monkeypatch.setattr(registry, "album_proposer_adapter", lambda: None)
+    placements, provider, model = albums._provider_placements(1, {3, 1, 2}, 2)
+    assert provider == "internal" and model == "album-baseline-1"
+    assert [p["asset_id"] for p in placements] == [1, 2, 3]
+
+
+def test_provider_placements_uses_eligible_challenger(monkeypatch):
+    monkeypatch.setattr(registry, "album_proposer_adapter", lambda: mocks.MockAlbumAdapter())
+    placements, provider, model = albums._provider_placements(1, {1, 2}, 2)
+    assert provider == "mock" and model == "mock-albums-1"
+    assert [p["asset_id"] for p in placements] == [1, 2]
+
+
+def test_provider_placements_falls_back_when_challenger_not_ok(monkeypatch):
+    # a non-OK challenger result must fall back to the validator-safe baseline, never store junk.
+    monkeypatch.setattr(
+        registry, "album_proposer_adapter", lambda: mocks.FailingAdapter(Capability.ALBUMS)
+    )
+    placements, provider, model = albums._provider_placements(1, {1, 2}, 2)
+    assert provider == "internal" and model == "album-baseline-1"
+
+
+def test_album_challenger_is_dormant_without_url(monkeypatch):
+    from app import config
+    from app.providers.album_challenger import InternalAlbumChallengerAdapter
+
+    monkeypatch.setattr(config, "ALBUM_CHALLENGER_URL", "")
+    a = InternalAlbumChallengerAdapter()
+    assert a.is_enabled() is False and a.serves_production is False
+    assert a.propose_album(1, [1]).status is ResultStatus.DISABLED
+
+
+def test_album_challenger_parses_placements(monkeypatch):
+    import json as _json
+
+    from app import config
+    from app.providers import album_challenger
+    from app.providers.album_challenger import InternalAlbumChallengerAdapter
+
+    monkeypatch.setattr(config, "ALBUM_CHALLENGER_URL", "http://mnemo.local")
+
+    class _Resp:
+        def read(self):
+            return _json.dumps(
+                {"placements": [{"asset_id": 1, "spread": 0, "slot": 0}], "model": "mnemosyne-1"}
+            ).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+    monkeypatch.setattr(album_challenger.urllib.request, "urlopen", lambda req, timeout: _Resp())
+    r = InternalAlbumChallengerAdapter().propose_album(7, [1])
+    assert r.ok and r.output["placements"] == [{"asset_id": 1, "spread": 0, "slot": 0}]
+    assert r.model == "mnemosyne-1" and r.cost_usd == 0.0

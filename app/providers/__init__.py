@@ -14,11 +14,13 @@ time, behind a feature flag and in shadow mode. See ``docs/PHASE-0-SLICE.md``.
 from __future__ import annotations
 
 from .adapters import (
+    InternalAlbumBaselineAdapter,
     LegacyArgusVisionAdapter,
     LegacyDionysusPackAdapter,
     LegacyOdysseusCaptionAdapter,
     LegacyPlutusOffersAdapter,
 )
+from .album_challenger import InternalAlbumChallengerAdapter
 from .contracts import (
     Capability,
     ProviderResult,
@@ -26,7 +28,15 @@ from .contracts import (
     ReviewRequirement,
 )
 from .products_render import ProductsRenderAdapter
-from .registry import challenger, reset, resolve, use, use_challenger
+from .registry import (
+    active_album_provider,
+    album_proposer_adapter,
+    challenger,
+    reset,
+    resolve,
+    use,
+    use_challenger,
+)
 from .shadow import compare
 from .vision_challenger import InternalVisionChallengerAdapter
 
@@ -40,11 +50,15 @@ __all__ = [
     "LegacyOdysseusCaptionAdapter",
     "LegacyDionysusPackAdapter",
     "InternalVisionChallengerAdapter",
+    "InternalAlbumBaselineAdapter",
+    "InternalAlbumChallengerAdapter",
     "ProductsRenderAdapter",
     "resolve",
     "use",
     "reset",
     "challenger",
     "use_challenger",
+    "active_album_provider",
+    "album_proposer_adapter",
     "compare",
 ]

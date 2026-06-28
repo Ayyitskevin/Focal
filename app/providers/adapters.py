@@ -262,3 +262,40 @@ class LegacyDionysusPackAdapter:
             data.get("message") or f"Dionysus status {status}",
             latency_ms=latency,
         )
+
+
+class InternalAlbumBaselineAdapter:
+    """ALBUMS default: the deterministic in-app baseline proposer (``app.albums.propose_layout``).
+
+    The production default for albums — always available, always serves production — so
+    ``resolve(ALBUMS)`` is a real adapter (not a raise) and adopting a Mnemosyne backend is a
+    registry registration + flag flip, not a rewrite (ADR 0011/0023). The hot path in
+    ``app.albums._provider_placements`` calls ``propose_layout`` directly (preserving
+    ``per_spread``); this wrapper exists so the facade resolves ALBUMS like every other
+    capability. Pure + non-mutating: the validator still guards the layout before it persists.
+    """
+
+    capability = Capability.ALBUMS
+    name = "internal"
+    serves_production = True
+
+    def is_enabled(self) -> bool:
+        return True
+
+    def propose_album(self, gallery_id: int, asset_ids: list[int] | None = None) -> ProviderResult:
+        from .. import albums  # lazy: app.albums imports the registry — avoid an import cycle
+
+        placements = albums.propose_layout(sorted(asset_ids or []))
+        return ProviderResult(
+            capability=self.capability,
+            provider=self.name,
+            status=ResultStatus.OK,
+            review=ReviewRequirement.HUMAN_REVIEW,
+            output={
+                "placements": placements,
+                "spread_count": len({p["spread"] for p in placements}),
+            },
+            model="album-baseline-1",
+            latency_ms=0,
+            cost_usd=0.0,
+        )

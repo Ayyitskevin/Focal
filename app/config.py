@@ -178,6 +178,23 @@ VISION_PROVIDER = os.environ.get("MISE_VISION_PROVIDER", "argus").strip().lower(
 VALIDATION_MIN_PAIRED = int(os.environ.get("MISE_VALIDATION_MIN_PAIRED", "20"))
 VALIDATION_PARITY_MARGIN = float(os.environ.get("MISE_VALIDATION_PARITY_MARGIN", "0.0"))
 
+# Which provider proposes ALBUM layouts — the album-adopt switch (default 'baseline', the
+# deterministic in-app proposer). Mirrors the vision cutover interlock
+# (providers.registry.active_album_provider): a named challenger (Mnemosyne) is honored ONLY if it
+# declares it serves the production contract AND is configured; otherwise this falls back to the
+# baseline. The Mnemosyne challenger is dormant until its URL is set and eval-only until its
+# layouts beat the baseline, so 'mnemosyne' is refused (logged) until both hold — adoption stays a
+# deliberate flip (ADR 0011/0023).
+ALBUM_PROVIDER = os.environ.get("MISE_ALBUM_PROVIDER", "baseline").strip().lower()
+# Mnemosyne album-proposer backend (Phase 5) — DORMANT until the URL is set. Point ONLY at a
+# trusted LOCAL endpoint. Mise POSTs {gallery_id, asset_ids} and reads back albums.schema.json
+# placements; the deterministic validator (app.albums) still guards every proposal, so a bad
+# layout never stores. ids only, never media.
+ALBUM_CHALLENGER_URL = os.environ.get("MISE_ALBUM_CHALLENGER_URL", "").rstrip("/")
+ALBUM_CHALLENGER_MODEL = os.environ.get("MISE_ALBUM_CHALLENGER_MODEL", "mnemosyne")
+ALBUM_CHALLENGER_TOKEN = os.environ.get("MISE_ALBUM_CHALLENGER_TOKEN", "")
+ALBUM_CHALLENGER_TIMEOUT = int(os.environ.get("MISE_ALBUM_CHALLENGER_TIMEOUT", "60"))
+
 # Aphrodite product-image generation (Phase 6) — DORMANT by default. A render backend is
 # consulted ONLY when PRODUCTS_RENDER_URL is set, and total spend is HARD-CAPPED by
 # PRODUCTS_BUDGET_USD (default 0 = disabled: products.create_render refuses every render).
