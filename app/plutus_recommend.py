@@ -134,6 +134,40 @@ def _bundle_meta(payload: dict) -> tuple[int | None, int | None]:
     return count, int(cents) if cents is not None else None
 
 
+def bundles_to_line_items(bundles: list[dict] | None) -> list[dict]:
+    """Flatten persisted offer bundles (the ``parse_bundles`` shape) into invoice line-item
+    dicts, each carrying the bundle's stable ``sku`` (ADR 0022 piece 2). A bundle with
+    ``line_items`` yields one invoice line per line_item; a bundle without yields a single line
+    from its ``label`` + ``estimated_cents``. Bundles missing a ``sku`` are SKIPPED — without the
+    linkage key the line can't be attributed, so there's nothing to pre-fill (this is what keeps
+    the pre-fill inert until Plutus emits SKUs, PLUTUS #1). Pure; returns ``[]`` for empty/None.
+    This only PROPOSES invoice lines for an operator to add — it never creates or sends an
+    invoice (audit §11.4)."""
+    if not bundles:
+        return []
+    out: list[dict] = []
+    for b in bundles:
+        sku = b.get("sku")
+        if not sku:
+            continue
+        line_items = b.get("line_items")
+        if line_items:
+            for li in line_items:
+                out.append(
+                    {
+                        "label": li["label"],
+                        "qty": li["qty"],
+                        "unit_cents": li["unit_cents"],
+                        "sku": sku,
+                    }
+                )
+        else:
+            out.append(
+                {"label": b["label"], "qty": 1, "unit_cents": b["estimated_cents"], "sku": sku}
+            )
+    return out
+
+
 def trigger_gallery_recommend(gallery_id: int) -> dict:
     if not is_enabled():
         raise PlutusRecommendError("Plutus is not configured")

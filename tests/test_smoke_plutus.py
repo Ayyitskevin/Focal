@@ -188,3 +188,69 @@ def test_argus_callback_enqueues_plutus(tmp_path, monkeypatch):
     )
     argus_analyze.apply_callback(gid, {"status": "done", "run_id": 5})
     assert ("plutus_recommend_gallery", {"gallery_id": gid}) in enqueued
+
+
+def test_add_offer_items_prefills_invoice_from_approved_offer(tmp_path, monkeypatch):
+    """ADR 0022 piece 2: the opt-in pre-fill. An approved offer's persisted bundles flatten
+    into invoice line items carrying the offer sku; the action is idempotent and refused once
+    the invoice is locked. Nothing is sent — it only seeds editable draft lines."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    _configure_tmp_db(tmp_path, monkeypatch)
+    cid = db.run("INSERT INTO clients (name) VALUES (?)", ("Acme",))
+    pid = db.run("INSERT INTO projects (client_id, title) VALUES (?,?)", (cid, "Acme shoot"))
+    bundles = [
+        {
+            "sku": "ALBUM",
+            "label": "Album",
+            "estimated_cents": 30000,
+            "line_items": [{"label": "10x10 album", "qty": 1, "unit_cents": 30000}],
+        },
+        {"sku": "WALL", "label": "Wall piece", "estimated_cents": 12000},
+    ]
+    db.run(
+        """INSERT INTO galleries (slug, title, pin, project_id, plutus_offer_decision,
+                  plutus_offer_decided_at, plutus_last_bundles)
+           VALUES (?,?,?,?, 'approved', datetime('now'), ?)""",
+        ("g1", "Gallery", "1234", pid, json.dumps(bundles)),
+    )
+    iid = db.run(
+        "INSERT INTO invoices (project_id, slug, title, line_items, total_cents) VALUES (?,?,?,?,0)",
+        (pid, "inv-slug", "Invoice", "[]"),
+    )
+
+    with TestClient(app) as client:
+        assert (
+            client.post(
+                "/admin/login", data={"password": "test-pw"}, follow_redirects=False
+            ).status_code
+            == 303
+        )
+        r = client.post(f"/admin/studio/invoices/{iid}/add-offer-items", follow_redirects=False)
+        assert r.status_code == 303
+
+        items = json.loads(
+            db.one("SELECT line_items FROM invoices WHERE id=?", (iid,))["line_items"]
+        )
+        assert [it["sku"] for it in items] == ["ALBUM", "WALL"]
+        assert items[0] == {"label": "10x10 album", "qty": 1, "unit_cents": 30000, "sku": "ALBUM"}
+        assert db.one("SELECT total_cents FROM invoices WHERE id=?", (iid,))["total_cents"] == 42000
+
+        # idempotent: a second add does not duplicate (sku already present)
+        client.post(f"/admin/studio/invoices/{iid}/add-offer-items", follow_redirects=False)
+        items2 = json.loads(
+            db.one("SELECT line_items FROM invoices WHERE id=?", (iid,))["line_items"]
+        )
+        assert len(items2) == 2
+
+        # locked once the invoice leaves draft
+        db.run("UPDATE invoices SET status='sent' WHERE id=?", (iid,))
+        assert (
+            client.post(
+                f"/admin/studio/invoices/{iid}/add-offer-items", follow_redirects=False
+            ).status_code
+            == 400
+        )
+    jobs.stop()
