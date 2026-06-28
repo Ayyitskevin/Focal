@@ -36,6 +36,7 @@ states context, the decision, consequences, measured reopen criteria, and altern
 | [0029](0029-portal-license-summary.md) | Client-facing licence summary on the portal (active licences, structured, read-only, fee never shown) | Accepted |
 | [0030](0030-cull-state-spine.md) | AI-assisted culling: the cull-state spine (operator keep/cut, reversible, audited; flag-gated; deck UI + delivery gate deferred) | Accepted |
 | [0031](0031-cull-deck-ui.md) | AI-assisted culling: the keyboard cull deck (UI over the spine — score-ranked deck, K/X/H/U, threshold sweep, large preview; flag-gated; no delivery change) | Accepted |
+| [0032](0032-cull-delivery-gate.md) | AI-assisted culling: the client-delivery gate (a cut frame stops being listed/served/zipped/portal-shown; flag-gated rollback; public-site & transfers excluded) | Accepted |
 
 See also the operator runbook [`../MISE-SOLO-STUDIO-OS-RUNBOOK.md`](../MISE-SOLO-STUDIO-OS-RUNBOOK.md)
 (how to run it day to day), [`../MISE-SOLO-STUDIO-OS.md`](../MISE-SOLO-STUDIO-OS.md),

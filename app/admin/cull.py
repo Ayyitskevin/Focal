@@ -3,9 +3,9 @@
 The vision sidecars score every photo (argus_keeper_score, migration 064); this is where the
 operator acts on those scores. AI only proposes a ranking — every keep/cut here is an explicit
 human click, recorded on the asset's cull_state (migration 077) and audited. "cut" is a soft,
-REVERSIBLE flag: it never deletes an original/derivative and (in this slice) never changes what a
-client can see — a delivery gate is a separate, reviewed change. The destructive delete stays its
-own confirm-gated route in galleries.py.
+REVERSIBLE flag: it never deletes an original/derivative. A cut frame IS hidden from clients by the
+delivery gate (app/delivery_gate.py, flag-gated) — but the file is untouched and a 'restore' brings
+it back. The destructive delete stays its own confirm-gated route in galleries.py.
 
 Surfaces here: the keyboard cull DECK (GET .../cull) ranked by keeper score, a large-preview serve
 for the deck's focused card (GET .../cull/preview/{id}), and the keep/cut/restore write routes
@@ -78,6 +78,17 @@ def _apply_cull(con, gallery_id: int, asset_id: int, action: str) -> bool:
     return True
 
 
+def _bump_delivery_rev(con, gallery_id: int) -> None:
+    """Invalidate the cached full-gallery ZIP after a cull change. The deliverable ZIP is keyed by
+    galleries.content_rev (jobs.zip_path); a 'cut'/'restore' changes what should be in it, so we
+    bump the rev so the next download rebuilds it through the delivery gate. The live listing /
+    media / per-file / favourites / section paths filter cut frames directly, so they need no bump."""
+    con.execute(
+        "UPDATE galleries SET content_rev=content_rev+1 WHERE id=?",
+        (gallery_id,),
+    )
+
+
 @router.get("/galleries/{gallery_id}/cull")
 async def cull_deck(request: Request, gallery_id: int):
     """The keyboard cull deck: every ready photo in the gallery, ranked by its keeper score
@@ -135,13 +146,15 @@ async def cull_preview(gallery_id: int, asset_id: int):
 @router.post("/galleries/{gallery_id}/assets/{asset_id}/cull")
 async def cull_asset(request: Request, gallery_id: int, asset_id: int, action: str = Form(...)):
     """Record the operator's keep / cut / restore decision on one asset. Reversible; writes no
-    file and (this slice) gates no delivery — just the decision + an audit row."""
+    file. A 'cut' is hidden from clients by the delivery gate (flag-gated) — the originals are
+    untouched and a 'restore' brings it back."""
     _require_enabled()
     if action not in _ACTIONS:
         raise HTTPException(status_code=400, detail="action must be keep, cut, or restore")
     with db.tx() as con:
         if not _apply_cull(con, gallery_id, asset_id, action):
             raise HTTPException(status_code=404, detail="asset not in this gallery")
+        _bump_delivery_rev(con, gallery_id)
     return _result(request, gallery_id)
 
 
@@ -164,5 +177,7 @@ async def bulk_cull(request: Request, gallery_id: int):
                 continue
             if _apply_cull(con, gallery_id, aid, action):
                 n += 1
+        if n:
+            _bump_delivery_rev(con, gallery_id)
     log.info("bulk cull %s: %s assets -> %s (gallery %s)", action, n, action, gallery_id)
     return _result(request, gallery_id)

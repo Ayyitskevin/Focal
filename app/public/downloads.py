@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
-from .. import config, db, jobs, security
+from .. import config, db, delivery_gate, jobs, security
 from ..render import templates
 from .gallery import get_live_gallery, is_expired
 
@@ -108,7 +108,9 @@ async def download_asset(request: Request, slug: str, asset_id: int):
     if _email_required(g) and not visitor["email"]:
         return RedirectResponse(f"/g/{slug}/download?asset_id={asset_id}", status_code=303)
     a = db.one(
-        "SELECT * FROM assets WHERE id=? AND gallery_id=? AND status='ready'", (asset_id, g["id"])
+        "SELECT * FROM assets WHERE id=? AND gallery_id=? AND status='ready'"
+        + delivery_gate.clause(),
+        (asset_id, g["id"]),
     )
     if not a:
         raise HTTPException(status_code=404)
@@ -128,8 +130,8 @@ async def download_favorites(request: Request, slug: str):
     if not visitor["email"]:
         return RedirectResponse(f"/g/{slug}/download?fav=1", status_code=303)
     assets = db.all_(
-        """SELECT a.* FROM favorites f JOIN assets a ON a.id=f.asset_id
-                        WHERE f.visitor_id=? AND a.gallery_id=? AND a.status='ready'
+        f"""SELECT a.* FROM favorites f JOIN assets a ON a.id=f.asset_id
+                        WHERE f.visitor_id=? AND a.gallery_id=? AND a.status='ready'{delivery_gate.clause("a")}
                         ORDER BY a.id""",
         (visitor["id"], g["id"]),
     )
@@ -160,8 +162,8 @@ async def download_section(request: Request, slug: str, section_id: int):
     if not s:
         raise HTTPException(status_code=404)
     assets = db.all_(
-        """SELECT * FROM assets WHERE gallery_id=? AND section_id=?
-                        AND status='ready' ORDER BY position, id""",
+        f"""SELECT * FROM assets WHERE gallery_id=? AND section_id=?
+                        AND status='ready'{delivery_gate.clause()} ORDER BY position, id""",
         (g["id"], section_id),
     )
     if not assets:

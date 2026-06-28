@@ -13,6 +13,7 @@ from . import (
     brand_kits,
     config,
     db,
+    delivery_gate,
     imaging,
     notion_sync,
     presets,
@@ -124,7 +125,12 @@ def _h_zip(p: dict) -> None:
     final = zip_path(gid, rev)
     if final.exists():
         return
-    assets = db.all_("SELECT * FROM assets WHERE gallery_id=? AND status='ready'", (gid,))
+    # Cut frames (cull deck) are excluded from the deliverable ZIP — gate is flag-gated; the
+    # gallery's content_rev is bumped on every cull decision so this rebuilds at a fresh rev.
+    assets = db.all_(
+        f"SELECT * FROM assets WHERE gallery_id=? AND status='ready'{delivery_gate.clause()}",
+        (gid,),
+    )
     src_dir = _gallery_dirs(gid)["original"]
     names: set[str] = set()
     entries = []

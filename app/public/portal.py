@@ -12,7 +12,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
-from .. import clients, config, db, jobs, presets, security
+from .. import clients, config, db, delivery_gate, jobs, presets, security
 from ..render import templates
 
 log = logging.getLogger("mise.public.portal")
@@ -151,12 +151,12 @@ async def view(request: Request, slug: str):
         (p["client_id"],),
     )
     crops = db.all_(
-        """SELECT DISTINCT a.*, g.title AS gallery_title
+        f"""SELECT DISTINCT a.*, g.title AS gallery_title
                        FROM favorites f
                        JOIN assets a ON a.id=f.asset_id
                        JOIN galleries g ON g.id=a.gallery_id
                        WHERE g.client_id=? AND g.published=1
-                         AND a.kind='photo' AND a.status='ready'
+                         AND a.kind='photo' AND a.status='ready'{delivery_gate.clause("a")}
                        ORDER BY g.created_at DESC, a.id""",
         (p["client_id"],),
     )
@@ -170,13 +170,13 @@ async def view(request: Request, slug: str):
     # one-line trust signal at the top of the Social crops section so the
     # client knows how many selects they've already made.
     fav_summary = db.one(
-        """SELECT COUNT(DISTINCT f.asset_id) AS n_faves,
+        f"""SELECT COUNT(DISTINCT f.asset_id) AS n_faves,
                                    COUNT(DISTINCT a.gallery_id) AS n_galleries
                             FROM favorites f
                             JOIN assets a ON a.id=f.asset_id
                             JOIN galleries g ON g.id=a.gallery_id
                             WHERE g.client_id=? AND g.published=1
-                              AND a.kind='photo' AND a.status='ready'""",
+                              AND a.kind='photo' AND a.status='ready'{delivery_gate.clause("a")}""",
         (p["client_id"],),
     )
     # What-changed header: how many of each surface is new since prev_visit, +
@@ -258,8 +258,8 @@ async def check_pin(request: Request, slug: str, pin: str = Form(...)):
 
 def _client_asset(portal: "db.sqlite3.Row", asset_id: int) -> "db.sqlite3.Row":
     a = db.one(
-        """SELECT a.* FROM assets a JOIN galleries g ON g.id=a.gallery_id
-                  WHERE a.id=? AND g.client_id=? AND g.published=1 AND a.status='ready'""",
+        f"""SELECT a.* FROM assets a JOIN galleries g ON g.id=a.gallery_id
+                  WHERE a.id=? AND g.client_id=? AND g.published=1 AND a.status='ready'{delivery_gate.clause("a")}""",
         (asset_id, portal["client_id"]),
     )
     if not a:
@@ -306,11 +306,11 @@ async def crops_zip(request: Request, slug: str):
     p = get_live_portal(slug)
     _require_access(request, p["id"])
     rows = db.all_(
-        """SELECT DISTINCT a.* FROM favorites f
+        f"""SELECT DISTINCT a.* FROM favorites f
                       JOIN assets a ON a.id=f.asset_id
                       JOIN galleries g ON g.id=a.gallery_id
                       WHERE g.client_id=? AND g.published=1
-                        AND a.kind='photo' AND a.status='ready'
+                        AND a.kind='photo' AND a.status='ready'{delivery_gate.clause("a")}
                       ORDER BY a.id""",
         (p["client_id"],),
     )
