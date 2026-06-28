@@ -1,10 +1,14 @@
 """Plutus offers — pure unit tests (CI-run via the `unit` marker).
 
-Covers ``plutus_recommend.parse_bundles``, the deterministic offers.schema.json validator
-that gates what gets persisted to ``galleries.plutus_last_bundles`` (ADR 0022 piece 1) — the
-analog of ``qwen_writeback.parse_structured``. No DB/network: the validator is pure, so this
-runs in the CI unit step. The DB-backed persistence path (apply_callback → the column) is
-exercised by tests/test_smoke_plutus.py.
+Covers the deterministic, pure offer helpers:
+* ``parse_bundles`` — the offers.schema.json validator gating what gets persisted to
+  ``galleries.plutus_last_bundles`` (ADR 0022 piece 1), the analog of
+  ``qwen_writeback.parse_structured``;
+* ``bundles_to_line_items`` — flattening persisted bundles into invoice line items that carry
+  the offer sku (ADR 0022 piece 2).
+
+No DB/network, so this runs in the CI unit step. The DB-backed persistence + invoice pre-fill
+paths are exercised by tests/test_smoke_plutus.py.
 """
 
 import pytest
@@ -88,3 +92,40 @@ def test_parse_bundles_returns_none_on_malformed_or_empty():
         )
         is None
     )
+
+
+def test_bundles_to_line_items_expands_line_items_with_sku():
+    bundles = [
+        {
+            "sku": "ALBUM",
+            "label": "Album",
+            "estimated_cents": 30000,
+            "line_items": [
+                {"label": "10x10 album", "qty": 1, "unit_cents": 25000},
+                {"label": "Extra spread", "qty": 2, "unit_cents": 2500},
+            ],
+        }
+    ]
+    assert plutus_recommend.bundles_to_line_items(bundles) == [
+        {"label": "10x10 album", "qty": 1, "unit_cents": 25000, "sku": "ALBUM"},
+        {"label": "Extra spread", "qty": 2, "unit_cents": 2500, "sku": "ALBUM"},
+    ]
+
+
+def test_bundles_to_line_items_falls_back_to_bundle_total_without_line_items():
+    bundles = [{"sku": "WALL", "label": "Wall piece", "estimated_cents": 12000}]
+    assert plutus_recommend.bundles_to_line_items(bundles) == [
+        {"label": "Wall piece", "qty": 1, "unit_cents": 12000, "sku": "WALL"}
+    ]
+
+
+def test_bundles_to_line_items_skips_skuless_bundles_and_empty():
+    # no sku -> no linkage key -> nothing to pre-fill (inert before Plutus emits SKUs)
+    assert (
+        plutus_recommend.bundles_to_line_items(
+            [{"sku": None, "label": "x", "estimated_cents": 100}]
+        )
+        == []
+    )
+    assert plutus_recommend.bundles_to_line_items([]) == []
+    assert plutus_recommend.bundles_to_line_items(None) == []

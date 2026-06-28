@@ -98,3 +98,36 @@ def test_non_numeric_price_is_rejected_not_silently_zeroed():
     with pytest.raises(HTTPException) as exc:
         parse_items(form)
     assert exc.value.status_code == 400
+
+
+# --- optional line-item sku (offer→invoice attribution tag, ADR 0022) -------
+
+
+def test_line_item_sku_carried_through_when_present():
+    form = {
+        "item_label_0": "Album",
+        "item_qty_0": "1",
+        "item_price_0": "300.00",
+        "item_sku_0": "ALBUM",
+    }
+    items = json.loads(parse_items(form)[0])
+    assert items[0] == {"label": "Album", "qty": 1, "unit_cents": 30000, "sku": "ALBUM"}
+
+
+def test_line_item_sku_omitted_when_blank():
+    # non-offer lines keep the plain {label, qty, unit_cents} shape — no empty sku key
+    form = {"item_label_0": "Album", "item_qty_0": "1", "item_price_0": "300.00", "item_sku_0": ""}
+    items = json.loads(parse_items(form)[0])
+    assert items[0] == {"label": "Album", "qty": 1, "unit_cents": 30000}
+    assert "sku" not in items[0]
+
+
+def test_line_item_sku_does_not_affect_total():
+    form = {
+        "item_label_0": "Album",
+        "item_qty_0": "2",
+        "item_price_0": "300.00",
+        "item_sku_0": "ALBUM",
+    }
+    _, total = parse_items(form)
+    assert total == 60000

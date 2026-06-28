@@ -239,7 +239,10 @@ def get_proposal(proposal_id: int) -> "db.sqlite3.Row":
 
 
 def parse_items(form) -> tuple[str, int]:
-    """Collect item_label_N / item_qty_N / item_price_N rows → (json, total_cents)."""
+    """Collect item_label_N / item_qty_N / item_price_N (+ optional item_sku_N) rows →
+    (json, total_cents). A non-empty item_sku_N is carried through as an offer→invoice
+    attribution tag (ADR 0022); it is omitted when absent (non-offer lines keep the plain
+    {label, qty, unit_cents} shape) and never affects the total."""
     items, total = [], 0
     for i in range(MAX_ITEM_ROWS):
         label = (form.get(f"item_label_{i}") or "").strip()
@@ -250,7 +253,11 @@ def parse_items(form) -> tuple[str, int]:
             unit_cents = common.parse_form_cents(form, f"item_price_{i}")
         except ValueError:
             raise HTTPException(status_code=400, detail=f"bad numbers on row {i + 1}")
-        items.append({"label": label, "qty": qty, "unit_cents": unit_cents})
+        item = {"label": label, "qty": qty, "unit_cents": unit_cents}
+        sku = (form.get(f"item_sku_{i}") or "").strip()
+        if sku:
+            item["sku"] = sku
+        items.append(item)
         total += qty * unit_cents
     return json.dumps(items), total
 
