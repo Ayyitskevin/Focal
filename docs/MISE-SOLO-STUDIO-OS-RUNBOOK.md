@@ -56,6 +56,38 @@ nothing until you set the relevant flag. Flags live in flow's `.env`
   challenger stops running, Argus is unaffected throughout.
 - **The promotion workflow** is in §3.
 
+### Culling (AI-assisted keep/cut) — ADRs 0030, 0031, 0032
+
+- **What it does:** a fast, keyboard-first cull over the keeper scores Vision already writes
+  (`argus_keeper_score`). You step through the gallery best-first and keep/cut each frame; a
+  **cut** is hidden from the client (not the studio) and is fully reversible. Nothing is ever
+  deleted — `cut` is a flag, the original stays on disk, and `restore` brings the frame back.
+- **Surface:** the **Cull** button on a gallery page → `/admin/galleries/{id}/cull`. One big
+  card at a time: **K** keep · **X** cut · **H / →** skip · **←** back · **R** undecide · **U**
+  undo. A **score-threshold slider** pre-selects the low-scoring tail for one bulk cut, and a
+  **triage grid** shows every frame's decision (cut dimmed) — click to jump.
+- **Precondition — check which world you're in.** The ranking + threshold are only useful if
+  scores exist. Open the deck on a real gallery: if frames show a score badge, Vision is
+  scoring you and the AI-assist works. If most read **"unscored"**, Vision isn't analysing your
+  galleries (Argus not armed, or the local challenger not promoted) — the deck still works as a
+  *manual* keyboard cull, but ranking/threshold do nothing until scores flow. That's the trigger
+  to arm Vision (above) or build the local scorer.
+- **Arm:** `MISE_CULL_UI=true`. **One switch** arms both halves — the authoring deck *and* the
+  client-delivery gate. Off by default; every cull route 404s and delivery is unchanged until set.
+- **What a cut does once armed:** the frame drops out of the client gallery listing, 404s on the
+  media + download routes (even a guessed/cached URL), is excluded from the favourites / section /
+  full-gallery ZIPs, and disappears from the client portal. The full-gallery ZIP rebuilds on next
+  download (a cull decision bumps `content_rev`). The studio side (gallery manage page, the deck
+  itself) always shows every frame so you can see and reverse decisions.
+- **What it never touches:** the **public marketing site** (governed by the `portfolio` flag, a
+  separate publication intent — a cut can't make a portfolio piece vanish) and **transfers/drops**
+  (a literal send; no deck). Originals, `delete`, and the money path are all untouched.
+- **Rollback:** `MISE_CULL_UI=false` returns every client path to pre-cull delivery exactly, and
+  hides the deck — one env var, no code change. Caveat: the *full-gallery ZIP* reflects the cull
+  state at its last build (the live listing/media/per-file paths honour the flag immediately); a
+  fresh download after a decision rebuilds it. To permanently un-cut a frame, use **restore**, not
+  the flag.
+
 ### Offers (Plutus) — ADRs 0006, 0012
 
 - **What it does:** print/album bundle recommendations after a gallery is analyzed; the
@@ -284,6 +316,7 @@ arm it. The controlled cutover to `2025-09-03` (data-source model) is its own ru
 | Env var | Default | Effect |
 | --- | --- | --- |
 | `MISE_PROVIDER_FACADE_CONTENT` | `false` | Route captions through the facade + Dionysus pack provenance to the ledger |
+| `MISE_CULL_UI` | `false` | Arm AI-assisted culling — the keep/cut deck **and** the client-delivery gate (one switch; see §2) |
 | `MISE_VISION_SHADOW` | `false` | Shadow-compare a challenger vs Argus into the ledger (needs a challenger URL) |
 | `MISE_VISION_CHALLENGER_URL` | — | Trusted **local** OpenAI-compatible endpoint for the challenger |
 | `MISE_VISION_CHALLENGER_MODEL` | `qwen3-vl:32b` | Challenger model id |
@@ -317,6 +350,7 @@ feature dormant changes nothing. Run via the app's normal `db.migrate()` on boot
 | `068_plutus_offer_decision.sql` | `galleries.plutus_offer_decision` + `…_decided_at` | `rollback/068…` (DROP COLUMN; SQLite ≥3.35) |
 | `069_plutus_offer_sent.sql` | `galleries.plutus_offer_sent_at` + `…_sent_to` | `rollback/069…` (DROP COLUMN; SQLite ≥3.35) |
 | `070_album_order.sql` | `album_drafts.ordered_at` + `order_size/cover/notes` | `rollback/070…` (DROP COLUMN; SQLite ≥3.35) |
+| `077_asset_cull_state.sql` | `assets.cull_state` + `cull_decided_at/cull_source` + index | `rollback/077…` (DROP COLUMN; SQLite ≥3.45) |
 
 Each rollback is safe because the tables/columns are dormant and referenced by no money,
 invoice, or business record. Rolling a feature back is normally a **flag**, not a migration —
@@ -354,6 +388,9 @@ CI runs the `-m unit` gate and `tests/test_smoke.py`. Topic smoke files
   AI output payload and never a secret.
 - **Local-only challenger posture.** The vision challenger URL must be a trusted local
   endpoint; it sends downsized web derivatives, never originals, capped by `…_MAX_IMAGES`.
+- **Culling is reversible and never deletes.** A `cut` is a flag that hides a frame from the
+  *client*; the original is untouched and `restore` brings it back. AI only ranks — every keep/cut
+  is your keystroke. `MISE_CULL_UI=false` rolls the whole feature back to pre-cull delivery.
 - **Red-light changes** (schema, money path, auth/CSRF, deploy, contracts) ship as a reviewed
   PR a human merges — never self-applied.
 
