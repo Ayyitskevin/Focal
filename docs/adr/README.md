@@ -26,7 +26,7 @@ states context, the decision, consequences, measured reopen criteria, and altern
 | [0019](0019-album-order-record-only.md) | Album order: record the spec, don't integrate or charge | Accepted |
 | [0020](0020-offer-revenue-scorecard.md) | Offer scorecard: a funnel + an honest revenue proxy | Accepted |
 | [0021](0021-aphrodite-products-foundation.md) | Aphrodite products: budget-capped, export-gated foundation (dormant) | Accepted |
-| [0022](0022-offer-sku-revenue-attribution.md) | Offer SKU revenue attribution: proxy → real attributed upsell (gated on Plutus SKUs) | Proposed |
+| [0022](0022-offer-sku-revenue-attribution.md) | Offer SKU revenue attribution: proxy → real attributed upsell (gated on Plutus SKUs) | Accepted |
 
 See also the operator runbook [`../MISE-SOLO-STUDIO-OS-RUNBOOK.md`](../MISE-SOLO-STUDIO-OS-RUNBOOK.md)
 (how to run it day to day), [`../MISE-SOLO-STUDIO-OS.md`](../MISE-SOLO-STUDIO-OS.md),

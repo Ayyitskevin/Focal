@@ -5,6 +5,8 @@ project-level revenue attribution proxy (no double-count across a project's gall
 admin-gating.
 """
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -105,8 +107,76 @@ def test_scorecard_renders(admin_client):
     body = admin_client.get("/admin/offers-scorecard").text
     assert "Offer scorecard" in body
     assert "$650.00" in body  # proposed pipeline, all-time
-    assert "$450.00" in body  # attributed revenue
-    assert "attribution proxy" in body.lower()
+    assert "$450.00" in body  # directional proxy revenue
+    assert "directional proxy" in body.lower()
+    assert "Attributed upsell" in body  # the real-attribution section (ADR 0022 piece 3)
+
+
+def test_attributed_upsell_counts_only_tagged_paid_lines(admin_client):
+    cid = db.run("INSERT INTO clients (name) VALUES (?)", ("Dana",))
+    pid = db.run("INSERT INTO projects (client_id, title) VALUES (?,?)", (cid, "Wedding"))
+    db.run(
+        "INSERT INTO galleries (slug, title, pin, project_id, plutus_last_bundles) VALUES (?,?,?,?,?)",
+        (
+            "ga",
+            "GA",
+            "1",
+            pid,
+            json.dumps([{"sku": "ALBUM", "label": "Album", "estimated_cents": 30000}]),
+        ),
+    )
+    db.run(
+        "INSERT INTO invoices (project_id, slug, title, total_cents, status, line_items) "
+        "VALUES (?,?,?,?,?,?)",
+        (
+            pid,
+            "inv-1",
+            "Order",
+            120000,
+            "paid",
+            json.dumps(
+                [
+                    {"label": "Shoot fee", "qty": 1, "unit_cents": 90000},
+                    {"label": "Album", "qty": 1, "unit_cents": 30000, "sku": "ALBUM"},
+                ]
+            ),
+        ),
+    )
+    att = offer_scorecard._attributed_upsell()
+    # only the tagged $300 album line, NOT the $900 shoot fee on the same paid invoice
+    assert att["revenue"] == "$300.00"
+    assert att["invoices"] == 1 and att["skus"] == 1 and att["offered_skus"] == 1
+    assert att["has_data"] is True
+
+
+def test_attributed_upsell_ignores_unpaid_invoices(admin_client):
+    cid = db.run("INSERT INTO clients (name) VALUES (?)", ("Dana",))
+    pid = db.run("INSERT INTO projects (client_id, title) VALUES (?,?)", (cid, "Wedding"))
+    db.run(
+        "INSERT INTO galleries (slug, title, pin, project_id, plutus_last_bundles) VALUES (?,?,?,?,?)",
+        (
+            "ga",
+            "GA",
+            "1",
+            pid,
+            json.dumps([{"sku": "ALBUM", "label": "Album", "estimated_cents": 30000}]),
+        ),
+    )
+    # a DRAFT invoice with a tagged line is not collected revenue -> not attributed
+    db.run(
+        "INSERT INTO invoices (project_id, slug, title, total_cents, status, line_items) "
+        "VALUES (?,?,?,?,?,?)",
+        (
+            pid,
+            "inv-draft",
+            "Order",
+            30000,
+            "draft",
+            json.dumps([{"label": "Album", "qty": 1, "unit_cents": 30000, "sku": "ALBUM"}]),
+        ),
+    )
+    att = offer_scorecard._attributed_upsell()
+    assert att["revenue"] == "$0.00" and att["invoices"] == 0 and att["has_data"] is False
 
 
 def test_empty_state_renders(admin_client):

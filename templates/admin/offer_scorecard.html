@@ -5,9 +5,9 @@
   <div class="pgtop-lead">
     <h1>Offer scorecard</h1>
     <p class="pgtop-sub">
-      Does the offers capability earn its keep? The proposed → approved → sent funnel and an
-      attribution-proxy view of revenue on offered projects. Read-only — it informs the
-      keep/retire call (audit §19.4), it doesn't decide it.
+      Does the offers capability earn its keep? The proposed → approved → sent funnel, real
+      attributed upsell (offer SKU → invoice line), and a directional revenue proxy alongside it.
+      Read-only — it informs the keep/retire call (audit §19.4), it doesn't decide it.
     </p>
   </div>
   <div class="pgtop-actions">
@@ -47,7 +47,34 @@
   </section>
 
   <section style="margin-top:1.1rem">
-    <div class="muted" style="font-size:.8rem; margin:.3rem 0">Revenue on offered projects — attribution proxy</div>
+    <div class="muted" style="font-size:.8rem; margin:.3rem 0">Attributed upsell — real (offer SKU → invoice line)</div>
+    <div style="display:flex; gap:.6rem; flex-wrap:wrap">
+      <div style="flex:1 1 150px; border:1px solid #e2e6e8; border-radius:8px; padding:.7rem .8rem">
+        <div style="font-size:1.5rem; font-weight:600">{{ attributed.revenue }}</div>
+        <div class="muted" style="font-size:.8rem">paid value of offer-SKU-tagged invoice lines</div>
+      </div>
+      <div style="flex:1 1 150px; border:1px solid #e2e6e8; border-radius:8px; padding:.7rem .8rem">
+        <div style="font-size:1.5rem; font-weight:600">{{ attributed.invoices }}</div>
+        <div class="muted" style="font-size:.8rem">paid invoices with an attributed offer line</div>
+      </div>
+      <div style="flex:1 1 150px; border:1px solid #e2e6e8; border-radius:8px; padding:.7rem .8rem">
+        <div style="font-size:1.5rem; font-weight:600">{{ attributed.skus }} / {{ attributed.offered_skus }}</div>
+        <div class="muted" style="font-size:.8rem">offered SKUs that converted to paid lines</div>
+      </div>
+    </div>
+    <p class="muted" style="font-size:.78rem; margin:.4rem 0">
+      <b>Causal — counts only tagged lines.</b> This sums <em>only</em> the value of invoice line
+      items a human tagged with a SKU that Plutus offered (via the approved-offer pre-fill), on
+      fully-paid invoices — not the base shoot fee on the same invoice, and not untagged revenue.
+      {% if not attributed.has_data %}Reads $0 until Plutus emits SKUs and a SKU-tagged invoice is
+      paid; the proxy below covers the interim.{% endif %}
+      Deposit/partly-paid invoices aren't line-attributed yet, so treat this as a conservative
+      floor.
+    </p>
+  </section>
+
+  <section style="margin-top:1.1rem">
+    <div class="muted" style="font-size:.8rem; margin:.3rem 0">Revenue on offered projects — directional proxy</div>
     <div style="display:flex; gap:.6rem; flex-wrap:wrap">
       <div style="flex:1 1 150px; border:1px solid #e2e6e8; border-radius:8px; padding:.7rem .8rem">
         <div style="font-size:1.5rem; font-weight:600">{{ revenue.revenue }}</div>
