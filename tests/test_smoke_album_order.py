@@ -6,6 +6,8 @@ non-approved draft, can be updated and cleared, writes an audit row — and neve
 contacts a vendor, or charges.
 """
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -157,3 +159,52 @@ def test_album_order_requires_admin(tmp_path, monkeypatch):
         r2 = anon.get("/admin/albums/1/order-sheet", follow_redirects=False)
         assert r2.status_code == 303 and r2.headers["location"] == "/admin/login"
         jobs.stop()
+
+
+def _ordered_album_on_project(admin_client, *, order=True):
+    """An approved album draft whose gallery belongs to a project; optionally marked ordered."""
+    cid = db.run("INSERT INTO clients (name) VALUES (?)", ("Dana",))
+    pid = db.run("INSERT INTO projects (client_id, title) VALUES (?,?)", (cid, "Wedding"))
+    gid = db.run(
+        "INSERT INTO galleries (slug, title, pin, project_id) VALUES (?,?,?,?)",
+        ("AlbP", "Album P", "1", pid),
+    )
+    db.run(
+        "INSERT INTO assets (gallery_id, kind, filename, stored, status) VALUES (?,?,?,?,?)",
+        (gid, "photo", "p1.jpg", "p1.jpg", "ready"),
+    )
+    did = albums.propose_draft(gid)
+    albums.set_status(did, "approved")
+    if order:
+        admin_client.post(
+            f"/admin/albums/{did}/order", data={"size": "10x10"}, follow_redirects=False
+        )
+    return pid, did
+
+
+def test_build_invoice_from_ordered_album(admin_client):
+    pid, did = _ordered_album_on_project(admin_client)
+    r = admin_client.post(f"/admin/studio/invoices/from-album/{did}", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith("/admin/studio/invoices/")
+    inv = db.one("SELECT * FROM invoices WHERE project_id=? ORDER BY id DESC LIMIT 1", (pid,))
+    items = json.loads(inv["line_items"])
+    assert len(items) == 1
+    line = items[0]
+    # clean line: labeled from the album spec, $0 for the operator to price, NO sku (not attributed)
+    assert line["label"].startswith("Album") and "10x10" in line["label"]
+    assert line["qty"] == 1 and line["unit_cents"] == 0 and "sku" not in line
+    assert inv["status"] == "draft" and inv["total_cents"] == 0
+
+
+def test_build_invoice_from_album_refused_when_not_ordered(admin_client):
+    _pid, did = _ordered_album_on_project(admin_client, order=False)
+    r = admin_client.post(f"/admin/studio/invoices/from-album/{did}", follow_redirects=False)
+    assert r.status_code == 400
+
+
+def test_build_invoice_from_album_refused_without_project(admin_client):
+    # _draft()'s gallery has no project_id; ordering it then building an invoice is refused
+    did = _draft()
+    admin_client.post(f"/admin/albums/{did}/order", data={"size": "8x8"}, follow_redirects=False)
+    r = admin_client.post(f"/admin/studio/invoices/from-album/{did}", follow_redirects=False)
+    assert r.status_code == 400

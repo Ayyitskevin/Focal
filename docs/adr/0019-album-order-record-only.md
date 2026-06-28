@@ -4,6 +4,13 @@
 **Date:** 2026-06-26
 **Deciders:** Kevin (owner), principal engineer
 
+> **Update (2026-06-28):** the record-only order is no longer a fulfillment dead-end — an ordered
+> album draft now has a one-click **"Add to invoice"** that creates a draft invoice for the
+> gallery's project with an `"Album — <size>"` line, priced $0 for the operator to fill. It's a
+> **clean line with NO sku**, deliberately NOT counted as offer-attributed upsell (album orders
+> aren't Plutus offers; the scorecard's attribution stays offer→sale — see ADR 0024 note). Still
+> never sends, charges, or hands off to a vendor (§11.4); the draft is the operator's to price/send.
+
 ## Context
 
 Mnemosyne album drafts can be proposed, reviewed, approved, or rejected (ADRs 0009/0011),

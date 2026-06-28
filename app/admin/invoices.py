@@ -99,6 +99,37 @@ async def create_invoice_from_offer(gallery_id: int):
     return RedirectResponse(f"/admin/studio/invoices/{did}", status_code=303)
 
 
+@router.post("/invoices/from-album/{draft_id}")
+async def create_invoice_from_album(draft_id: int):
+    """One-click from an ORDERED album draft: create a draft invoice for the gallery's project
+    with a single 'Album — <size>' line for the operator to price. Bridges the record-only album
+    order (ADR 0019) to billing so it stops being a fulfillment dead-end.
+
+    Deliberately a CLEAN line with NO sku — album orders aren't Plutus offers, so this is not
+    counted as offer-attributed upsell (the scorecard's attribution stays offer→sale). The line
+    is priced $0 for the operator to fill; nothing is sent or charged (audit §11.4)."""
+    d = db.one(
+        """SELECT d.id, d.ordered_at, d.order_size, g.project_id, g.title AS gtitle
+           FROM album_drafts d JOIN galleries g ON g.id = d.gallery_id WHERE d.id=?""",
+        (draft_id,),
+    )
+    if not d:
+        raise HTTPException(status_code=404, detail="album draft not found")
+    if d["project_id"] is None:
+        raise HTTPException(status_code=400, detail="gallery has no project to invoice")
+    if not d["ordered_at"]:
+        raise HTTPException(status_code=400, detail="album is not marked ordered")
+    p = get_project(d["project_id"])
+    label = "Album" + (f" — {d['order_size']}" if d["order_size"] else "")
+    line = {"label": label, "qty": 1, "unit_cents": 0}  # operator sets the price; clean, no sku
+    did = db.run(
+        "INSERT INTO invoices (project_id, slug, title, line_items, total_cents) VALUES (?,?,?,?,?)",
+        (d["project_id"], security.new_slug(), f"Invoice — {p['title']}", json.dumps([line]), 0),
+    )
+    log.info("invoice %s built from ordered album draft %s", did, draft_id)
+    return RedirectResponse(f"/admin/studio/invoices/{did}", status_code=303)
+
+
 @router.get("/invoices/{invoice_id}", response_class=HTMLResponse)
 async def invoice_detail(request: Request, invoice_id: int):
     d = get_invoice(invoice_id)

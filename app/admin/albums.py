@@ -116,7 +116,7 @@ async def album_detail(request: Request, draft_id: int, msg: str = "", err: str 
     if not draft:
         return _redirect("/admin/albums", err="No such album draft.")
     gallery = db.get_or_404(
-        "SELECT id, slug, title FROM galleries WHERE id=?", (draft["gallery_id"],)
+        "SELECT id, slug, title, project_id FROM galleries WHERE id=?", (draft["gallery_id"],)
     )
     placements = albums.draft_placements(draft_id)
     # Re-validate against the gallery's CURRENT eligible photos: surfaces a placement whose
@@ -139,6 +139,8 @@ async def album_detail(request: Request, draft_id: int, msg: str = "", err: str 
         {
             "draft": draft,
             "gallery": dict(gallery),
+            # An ordered album on a project can be turned into a draft invoice line in one click.
+            "can_invoice": bool(draft["ordered_at"]) and gallery["project_id"] is not None,
             "spreads": spread_view,
             "placement_count": len(placements),
             "omitted": list(revalidation.omitted),
