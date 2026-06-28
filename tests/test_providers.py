@@ -553,3 +553,76 @@ def test_active_vision_provider_honors_a_production_capable_challenger(monkeypat
     monkeypatch.setattr(InternalVisionChallengerAdapter, "is_enabled", lambda self: True)
     p = registry.active_vision_provider("qwen")
     assert p["effective"] == "qwen3-vl" and p["eligible"] is True
+
+
+# ── the live vision trigger dispatches through the interlock (jobs._h_vision_analyze) ──
+# ADR 0016 left the production analyze job calling Argus directly; these prove it now routes
+# through active_vision_provider() so promotion is a flag flip, and stays Argus-default + inert.
+
+
+def test_vision_trigger_defaults_to_argus_byte_identical(monkeypatch):
+    from app import argus_analyze, config, jobs, qwen_writeback
+
+    calls = {}
+    monkeypatch.setattr(config, "VISION_PROVIDER", "argus")
+    monkeypatch.setattr(argus_analyze, "is_enabled", lambda: True)
+    monkeypatch.setattr(
+        argus_analyze,
+        "run_for_gallery",
+        lambda gid, skip_dedup=False: calls.setdefault("argus", (gid, skip_dedup)),
+    )
+    monkeypatch.setattr(
+        qwen_writeback, "writeback_gallery", lambda gid: calls.setdefault("qwen", gid)
+    )
+    monkeypatch.setattr(
+        jobs, "enqueue", lambda kind, payload: calls.setdefault("enqueue", (kind, payload)) or 1
+    )
+    jobs._h_vision_analyze({"gallery_id": 7, "skip_dedup": True})
+    assert calls == {"argus": (7, True)}  # only Argus, skip_dedup preserved; no Qwen, no enqueue
+
+
+def test_vision_trigger_routes_to_qwen_once_promoted(monkeypatch):
+    from app import config, jobs, plutus_recommend, qwen_writeback
+    from app.providers.vision_challenger import InternalVisionChallengerAdapter
+
+    calls = {}
+    monkeypatch.setattr(config, "VISION_PROVIDER", "qwen")
+    monkeypatch.setattr(config, "VISION_CHALLENGER_URL", "http://mickeybot:11434/v1")
+    monkeypatch.setattr(InternalVisionChallengerAdapter, "serves_production", True, raising=False)
+    monkeypatch.setattr(
+        jobs.argus_analyze,
+        "run_for_gallery",
+        lambda gid, skip_dedup=False: calls.setdefault("argus", gid),
+    )
+    monkeypatch.setattr(
+        qwen_writeback, "writeback_gallery", lambda gid: calls.setdefault("qwen", gid)
+    )
+    monkeypatch.setattr(plutus_recommend, "is_enabled", lambda: True)
+    monkeypatch.setattr(
+        jobs, "enqueue", lambda kind, payload: calls.setdefault("enqueue", (kind, payload)) or 1
+    )
+    jobs._h_vision_analyze({"gallery_id": 9})
+    assert calls.get("qwen") == 9 and "argus" not in calls
+    # the upsell hop the Argus path fires is preserved so promotion doesn't drop offers
+    assert calls.get("enqueue") == ("plutus_recommend_gallery", {"gallery_id": 9})
+
+
+def test_vision_trigger_eval_only_challenger_falls_back_to_argus(monkeypatch):
+    # flag points at qwen but the challenger is serves_production=False -> interlock refuses,
+    # so the trigger must STILL run Argus (the whole reason for routing through the interlock)
+    from app import config, jobs, qwen_writeback
+
+    calls = {}
+    monkeypatch.setattr(config, "VISION_PROVIDER", "qwen")
+    monkeypatch.setattr(config, "VISION_CHALLENGER_URL", "http://mickeybot:11434/v1")
+    # serves_production stays False (default) — the eval-only posture
+    monkeypatch.setattr(
+        jobs.argus_analyze,
+        "run_for_gallery",
+        lambda gid, skip_dedup=False: calls.setdefault("argus", gid),
+    )
+    monkeypatch.setattr(
+        qwen_writeback, "writeback_gallery", lambda gid: calls.setdefault("qwen", gid)
+    )
+    jobs._h_vision_analyze({"gallery_id": 5})
+    assert calls == {"argus": 5}  # fell back to Argus despite MISE_VISION_PROVIDER=qwen

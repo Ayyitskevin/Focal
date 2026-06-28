@@ -4,6 +4,15 @@
 **Date:** 2026-06-26
 **Deciders:** Kevin (owner), principal engineer
 
+> **Update (2026-06-28):** the deferred slice (b) below — *routing the live vision trigger
+> through the facade seam* — is now done. The production analyze job (`jobs._h_vision_analyze`,
+> same `argus_analyze_gallery` kind) dispatches via `registry.active_vision_provider()`: Argus
+> by default, the Qwen production writeback only once Qwen is the *eligible* provider. It stays
+> byte-identical to before until a deliberate promotion (`serves_production=True` +
+> `MISE_VISION_PROVIDER=qwen`), so cutover is now a flag flip, not a delivery-path edit. The
+> remaining slice (a), the Qwen writeback path, already exists (ADR 0017); what's left is live
+> prompt-tuning + the `serves_production` flip against a real endpoint.
+
 ## Context
 
 The vision evaluation chain is complete (shadow → ledger → validation gate, ADRs

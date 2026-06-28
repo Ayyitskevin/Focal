@@ -21,6 +21,7 @@ from . import (
     video,
     vision_shadow,
 )
+from .providers import registry
 
 log = logging.getLogger("mise.jobs")
 
@@ -140,6 +141,33 @@ def _h_zip(p: dict) -> None:
             old.unlink(missing_ok=True)
 
 
+# Production vision provider the cutover interlock routes to once Qwen is promoted (ADR 0016/0017).
+_QWEN_VISION = "qwen3-vl"
+
+
+def _h_vision_analyze(p: dict) -> None:
+    """Dispatch production vision analysis through the cutover interlock (ADR 0016).
+
+    Consults ``registry.active_vision_provider()``: when Qwen is the *eligible production*
+    provider it runs the structured Qwen writeback (itself interlocked); otherwise it runs the
+    legacy Argus analyze. Default config keeps this BYTE-IDENTICAL to the old direct Argus call —
+    the challenger is ``serves_production=False`` until a deliberate promotion (the flip is
+    ``serves_production=True`` + ``MISE_VISION_PROVIDER=qwen``), so the Qwen branch is unreachable
+    today. Wiring it now makes promotion a flag flip, not an edit to the gallery-delivery path
+    under pressure (ADR 0016 deliberately left this trigger calling Argus directly)."""
+    gid = p["gallery_id"]
+    status = registry.active_vision_provider()
+    if status["eligible"] and status["effective"] == _QWEN_VISION:
+        log.info("vision analyze gallery %s -> qwen (eligible production provider)", gid)
+        qwen_writeback.writeback_gallery(gid)
+        # Preserve the post-analysis upsell hop the Argus path fires, so promoting Qwen doesn't
+        # silently drop offers. Shadow is N/A once Qwen IS production (it shadows the challenger).
+        if plutus_recommend.is_enabled():
+            enqueue("plutus_recommend_gallery", {"gallery_id": gid})
+    else:
+        argus_analyze.run_for_gallery(gid, skip_dedup=bool(p.get("skip_dedup")))
+
+
 HANDLERS = {
     "image_derivatives": _h_image,
     "social_crops": _h_crops,
@@ -147,9 +175,10 @@ HANDLERS = {
     "zip_build": _h_zip,
     "notion_sync_invoice": lambda p: notion_sync.sync_invoice(p["invoice_id"]),
     "notion_sync_gallery": lambda p: notion_sync.sync_gallery(p["gallery_id"]),
-    "argus_analyze_gallery": lambda p: argus_analyze.run_for_gallery(
-        p["gallery_id"], skip_dedup=bool(p.get("skip_dedup"))
-    ),
+    # Production vision analysis, dispatched through the cutover interlock (ADR 0016): Argus by
+    # default, the Qwen production writeback only once Qwen is the eligible provider. Same job
+    # kind as before, so existing enqueuers (galleries publish) and in-flight jobs are unaffected.
+    "argus_analyze_gallery": _h_vision_analyze,
     "argus_writeback_gallery": lambda p: argus_writeback.run_for_gallery(
         p["gallery_id"], int(p["run_id"])
     ),
