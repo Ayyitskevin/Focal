@@ -345,6 +345,7 @@ async def gallery_detail(request: Request, gallery_id: int):
             "argus_url": config.ARGUS_URL,
             "platekit_enabled": platekit.is_enabled(),
             "platekit_url": config.PLATEKIT_API_BASE,
+            "cull_enabled": config.CULL_UI,
         },
     )
 

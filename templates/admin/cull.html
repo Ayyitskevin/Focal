@@ -1,0 +1,175 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Cull · {{ g.title }} · Mise admin{% endblock %}
+{% block admin_head %}
+<style>
+  /* Cull deck — scoped to this page. A dark stage so the focused photo pops while
+     judging; the chrome stays in the cream-editorial admin palette. */
+  .cull-wrap { padding: 0 clamp(12px, 3vw, 32px) 48px; }
+  .cull-banner {
+    margin: 12px 0 18px; padding: 10px 14px; border-radius: 10px;
+    background: #f7ecd2; color: #6b531a; border: 1px solid #e4d4a6;
+    font-size: 14px; line-height: 1.4;
+  }
+  .cull-banner strong { color: #5a4513; }
+  .cull-counts { display: flex; gap: 18px; flex-wrap: wrap; margin: 0 0 16px; font-size: 14px; }
+  .cull-counts b { font-variant-numeric: tabular-nums; }
+  .cull-counts .k { color: #2f7d57; } .cull-counts .x { color: #a23b3b; }
+  .cull-counts .u { color: #8A9183; }
+
+  .cull-stage {
+    position: relative; background: #16181a; border-radius: 14px; overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 46vh; max-height: 64vh;
+  }
+  .cull-stage img { max-width: 100%; max-height: 64vh; object-fit: contain; display: block; }
+  .cull-stage.is-cut::after {
+    content: "CUT"; position: absolute; top: 14px; left: 14px;
+    background: #a23b3b; color: #fff; font-weight: 700; letter-spacing: .08em;
+    padding: 4px 10px; border-radius: 6px; font-size: 13px;
+  }
+  .cull-stage.is-keep::after {
+    content: "KEEP"; position: absolute; top: 14px; left: 14px;
+    background: #2f7d57; color: #fff; font-weight: 700; letter-spacing: .08em;
+    padding: 4px 10px; border-radius: 6px; font-size: 13px;
+  }
+  .cull-scorebadge {
+    position: absolute; top: 14px; right: 14px; background: rgba(0,0,0,.6); color: #fff;
+    padding: 4px 10px; border-radius: 6px; font-size: 13px; font-variant-numeric: tabular-nums;
+  }
+  .cull-meta {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    margin: 10px 2px; font-size: 13px; color: #5b6157;
+  }
+  .cull-meta .file { font-family: ui-monospace, monospace; word-break: break-all; }
+
+  .cull-controls { display: flex; gap: 10px; flex-wrap: wrap; margin: 4px 0 22px; }
+  .cull-btn {
+    border: 1px solid #d6d2c4; background: #fff; border-radius: 10px; cursor: pointer;
+    padding: 10px 16px; font-size: 14px; font-weight: 600; color: #18241E;
+  }
+  .cull-btn:hover { background: #f4f1e8; }
+  .cull-btn kbd {
+    margin-left: 8px; font-size: 11px; background: #eee7d4; border: 1px solid #ddd3b6;
+    border-radius: 4px; padding: 1px 6px; color: #6b531a; font-family: ui-monospace, monospace;
+  }
+  .cull-btn.keep { border-color: #b6dcc6; } .cull-btn.keep:hover { background: #e9f5ee; }
+  .cull-btn.cut  { border-color: #e3b9b9; } .cull-btn.cut:hover  { background: #f7e9e9; }
+
+  .cull-threshold {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    background: #fbf8f0; border: 1px solid #e8e2d2; border-radius: 12px;
+    padding: 14px 16px; margin: 0 0 24px;
+  }
+  .cull-threshold input[type=range] { flex: 1 1 220px; min-width: 180px; }
+  .cull-threshold .lo { color: #5b6157; font-size: 13px; }
+
+  .cull-gridhead { display:flex; align-items:baseline; justify-content:space-between; margin: 8px 2px; }
+  .cull-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+  .cull-cell {
+    position: relative; aspect-ratio: 1/1; border: 2px solid transparent; border-radius: 8px;
+    overflow: hidden; cursor: pointer; background: #ece8dd; padding: 0;
+  }
+  .cull-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .cull-cell.is-current { border-color: #18241E; }
+  .cull-cell[data-state="cut"]  { outline: 3px solid #a23b3b; outline-offset: -3px; }
+  .cull-cell[data-state="cut"] img { opacity: .42; }
+  .cull-cell[data-state="keep"] { outline: 3px solid #2f7d57; outline-offset: -3px; }
+  .cull-cell.is-selected::after {
+    content: ""; position: absolute; inset: 0; background: rgba(162,59,59,.28);
+    border: 2px dashed #a23b3b;
+  }
+  .cull-cell .badge {
+    position: absolute; bottom: 3px; right: 3px; font-size: 10px; line-height: 1;
+    padding: 2px 4px; border-radius: 4px; color: #fff; font-variant-numeric: tabular-nums;
+    background: rgba(0,0,0,.55);
+  }
+  .cull-empty { padding: 48px 0; text-align: center; color: #8A9183; }
+</style>
+{% endblock %}
+{% block topbar %}
+<header class="admin-topbar pgtop">
+  <div class="pgtop-lead">
+    <a class="gd-back" href="/admin/galleries/{{ g.id }}" aria-label="Back to gallery">&larr;</a>
+    <div class="gd-lead-text">
+      <p class="gd-eyebrow">Cull</p>
+      <h1>{{ g.title }}</h1>
+    </div>
+  </div>
+  <div class="pgtop-actions">
+    <a class="pgtop-link" href="/admin/galleries/{{ g.id }}">Back to gallery</a>
+  </div>
+</header>
+{% endblock %}
+{% block admin_body %}
+<main class="admin-main">
+<div class="cull-wrap" id="cull-app" data-gallery-id="{{ g.id }}">
+
+  <p class="cull-banner">
+    <strong>Cut is reversible and does not hide photos from clients yet.</strong>
+    It flags the frame and records the decision (audited); originals are never deleted. The
+    client-delivery gate ships separately. Use <em>delete</em> on the gallery page to remove a file.
+  </p>
+
+  {% if not queue %}
+    <div class="cull-empty">No ready photos to cull in this gallery yet.</div>
+  {% else %}
+
+  <div class="cull-counts" aria-live="polite">
+    <span>Total <b id="c-total">{{ counts.total }}</b></span>
+    <span class="k">Keep <b id="c-keep">{{ counts.keep }}</b></span>
+    <span class="x">Cut <b id="c-cut">{{ counts.cut }}</b></span>
+    <span class="u">Undecided <b id="c-undecided">{{ counts.total - counts.keep - counts.cut }}</b></span>
+    <span class="lo">{{ counts.scored }} of {{ counts.total }} scored by AI</span>
+  </div>
+
+  <div class="cull-stage" id="cull-stage">
+    <img id="cull-photo" alt="Photo being culled" decoding="async">
+    <span class="cull-scorebadge" id="cull-scorebadge"></span>
+  </div>
+
+  <div class="cull-meta">
+    <span class="file" id="cull-file"></span>
+    <span id="cull-progress"></span>
+  </div>
+
+  <div class="cull-controls">
+    <button type="button" class="cull-btn keep" data-act="keep">Keep <kbd>K</kbd></button>
+    <button type="button" class="cull-btn cut" data-act="cut">Cut <kbd>X</kbd></button>
+    <button type="button" class="cull-btn" data-nav="next">Skip <kbd>H / →</kbd></button>
+    <button type="button" class="cull-btn" data-nav="prev">Back <kbd>←</kbd></button>
+    <button type="button" class="cull-btn" data-act="restore">Undecide <kbd>R</kbd></button>
+    <button type="button" class="cull-btn" data-undo>Undo last <kbd>U</kbd></button>
+  </div>
+
+  <div class="cull-threshold">
+    <span class="lo">Pre-select photos scoring below
+      <b id="thr-label">0%</b></span>
+    <input type="range" id="cull-threshold" min="0" max="100" step="1" value="0"
+           aria-label="Score threshold percent">
+    <span class="lo"><b id="thr-count">0</b> selected</span>
+    <button type="button" class="cull-btn cut" id="thr-cut" disabled>Cut selected</button>
+    <button type="button" class="cull-btn" id="thr-clear" disabled>Clear</button>
+  </div>
+
+  <div class="cull-gridhead">
+    <h3 style="margin:0">All frames</h3>
+    <span class="lo">click a frame to jump · ranked best&nbsp;→&nbsp;worst</span>
+  </div>
+  <div class="cull-grid" id="cull-grid">
+    {% for q in queue %}
+    <button type="button" class="cull-cell" data-id="{{ q.id }}" data-idx="{{ loop.index0 }}"
+            data-state="{{ q.state or '' }}"
+            {% if q.score is not none %}data-score="{{ q.score }}"{% endif %}
+            aria-label="Frame {{ loop.index }}">
+      <img loading="lazy" src="/admin/thumb/{{ g.id }}/{{ q.id }}" alt="">
+      <span class="badge">{% if q.score is not none %}{{ (q.score * 100) | round | int }}{% else %}—{% endif %}</span>
+    </button>
+    {% endfor %}
+  </div>
+
+  <script type="application/json" id="cull-data">{{ queue | tojson }}</script>
+  {% endif %}
+</div>
+</main>
+<script src="/static/cull_deck.js?v={{ static_rev }}" defer></script>
+{% endblock %}

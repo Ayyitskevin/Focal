@@ -22,6 +22,9 @@
   <div class="pgtop-actions gd-actions">
     {{ cp.copy_link(base_url ~ "/g/" ~ g.slug, g.pin if show_pin else None) }}
     <button type="button" class="pgtop-link" data-reveal="g-upload">Upload</button>
+    {% if cull_enabled and not is_drop %}
+    <a class="pgtop-link" href="/admin/galleries/{{ g.id }}/cull">Cull</a>
+    {% endif %}
     {% if can_email %}
     <button type="button" class="pgtop-new" data-reveal="g-send-email">Send to client</button>
     {% endif %}
