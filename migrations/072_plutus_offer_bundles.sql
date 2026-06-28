@@ -1,0 +1,15 @@
+-- 072_plutus_offer_bundles.sql — persist Plutus's proposed bundles (with SKUs) on galleries.
+--
+-- The offer scorecard's revenue figure is a project-level PROXY (ADR 0020) because Mise stores
+-- only an offer SUMMARY on galleries (plutus_last_bundle_count / plutus_last_estimated_cents) —
+-- the bundles themselves, and the stable per-bundle SKU that links an accepted offer to an
+-- invoice line, live only at the offer_url. This column persists the validated bundles JSON so
+-- that linkage can exist (ADR 0022, piece 1 of SKU revenue attribution).
+--
+-- JSON array mirroring offers.schema.json bundles: [{sku, label, estimated_cents,
+-- line_items:[{label, qty, unit_cents}]}]. Written by plutus_recommend ONLY after a
+-- deterministic validation pass (plutus_recommend.parse_bundles); malformed bundles store NULL
+-- and never block the existing summary columns. Additive, forward-only, nullable; existing rows
+-- read NULL and behavior is unchanged until a validated offer with bundles lands. Recording
+-- bundles NEVER charges, sends, or creates an invoice — offers stay proposal-only (audit §11.4).
+ALTER TABLE galleries ADD COLUMN plutus_last_bundles TEXT;

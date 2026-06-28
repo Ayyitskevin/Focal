@@ -147,6 +147,9 @@ class LegacyPlutusOffersAdapter:
                 "estimated_total_cents": estimated_cents,
                 "review_url": payload.get("review_url"),
                 "pitch_url": payload.get("pitch_url"),
+                # Pass the raw bundles through so the facade recording path can persist the
+                # validated catalogue (plutus_recommend.parse_bundles); ADR 0022 piece 1.
+                "bundles": bundles,
             },
             model=self.name,
             latency_ms=latency,
