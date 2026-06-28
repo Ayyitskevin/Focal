@@ -129,6 +129,12 @@ ODYSSEUS_TIMEOUT = int(os.environ.get("MISE_ODYSSEUS_TIMEOUT", "210"))
 # ROADMAP.md Phase 1).
 PROVIDER_FACADE_CONTENT = _b("MISE_PROVIDER_FACADE_CONTENT", "false")
 
+# AI-assisted culling surface (operator keep/cut review over the vision keeper scores). Default
+# OFF — the cull write routes 404 until armed, so the feature is inert on every host until the
+# operator flips it. The score it ranks on (argus_keeper_score) is written regardless; this only
+# gates the operator-decision UI/routes.
+CULL_UI = _b("MISE_CULL_UI", "false")
+
 # Argus vision analyze (Phase 6). BOTH url+token must be set to arm publish hooks and
 # the gallery admin "Analyze now" button (see argus_analyze.is_enabled); either unset =
 # dormant, no outbound call. Mise POSTs mise_gallery_id to Argus /analyze-folder; Argus
