@@ -157,6 +157,18 @@ def test_cull_requires_admin(tmp_path, monkeypatch):
         jobs.stop()
 
 
+def test_cull_decision_bumps_content_rev(admin_client):
+    # the full-gallery ZIP is cached by galleries.content_rev; a cut/restore must bump it so the
+    # next download rebuilds without (or with) the frame (the delivery gate's cache invalidation).
+    gid, ids = _gallery_with_assets(1)
+    before = db.one("SELECT content_rev FROM galleries WHERE id=?", (gid,))["content_rev"]
+    admin_client.post(f"/admin/galleries/{gid}/assets/{ids[0]}/cull", data={"action": "cut"})
+    after_cut = db.one("SELECT content_rev FROM galleries WHERE id=?", (gid,))["content_rev"]
+    admin_client.post(f"/admin/galleries/{gid}/assets/{ids[0]}/cull", data={"action": "restore"})
+    after_restore = db.one("SELECT content_rev FROM galleries WHERE id=?", (gid,))["content_rev"]
+    assert after_cut == before + 1 and after_restore == before + 2
+
+
 def test_decision_returns_204_for_deck_fetch(admin_client):
     # the deck posts with HX-Request and wants an empty 204 (no full-page reload per keystroke);
     # a plain form post still gets a 303 (covered elsewhere). Both persist the decision.

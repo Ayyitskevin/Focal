@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 
-from .. import config, db, security
+from .. import config, db, delivery_gate, security
 from .gallery import get_live_gallery, is_expired
 
 router = APIRouter(prefix="/media")
@@ -21,8 +21,11 @@ def _resolve(slug: str, variant: str, asset_id: int, request: Request):
     if is_expired(g):
         raise HTTPException(status_code=410)
     security.require_visitor(request, g["id"])
+    # A cut frame is not served — 404 even on a guessed/cached URL (gate is flag-gated).
     a = db.one(
-        "SELECT * FROM assets WHERE id=? AND gallery_id=? AND status='ready'", (asset_id, g["id"])
+        "SELECT * FROM assets WHERE id=? AND gallery_id=? AND status='ready'"
+        + delivery_gate.clause(),
+        (asset_id, g["id"]),
     )
     if not a:
         raise HTTPException(status_code=404)
@@ -46,7 +49,9 @@ async def poster(request: Request, slug: str, asset_id: int):
     g = get_live_gallery(slug)
     security.require_visitor(request, g["id"])
     a = db.one(
-        "SELECT * FROM assets WHERE id=? AND gallery_id=? AND kind='video'", (asset_id, g["id"])
+        "SELECT * FROM assets WHERE id=? AND gallery_id=? AND kind='video'"
+        + delivery_gate.clause(),
+        (asset_id, g["id"]),
     )
     if not a:
         raise HTTPException(status_code=404)

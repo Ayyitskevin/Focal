@@ -4,7 +4,7 @@ import logging
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from .. import audit, config, db, jobs, reopen_notify, security
+from .. import audit, config, db, delivery_gate, jobs, reopen_notify, security
 from ..render import templates
 
 log = logging.getLogger("mise.public.gallery")
@@ -33,8 +33,9 @@ async def view(request: Request, slug: str):
     if not visitor:
         return templates.TemplateResponse(request, "public/pin.html", {"g": g, "error": None})
     sections = db.all_("SELECT * FROM sections WHERE gallery_id=? ORDER BY position", (g["id"],))
+    # Cut frames (cull deck) never reach the client — gate is flag-gated, NULL/keep always deliver.
     assets = db.all_(
-        """SELECT * FROM assets WHERE gallery_id=? AND status='ready'
+        f"""SELECT * FROM assets WHERE gallery_id=? AND status='ready'{delivery_gate.clause()}
                         ORDER BY section_id, position, id""",
         (g["id"],),
     )
@@ -128,8 +129,8 @@ def _progress_oob(g_id: int, section_id: int | None, visitor_id: int) -> str:
     if not s or not s["proof_target"]:
         return ""
     picks = db.one(
-        """SELECT COUNT(*) AS n FROM favorites f JOIN assets a ON a.id=f.asset_id
-                      WHERE f.visitor_id=? AND a.section_id=?""",
+        f"""SELECT COUNT(*) AS n FROM favorites f JOIN assets a ON a.id=f.asset_id
+                      WHERE f.visitor_id=? AND a.section_id=?{delivery_gate.clause("a")}""",
         (visitor_id, section_id),
     )["n"]
     cls = "ok" if picks >= s["proof_target"] else "muted"
@@ -144,9 +145,9 @@ async def toggle_fav(request: Request, slug: str, asset_id: int):
     g = get_live_gallery(slug)
     visitor = security.require_visitor(request, g["id"])
     a = db.one(
-        """SELECT a.id, a.kind, a.status, a.section_id, s.proof_target
+        f"""SELECT a.id, a.kind, a.status, a.section_id, s.proof_target
                   FROM assets a LEFT JOIN sections s ON s.id=a.section_id
-                  WHERE a.id=? AND a.gallery_id=?""",
+                  WHERE a.id=? AND a.gallery_id=?{delivery_gate.clause("a")}""",
         (asset_id, g["id"]),
     )
     if not a:
@@ -161,9 +162,9 @@ async def toggle_fav(request: Request, slug: str, asset_id: int):
     # Proofing cap: refuse the fav if the visitor already hit the section's target.
     if a["proof_target"]:
         picks = db.one(
-            """SELECT COUNT(*) AS n FROM favorites f
+            f"""SELECT COUNT(*) AS n FROM favorites f
                           JOIN assets x ON x.id=f.asset_id
-                          WHERE f.visitor_id=? AND x.section_id=?""",
+                          WHERE f.visitor_id=? AND x.section_id=?{delivery_gate.clause("x")}""",
             (visitor["id"], a["section_id"]),
         )["n"]
         if picks >= a["proof_target"]:
@@ -280,7 +281,8 @@ def _live_video_asset(request: Request, slug: str, asset_id: int):
         raise HTTPException(status_code=410)
     visitor = security.require_visitor(request, g["id"])
     a = db.one(
-        "SELECT id FROM assets WHERE id=? AND gallery_id=? AND kind='video' AND status='ready'",
+        "SELECT id FROM assets WHERE id=? AND gallery_id=? AND kind='video' AND status='ready'"
+        + delivery_gate.clause(),
         (asset_id, g["id"]),
     )
     if not a:
