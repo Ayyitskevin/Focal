@@ -2,6 +2,7 @@
 
 import datetime as dt
 import hashlib
+import json
 import logging
 import mimetypes
 import re
@@ -11,11 +12,96 @@ from urllib.parse import quote
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
-from .. import config, db, jobs, presets, security
+from .. import clients, config, db, jobs, presets, security
 from ..render import templates
 
 log = logging.getLogger("mise.public.portal")
 router = APIRouter(prefix="/portal")
+
+# Friendly labels for the client-facing licence view (the admin stores slugs).
+_TIER_LABEL = {
+    "standard": "Standard",
+    "extended": "Extended",
+    "exclusive": "Exclusive",
+    "unpublished_commercial": "Unpublished / commercial",
+}
+# Columns shown to the client. fee_cents is DELIBERATELY excluded — the client sees what they're
+# licensed for, never the licensing fee.
+_LICENSE_COLS = (
+    "l.id, l.title, l.scope, l.usage_tier, l.exclusivity, l.territory, l.channels, "
+    "l.starts_on, l.ends_on, l.perpetual"
+)
+
+
+def _friendly_token(s: str) -> str:
+    """A stored slug ('north_america', 'paid_social') → a readable label."""
+    return s.replace("_", " ").strip().title()
+
+
+def _friendly_license(row) -> dict:
+    """Shape one active licence row for the client view: parse the JSON channel/territory lists,
+    humanize the tier, and render the term. Never includes the fee."""
+    try:
+        territory = [_friendly_token(t) for t in json.loads(row["territory"] or "[]")]
+    except (ValueError, TypeError):
+        territory = []
+    try:
+        channels = [_friendly_token(c) for c in json.loads(row["channels"] or "[]")]
+    except (ValueError, TypeError):
+        channels = []
+    if row["perpetual"]:
+        term = "Perpetual"
+    elif row["starts_on"] and row["ends_on"]:
+        term = f"{row['starts_on']} → {row['ends_on']}"
+    elif row["ends_on"]:
+        term = f"through {row['ends_on']}"
+    else:
+        term = "—"
+    return {
+        "title": row["title"],
+        "scope": row["scope"] or "",
+        "tier": _TIER_LABEL.get(row["usage_tier"], _friendly_token(row["usage_tier"])),
+        "exclusive": row["exclusivity"] == "exclusive",
+        "territory": territory,
+        "channels": channels,
+        "term": term,
+    }
+
+
+def _client_licenses(client_id: int) -> list[dict]:
+    """Active usage-rights that reach this client, for the client-facing portal — the structured
+    twin of the admin licence list. Three arms (deduped by id): licences the client HOLDS, a
+    group ``holder_and_descendants`` licence held by an ancestor, and a ``specific`` licence that
+    lists this client. Only ``status='active'``, non-deleted rows are shown (draft/expired/
+    terminated never surface to the client), and the fee is never selected."""
+    rows: dict[int, dict] = {}
+
+    def _add(sql: str, params: tuple) -> None:
+        for r in db.all_(sql, params):
+            rows[r["id"]] = _friendly_license(r)
+
+    _add(
+        f"SELECT {_LICENSE_COLS} FROM licenses l "
+        "WHERE l.holder_client_id=? AND l.status='active' AND l.deleted_at IS NULL",
+        (client_id,),
+    )
+    ancestors = clients.ancestor_ids(client_id)
+    if ancestors:
+        ph = ",".join("?" * len(ancestors))
+        _add(
+            f"SELECT {_LICENSE_COLS} FROM licenses l "
+            "WHERE l.coverage_scope='holder_and_descendants' "
+            f"  AND l.holder_client_id IN ({ph}) AND l.status='active' AND l.deleted_at IS NULL",
+            tuple(ancestors),
+        )
+    _add(
+        f"SELECT {_LICENSE_COLS} FROM licenses l "
+        "JOIN license_clients lc ON lc.license_id=l.id "
+        "WHERE lc.client_id=? AND l.coverage_scope='specific' "
+        "  AND l.status='active' AND l.deleted_at IS NULL",
+        (client_id,),
+    )
+    return sorted(rows.values(), key=lambda x: (x["title"] or "").lower())
 
 
 def get_live_portal(slug: str) -> "db.sqlite3.Row":
@@ -77,6 +163,9 @@ async def view(request: Request, slug: str):
     brand = db.all_(
         "SELECT * FROM brand_assets WHERE client_id=? ORDER BY created_at DESC", (p["client_id"],)
     )
+    # Structured usage-rights the client actually holds — what they can do with the content,
+    # read from the active licences (the free-text usage_rights note stays as a fallback).
+    licenses = _client_licenses(p["client_id"])
     # Aggregate the client's favorites across every published gallery —
     # one-line trust signal at the top of the Social crops section so the
     # client knows how many selects they've already made.
@@ -135,6 +224,7 @@ async def view(request: Request, slug: str):
             "galleries": galleries,
             "crops": crops,
             "brand": brand,
+            "licenses": licenses,
             "ratios": [ps["slug"] for ps in presets.active()],
             "prev_visit": prev_visit,
             "changes": changes,

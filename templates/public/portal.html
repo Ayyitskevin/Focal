@@ -93,7 +93,28 @@
   </ul>
   {% endif %}
 
-  {% if p.usage_rights %}
+  {% if licenses %}
+  <h2 class="section-name">Your usage rights</h2>
+  <p class="muted">What you're licensed to do with the delivered content. Questions about scope or
+    renewals? Just reply to our email thread.</p>
+  <ul class="license-list">
+    {% for lic in licenses %}
+    <li class="license-card">
+      <div class="license-head">
+        <strong>{{ lic.title }}</strong>
+        <span class="license-tier">{{ lic.tier }}{% if lic.exclusive %} · Exclusive{% endif %}</span>
+      </div>
+      {% if lic.scope %}<p class="license-scope">{{ lic.scope }}</p>{% endif %}
+      <dl class="license-meta">
+        {% if lic.channels %}<div><dt>Channels</dt><dd>{{ lic.channels | join(", ") }}</dd></div>{% endif %}
+        {% if lic.territory %}<div><dt>Territory</dt><dd>{{ lic.territory | join(", ") }}</dd></div>{% endif %}
+        <div><dt>Term</dt><dd>{{ lic.term }}</dd></div>
+      </dl>
+    </li>
+    {% endfor %}
+  </ul>
+  {% if p.usage_rights %}<p class="usage-rights muted">{{ p.usage_rights }}</p>{% endif %}
+  {% elif p.usage_rights %}
   <h2 class="section-name">Usage rights</h2>
   <p class="usage-rights">{{ p.usage_rights }}</p>
   {% endif %}
