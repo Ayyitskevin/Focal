@@ -17,7 +17,8 @@ router = APIRouter()
 def _invoice_or_404(slug: str) -> "db.sqlite3.Row":
     d = db.one(
         """SELECT i.*, p.title AS project_title, c.name AS client_name,
-                         c.company, c.email AS client_email
+                         c.company, c.email AS client_email,
+                         c.billing_address, c.tax_id
                   FROM invoices i
                   JOIN projects p ON p.id=i.project_id
                   JOIN clients c ON c.id=p.client_id

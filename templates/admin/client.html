@@ -53,6 +53,10 @@
     <label>Email <input type="email" name="email" value="{{ c.email or '' }}"></label>
     <label>Phone <input type="text" name="phone" value="{{ c.phone or '' }}"></label>
     <label>Notes <textarea name="notes" rows="3">{{ c.notes or '' }}</textarea></label>
+    <label>Billing email <input type="email" name="billing_email" value="{{ c.billing_email or '' }}" placeholder="accounts-payable contact (defaults to Email)"></label>
+    <label>Billing address <textarea name="billing_address" rows="3"
+           placeholder="Company AP address — shown on the invoice">{{ c.billing_address or '' }}</textarea></label>
+    <label>Tax ID <input type="text" name="tax_id" value="{{ c.tax_id or '' }}" placeholder="their VAT / EIN, if they need it on the invoice"></label>
     <label>Usage rights <textarea name="usage_rights" rows="3"
            placeholder="e.g. Social + web use, 12 months, no paid ads">{{ c.usage_rights or '' }}</textarea></label>
     <label>Platekit slug <input type="text" name="platekit_slug" value="{{ c.platekit_slug or '' }}" placeholder="blue-plate">

@@ -58,11 +58,14 @@
       <div class="inv-billrow">
         <div>
           <span class="inv-label">Billed to</span>
-          <p>{{ p.company or p.client_name }}<br><small>{{ p.client_name }}{% if p.client_email %} · {{ p.client_email }}{% endif %}</small></p>
+          <p>{{ p.company or p.client_name }}<br><small>{{ p.client_name }}{% if p.client_email %} · {{ p.client_email }}{% endif %}</small>
+          {% if p.billing_address %}<br><small>{{ p.billing_address|replace('\n', ', ') }}</small>{% endif %}
+          {% if p.tax_id %}<br><small>Tax ID {{ p.tax_id }}</small>{% endif %}</p>
         </div>
         <div>
           <span class="inv-label">Project</span>
-          <p>{{ p.title }}<br><small>{% if d.created_at %}Issued {{ d.created_at[:10] }}{% else %}Draft{% endif %}{% if d.due_date %} · Due {{ d.due_date }}{% endif %}</small></p>
+          <p>{{ p.title }}<br><small>{% if d.created_at %}Issued {{ d.created_at[:10] }}{% else %}Draft{% endif %}{% if d.due_date %} · Due {{ d.due_date }}{% endif %}{% if d.net_days %} · Net {{ d.net_days }}{% endif %}</small>
+          {% if d.po_number %}<br><small>PO {{ d.po_number }}</small>{% endif %}</p>
         </div>
       </div>
 
@@ -150,6 +153,13 @@
         <label>Deposit
           <input type="number" name="deposit" min="0" step="0.01" value="{{ d.deposit_cents|usd }}">
         </label>
+        <label>PO number
+          <input type="text" name="po_number" value="{{ d.po_number or '' }}" placeholder="client's purchase-order ref">
+        </label>
+        <label>Net terms (days)
+          <input type="number" name="net_days" min="0" max="365" step="1" value="{{ d.net_days or 0 }}" placeholder="0">
+          <small class="muted">Net 30 etc. — sets the due date to <em>sent + N days</em> when sent. 0 = use the due date above.</small>
+        </label>
         <label>Due date
           <input type="date" name="due_date" value="{{ d.due_date or '' }}">
         </label>
@@ -199,6 +209,7 @@
     {% set email_subject = "Invoice — " ~ p.title %}
     {% set email_intro = "Your invoice is ready — you can pay securely online (card or bank transfer):" %}
     {% set email_link = base_url ~ "/i/" ~ d.slug %}
+    {% set email_to = p.billing_email %}{# invoices go to the AP/billing contact when set #}
     {% include "admin/_email_form.html" %}
   </section>
   {% endif %}

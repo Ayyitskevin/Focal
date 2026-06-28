@@ -49,7 +49,8 @@ def get_client(client_id: int) -> "db.sqlite3.Row":
 
 def get_project(project_id: int) -> "db.sqlite3.Row":
     return db.get_or_404(
-        """SELECT p.*, c.name AS client_name, c.company, c.email AS client_email
+        """SELECT p.*, c.name AS client_name, c.company, c.email AS client_email,
+                  c.billing_email, c.billing_address, c.tax_id
                   FROM projects p JOIN clients c ON c.id=p.client_id WHERE p.id=?""",
         (project_id,),
     )
@@ -958,6 +959,9 @@ async def update_client(
     usage_rights: str = Form(""),
     market: str = Form(pricing.DEFAULT_MARKET),
     platekit_slug: str = Form(""),
+    billing_email: str = Form(""),
+    billing_address: str = Form(""),
+    tax_id: str = Form(""),
 ):
     get_client(client_id)
     # The market drives which base rate card the license-fee suggestion reads;
@@ -967,7 +971,8 @@ async def update_client(
         raise HTTPException(status_code=400, detail=f"unknown market {market!r}")
     db.run(
         """UPDATE clients SET name=?, company=?, email=?, phone=?, notes=?,
-              usage_rights=?, market=?, platekit_slug=? WHERE id=?""",
+              usage_rights=?, market=?, platekit_slug=?,
+              billing_email=?, billing_address=?, tax_id=? WHERE id=?""",
         (
             name.strip(),
             company.strip() or None,
@@ -977,6 +982,9 @@ async def update_client(
             usage_rights.strip() or None,
             market,
             platekit.normalize_slug(platekit_slug) or None,
+            billing_email.strip() or None,
+            billing_address.strip() or None,
+            tax_id.strip() or None,
             client_id,
         ),
     )
