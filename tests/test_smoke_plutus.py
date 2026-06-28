@@ -254,3 +254,60 @@ def test_add_offer_items_prefills_invoice_from_approved_offer(tmp_path, monkeypa
             == 400
         )
     jobs.stop()
+
+
+def test_build_invoice_from_approved_offer(tmp_path, monkeypatch):
+    """ADR 0022 piece 2 / offer→invoice bridge: one-click 'Build invoice' from an approved
+    offer creates a draft invoice pre-filled with the offer's SKU-tagged lines; refused when the
+    gallery has no project or the offer isn't approved."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    _configure_tmp_db(tmp_path, monkeypatch)
+    cid = db.run("INSERT INTO clients (name) VALUES (?)", ("Acme",))
+    pid = db.run("INSERT INTO projects (client_id, title) VALUES (?,?)", (cid, "Acme shoot"))
+    bundles = [
+        {
+            "sku": "ALBUM",
+            "label": "Album",
+            "estimated_cents": 30000,
+            "line_items": [{"label": "10x10 album", "qty": 1, "unit_cents": 30000}],
+        }
+    ]
+    gid = db.run(
+        "INSERT INTO galleries (slug, title, pin, project_id, plutus_last_status, "
+        "plutus_offer_decision, plutus_last_bundles) VALUES (?,?,?,?, 'done', 'approved', ?)",
+        ("g1", "G1", "1234", pid, json.dumps(bundles)),
+    )
+    with TestClient(app) as c:
+        c.post("/admin/login", data={"password": "test-pw"}, follow_redirects=False)
+        r = c.post(f"/admin/studio/invoices/from-offer/{gid}", follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"].startswith("/admin/studio/invoices/")
+        inv = db.one("SELECT * FROM invoices WHERE project_id=? ORDER BY id DESC LIMIT 1", (pid,))
+        assert json.loads(inv["line_items"]) == [
+            {"label": "10x10 album", "qty": 1, "unit_cents": 30000, "sku": "ALBUM"}
+        ]
+        assert inv["total_cents"] == 30000 and inv["status"] == "draft"
+
+        # refused: gallery has no project
+        g2 = db.run(
+            "INSERT INTO galleries (slug,title,pin,plutus_last_status,plutus_offer_decision) "
+            "VALUES (?,?,?, 'done','approved')",
+            ("g2", "G2", "1"),
+        )
+        assert (
+            c.post(f"/admin/studio/invoices/from-offer/{g2}", follow_redirects=False).status_code
+            == 400
+        )
+        # refused: offer not approved
+        g3 = db.run(
+            "INSERT INTO galleries (slug,title,pin,project_id,plutus_last_status) "
+            "VALUES (?,?,?,?, 'done')",
+            ("g3", "G3", "1", pid),
+        )
+        assert (
+            c.post(f"/admin/studio/invoices/from-offer/{g3}", follow_redirects=False).status_code
+            == 400
+        )
+    jobs.stop()

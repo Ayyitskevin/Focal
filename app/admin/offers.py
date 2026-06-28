@@ -83,7 +83,7 @@ def _set_decision(gallery_id: int, decision: str | None) -> None:
 
 
 def _rows(status: str, decision: str = "any") -> list[dict]:
-    base = """SELECT g.id, g.slug, g.title, g.client_id, g.plutus_last_status,
+    base = """SELECT g.id, g.slug, g.title, g.client_id, g.project_id, g.plutus_last_status,
                   g.plutus_last_offer_url, g.plutus_last_pitch_url, g.plutus_last_bundle_count,
                   g.plutus_last_estimated_cents, g.plutus_last_error, g.plutus_last_at,
                   g.plutus_offer_decision, g.plutus_offer_decided_at,
@@ -137,6 +137,11 @@ def _rows(status: str, decision: str = "any") -> list[dict]:
                     and r["plutus_offer_decision"] == "approved"
                     and bool(r["plutus_last_offer_url"])
                     and bool((r["client_email"] or "").strip())
+                ),
+                # An approved offer on a project can be turned into a pre-filled draft invoice
+                # in one click (ADR 0022 piece 2 / the offer→invoice SKU bridge).
+                "can_build_invoice": (
+                    r["plutus_offer_decision"] == "approved" and r["project_id"] is not None
                 ),
             }
         )
