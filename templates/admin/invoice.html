@@ -190,6 +190,13 @@
         <p class="muted">No payments yet.</p>
         {% endif %}
       </section>
+      {% if ar_chase_url %}
+      <section class="inv-card inv-actions">
+        <span class="inv-label">Past-due follow-up</span>
+        <a class="pgtop-link" style="text-align:center" href="{{ ar_chase_url }}">Draft AR chase email &rarr;</a>
+        <p class="muted">Review before sending. This does not change the invoice.</p>
+      </section>
+      {% endif %}
       <section class="inv-card inv-actions">
         <form method="post" action="/admin/studio/invoices/{{ d.id }}/duplicate"
               onsubmit="return confirm('Make an editable copy of this invoice as a new draft? Payments stay with the original.')">

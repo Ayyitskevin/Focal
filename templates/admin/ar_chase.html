@@ -1,0 +1,68 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}AR chase - {{ c.company or c.name }} - Mise{% endblock %}
+{% block topbar %}
+<header class="admin-topbar pgtop">
+  <div class="pgtop-lead">
+    <a class="gd-back" href="/admin/studio/companies/{{ c.id }}" aria-label="Back to company">&larr;</a>
+    <div class="gd-lead-text">
+      <p class="gd-eyebrow">Company AR</p>
+      <h1>{{ c.company or c.name }}</h1>
+    </div>
+  </div>
+  <div class="pgtop-actions">
+    <a class="pgtop-link" href="{{ statement_href }}">Statement &rarr;</a>
+    <a class="pgtop-link" href="{{ statement_href }}?format=csv">CSV &rarr;</a>
+  </div>
+</header>
+{% endblock %}
+{% block admin_body %}
+<main class="admin-main">
+  {% if rows %}
+  <section>
+    <div class="muted" style="font-size:.8rem; margin:.3rem 0">Open past-due invoices</div>
+    <table style="width:100%; border-collapse:collapse; font-size:.9rem">
+      <thead><tr style="text-align:left; color:#6b7280; font-size:.78rem">
+        <th style="padding:.35rem .4rem">Invoice</th><th>Client</th><th>Due</th><th>Open</th><th>Pay link</th>
+      </tr></thead>
+      <tbody>
+      {% for i in rows %}
+      <tr style="border-top:1px solid #eef1f2">
+        <td style="padding:.4rem"><a href="/admin/studio/invoices/{{ i.id }}" style="color:inherit">{{ i.title or ('Invoice #' ~ i.id) }}</a></td>
+        <td>{{ i.client_name }}</td>
+        <td style="color:#9a6b2c">{{ i.due_date }}</td>
+        <td>${{ i.owed_cents | usd }}</td>
+        <td><a href="{{ base_url }}/i/{{ i.slug }}" target="_blank" rel="noreferrer" class="muted">client link</a></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="muted" style="font-size:.8rem">Total open: ${{ owed_cents | usd }}</p>
+  </section>
+
+  <section style="margin-top:1.2rem">
+    <h2 style="font-size:1.05rem; margin:.2rem 0 .6rem">Email draft</h2>
+    <form method="post" action="/admin/studio/companies/{{ c.id }}/ar-chase/email" class="stack-form"
+          style="max-width:760px"
+          onsubmit="return confirm('Send this AR follow-up to ' + this.to.value + '?')">
+      {% if invoice_id %}<input type="hidden" name="invoice_id" value="{{ invoice_id }}">{% endif %}
+      <label>To
+        <input type="email" name="to" value="{{ email_to }}" required>
+      </label>
+      <label>Subject
+        <input type="text" name="subject" value="{{ email_subject }}" required>
+      </label>
+      <label>Message
+        <textarea name="message" rows="14" required>{{ email_message }}</textarea>
+      </label>
+      <button type="submit">Send email</button>
+      <p class="muted" style="font-size:.8rem">Manual send only. Invoice and payment records stay unchanged.</p>
+    </form>
+  </section>
+  {% else %}
+  <section>
+    <p class="muted">No overdue open invoices for this company.</p>
+    <p><a class="pgtop-link" href="{{ statement_href }}">Open statement &rarr;</a></p>
+  </section>
+  {% endif %}
+</main>
+{% endblock %}

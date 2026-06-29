@@ -10,6 +10,7 @@
     </div>
   </div>
   <div class="pgtop-actions">
+    {% if overdue_rows %}<a class="pgtop-link" href="/admin/studio/companies/{{ c.id }}/ar-chase">Draft chase email &rarr;</a>{% endif %}
     <a class="pgtop-link" href="/admin/studio/companies/{{ c.id }}/statement">Statement &rarr;</a>
     <a class="pgtop-link" href="/admin/studio/clients/{{ c.id }}">Client detail &rarr;</a>
   </div>
@@ -146,7 +147,10 @@
   {# ---- overdue AR ---------------------------------------------------- #}
   {% if overdue_rows %}
   <section style="margin-top:1.2rem">
-    <div class="muted" style="font-size:.8rem; margin:.3rem 0">Past-due invoices</div>
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:.75rem; margin:.3rem 0">
+      <div class="muted" style="font-size:.8rem">Past-due invoices</div>
+      <a class="pgtop-link" href="/admin/studio/companies/{{ c.id }}/ar-chase">Draft chase email &rarr;</a>
+    </div>
     <table style="width:100%; border-collapse:collapse; font-size:.9rem">
       <tbody>
       {% for i in overdue_rows %}
