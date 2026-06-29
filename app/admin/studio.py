@@ -941,6 +941,18 @@ async def company_view(request: Request, client_id: int):
             ORDER BY p.shoot_date IS NULL, p.shoot_date, p.created_at DESC""",
         group_ids,
     )
+    # Deliverable progress per project (delivered vs spec) — shown against each active project.
+    deliverables_by_project = {
+        r["project_id"]: r
+        for r in db.all_(
+            f"""SELECT d.project_id, COALESCE(SUM(d.spec_qty), 0) AS spec,
+                       COALESCE(SUM(d.delivered_qty), 0) AS done, COUNT(*) AS n
+                FROM project_deliverables d JOIN projects p ON p.id=d.project_id
+                WHERE p.client_id IN ({ph}) AND d.deleted_at IS NULL
+                GROUP BY d.project_id""",
+            group_ids,
+        )
+    }
 
     # Recurring book: active plans across the group, each with this period's utilization. Local
     # import — recurring imports studio.get_project at module load, so a top-level import cycles.
@@ -1009,6 +1021,7 @@ async def company_view(request: Request, client_id: int):
             "overdue_rows": overdue_rows,
             "status_counts": status_counts,
             "active_projects": active_projects,
+            "deliverables_by_project": deliverables_by_project,
             "retainers": retainers,
             "mrr_cents": mrr_cents,
             "period": period,
@@ -1496,6 +1509,12 @@ async def project_detail(request: Request, project_id: int):
         "SELECT * FROM shot_list WHERE project_id=? AND deleted_at IS NULL ORDER BY sort_order, id",
         (project_id,),
     )
+    # Domain F deliverable spec (inline query, same rationale as shots — no deliverables->studio import).
+    deliverables = db.all_(
+        "SELECT * FROM project_deliverables WHERE project_id=? AND deleted_at IS NULL "
+        "ORDER BY sort_order, id",
+        (project_id,),
+    )
     payments = db.all_(
         """SELECT pm.* FROM payments pm
                           JOIN invoices i ON i.id=pm.invoice_id
@@ -1524,10 +1543,12 @@ async def project_detail(request: Request, project_id: int):
             "galleries": galleries,
             "plans": plans,
             "shots": shots,
+            "deliverables": deliverables,
             "timeline": timeline,
             "testimonial_reqs": testimonial_reqs,
             "shot_categories": usage_vocab.SHOT_CATEGORIES,
             "shot_priorities": usage_vocab.SHOT_PRIORITIES,
+            "deliverable_units": usage_vocab.DELIVERABLE_UNITS,
             "statuses": PROJECT_STATUSES,
             "base_url": config.BASE_URL,
         },

@@ -39,3 +39,19 @@ SHOT_CATEGORIES = [
     "Ambiance",
 ]
 SHOT_PRIORITIES = ["must", "want", "if-time"]
+
+# Deliverable units for a project's contracted deliverable spec (Domain F). Same shape as the
+# retainer quota units, but a project deliverable is the ONE-OFF spec for a shoot ("25 hero images,
+# 5 reels, 1 social-crop ZIP") rather than a recurring monthly commitment. App-validated in
+# app/admin/deliverables.py (no SQL CHECK), so the list evolves in one place.
+DELIVERABLE_UNITS = [
+    "images",
+    "reels",
+    "videos",
+    "stories",
+    "carousels",
+    "posts",
+    "hours",
+    "files",
+    "other",
+]

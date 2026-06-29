@@ -96,7 +96,11 @@
         <td style="padding:.4rem"><a href="/admin/studio/projects/{{ p.id }}" style="color:inherit">{{ p.title }}</a></td>
         <td>{{ p.client_name }}</td>
         <td>{{ p.status.replace('_', ' ') }}</td>
-        <td class="muted">{% if p.shoot_date %}shoot {{ p.shoot_date }}{% endif %}</td>
+        <td class="muted">
+          {% if p.shoot_date %}shoot {{ p.shoot_date }}{% endif %}
+          {% set dv = deliverables_by_project.get(p.id) %}
+          {% if dv and dv.spec %} · deliverables {{ dv.done }}/{{ dv.spec }}{% endif %}
+        </td>
       </tr>
       {% endfor %}
       </tbody>
