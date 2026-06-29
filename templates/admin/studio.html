@@ -1,7 +1,7 @@
 {% extends "admin/base_admin.html" %}
 {% block title %}Studio · Mise{% endblock %}
 {% block topbar %}
-{% set na_count = (licenses_expiring or [])|length + (press_confirm or [])|length + (retainer_drafts or [])|length + (quota_behind or [])|length + (content_due or [])|length + (conflicts or [])|length + (proofing_waiting or [])|length %}
+{% set na_count = (licenses_expiring or [])|length + (press_confirm or [])|length + (retainer_drafts or [])|length + (quota_behind or [])|length + (content_due or [])|length + (commercial_actions or [])|length + (conflicts or [])|length + (proofing_waiting or [])|length %}
 <header class="admin-topbar pgtop">
   <div class="pgtop-lead">
     <h1>Studio</h1>

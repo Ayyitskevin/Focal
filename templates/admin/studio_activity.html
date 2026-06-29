@@ -5,7 +5,7 @@
     "contract_signed": "Contract Signed", "retainer_paid": "Retainer Paid",
     "session_planning": "Session Planning", "project_closed": "Project Closed",
     "archived": "Archived"} %}
-{% set na_count = (licenses_expiring or [])|length + (press_confirm or [])|length + (retainer_drafts or [])|length + (quota_behind or [])|length + (content_due or [])|length + (conflicts or [])|length + (proofing_waiting or [])|length %}
+{% set na_count = (licenses_expiring or [])|length + (press_confirm or [])|length + (retainer_drafts or [])|length + (quota_behind or [])|length + (content_due or [])|length + (commercial_actions or [])|length + (conflicts or [])|length + (proofing_waiting or [])|length %}
 {% block topbar %}
 <header class="admin-topbar pgtop">
   <div class="pgtop-lead">
@@ -119,6 +119,24 @@
           <span class="muted">{{ q.company or q.client_name }} ·
             {{ q.worst.label }}{% if q.worst.title %} ({{ q.worst.title }}){% endif %} {{ q.worst.slot_date }}{% if q.slots|length > 1 %} +{{ q.slots|length - 1 }} more{% endif %}</span>
         </a>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {% if commercial_actions %}
+  <section class="upcoming conflicts" aria-label="Commercial actions">
+    <h2>&#9888; Commercial actions</h2>
+    <ul class="upcoming-strip">
+      {% for a in commercial_actions %}
+      <li class="upcoming-chip{% if a.tone == 'warn' %} upcoming-overdue{% endif %}">
+        <span class="upcoming-when">{{ a.meta or 'action' }}</span>
+        <a href="{{ a.href }}" title="Open the owning surface for this derived company action">
+          <strong>{{ a.title }}</strong>
+          <span class="muted">{{ a.company_name }} · {{ a.label }}</span>
+        </a>
+        <a class="muted" href="{{ a.company_href }}" title="Open the company command view">company</a>
       </li>
       {% endfor %}
     </ul>

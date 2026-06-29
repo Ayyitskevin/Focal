@@ -29,7 +29,9 @@ The related intake shortcuts are also local/operator-controlled:
 - shot-list templates clone normal audited rows into the project, then you edit them like any other
   shot list;
 - the company command view ranks the next few derived actions across money, retainers, active
-  project closeout gaps, and repeat-shoot cadence; each item links back to its owning surface.
+  project closeout gaps, and repeat-shoot cadence; each item links back to its owning surface;
+- the Studio Activity `Needs attention` panel rolls up the top commercial action per company so
+  the morning triage view shows which relationship to open first.
 
 ## 1. Start here every morning — `/admin/ai-ops`
 

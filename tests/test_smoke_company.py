@@ -191,6 +191,22 @@ def test_company_next_actions_rank_money_project_and_cadence(admin_client, monke
     assert positions == sorted(positions)
 
 
+def test_studio_activity_surfaces_top_commercial_actions(admin_client):
+    group = _client("Activity Group", company="Activity Hospitality")
+    project = _project(group, "Launch closeout", status="project_closed")
+    db.run(
+        "INSERT INTO invoices (project_id, slug, title, total_cents, status, due_date)"
+        " VALUES (?,?,?,?,?,?)",
+        (project, "activity-past-due", "Activity invoice", 140000, "sent", "2000-01-01"),
+    )
+
+    html = admin_client.get("/admin/studio/activity").text
+    assert "Commercial actions" in html
+    assert "Chase past-due invoice" in html
+    assert "Activity Hospitality" in html
+    assert "Activity invoice" in html
+
+
 def test_company_view_requires_admin(tmp_path, monkeypatch):
     _configure_tmp_db(tmp_path, monkeypatch)
     with TestClient(app) as anon:
