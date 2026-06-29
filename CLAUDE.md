@@ -68,6 +68,13 @@ Do NOT:
 | Sibling repo prompts | `docs/sibling-briefs/` |
 | ADR index | `docs/adr/README.md` |
 
+## Current commercial spine handoff
+
+Recent F&B/commercial work is documented in ADRs 0034–0039. That spine now includes
+derived repeat-client cadence, canned shot-list templates, and a project closeout-readiness panel.
+These are deterministic/operator surfaces only: no auto-send, auto-charge, auto-publish, or
+auto-close.
+
 ## Provider facade quick reference
 
 ```python

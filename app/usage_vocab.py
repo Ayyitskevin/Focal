@@ -40,6 +40,91 @@ SHOT_CATEGORIES = [
 ]
 SHOT_PRIORITIES = ["must", "want", "if-time"]
 
+# Canned commercial shot-list templates for intake. Cloning a template creates normal
+# audited shot_list rows; it does not sync, publish, or overwrite project-specific edits.
+SHOT_TEMPLATES = {
+    "hero_detail": {
+        "label": "Hero + detail",
+        "shots": [
+            {
+                "title": "Plated hero, three-quarter",
+                "category": "Hero Dish",
+                "priority": "must",
+                "sort_order": 10,
+                "note": "Primary campaign/menu image.",
+            },
+            {
+                "title": "Overhead hero",
+                "category": "Hero Dish",
+                "priority": "want",
+                "sort_order": 20,
+                "note": "Layout-friendly alternate crop.",
+            },
+            {
+                "title": "Texture/detail close-up",
+                "category": "Detail",
+                "priority": "want",
+                "sort_order": 30,
+                "note": "Sauce, garnish, crumb, steam, or pour.",
+            },
+            {
+                "title": "Chef/action process",
+                "category": "Process",
+                "priority": "if-time",
+                "sort_order": 40,
+                "note": "Hands, plating, flame, pour, or finish.",
+            },
+            {
+                "title": "Room/table context",
+                "category": "Ambiance",
+                "priority": "if-time",
+                "sort_order": 50,
+                "note": "Hospitality context for social or web.",
+            },
+        ],
+    },
+    "menu_three_part": {
+        "label": "Menu 3-part",
+        "shots": [
+            {
+                "title": "Full menu lineup",
+                "category": "Hero Dish",
+                "priority": "must",
+                "sort_order": 10,
+                "note": "Set the seasonal/menu story in one frame.",
+            },
+            {
+                "title": "Hero entree",
+                "category": "Hero Dish",
+                "priority": "must",
+                "sort_order": 20,
+                "note": "Strong single-dish anchor.",
+            },
+            {
+                "title": "Drink pairing",
+                "category": "Drinks",
+                "priority": "want",
+                "sort_order": 30,
+                "note": "Cocktail, wine, coffee, or N/A pairing.",
+            },
+            {
+                "title": "Ingredient/process detail",
+                "category": "Detail",
+                "priority": "want",
+                "sort_order": 40,
+                "note": "Craft cue that makes the menu feel specific.",
+            },
+            {
+                "title": "Interior or table context",
+                "category": "Ambiance",
+                "priority": "if-time",
+                "sort_order": 50,
+                "note": "Use when the venue/environment is part of the sell.",
+            },
+        ],
+    },
+}
+
 # Deliverable units for a project's contracted deliverable spec (Domain F). Same shape as the
 # retainer quota units, but a project deliverable is the ONE-OFF spec for a shoot ("25 hero images,
 # 5 reels, 1 social-crop ZIP") rather than a recurring monthly commitment. App-validated in

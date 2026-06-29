@@ -15,6 +15,20 @@ the operator-facing companion to the architecture docs — see
 
 ---
 
+## Commercial project closeout — `/admin/studio/projects/{id}`
+
+The project page has a **Closeout readiness** panel (ADR 0039) that reconciles the commercial
+spine before you close a shoot: shot list, deliverable spec progress, usage licence, invoice,
+open AR, linked gallery, and client workspace. It is read-only. Each row links to the surface that
+owns the fix, and it never sends, charges, publishes, or changes project status.
+
+The related intake shortcuts are also local/operator-controlled:
+
+- company and client-list cadence cues are derived from past `shoot_date`s and suppress themselves
+  once a future shoot is scheduled;
+- shot-list templates clone normal audited rows into the project, then you edit them like any other
+  shot list.
+
 ## 1. Start here every morning — `/admin/ai-ops`
 
 `/admin/ai-ops` is the one pane over every AI capability (ADR 0013). It shows, with links

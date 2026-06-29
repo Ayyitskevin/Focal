@@ -1,9 +1,13 @@
 """Shared admin helpers (start of module splits for large admin files)."""
 
 import datetime as dt
+import statistics
 from pathlib import Path
 
+from .. import clients as client_tree
 from .. import db
+
+CADENCE_SOON_DAYS = 14
 
 _STATUS_STYLE = {
     "Delivered": ("#2f7d57", "#e1f2e9"),
@@ -62,6 +66,132 @@ def short_date(stored: str) -> str:
 def today() -> dt.date:
     """Studio wall-clock today (local). Monkeypatchable."""
     return dt.date.today()
+
+
+def _dateish(value: str | None) -> dt.date | None:
+    """Parse a stored YYYY-MM-DD-ish value, tolerating timestamp suffixes."""
+    if not value:
+        return None
+    try:
+        return dt.date.fromisoformat(value[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def shoot_cadence(
+    client_id: int,
+    *,
+    today_date: dt.date | None = None,
+    include_children: bool = True,
+) -> dict:
+    """Derived repeat-client cadence for a client or company group.
+
+    Uses prior shoot dates only: median gap between historical shoots projects
+    the next due date. A future shoot suppresses the due nudge because the next
+    action is already scheduled. Read-only; no persistence or automation.
+    """
+    today_date = today_date or today()
+    if include_children:
+        group_ids = [client_id, *client_tree.descendant_ids(client_id)]
+    else:
+        group_ids = [client_id]
+    ph = ",".join("?" * len(group_ids))
+    rows = db.all_(
+        f"""SELECT p.shoot_date
+            FROM projects p
+            WHERE p.client_id IN ({ph}) AND p.shoot_date IS NOT NULL
+                  AND p.shoot_date <= ?
+            ORDER BY p.shoot_date""",
+        (*group_ids, today_date.isoformat()),
+    )
+    dates = sorted({d for d in (_dateish(r["shoot_date"]) for r in rows) if d is not None})
+    last_shoot = dates[-1] if dates else None
+    next_row = db.one(
+        f"""SELECT MIN(shoot_date) AS d
+            FROM projects
+            WHERE client_id IN ({ph}) AND shoot_date IS NOT NULL
+                  AND shoot_date >= ?""",
+        (*group_ids, today_date.isoformat()),
+    )
+    next_shoot = _dateish(next_row["d"] if next_row else None)
+    cadence = {
+        "status": "none",
+        "label": "no shoots logged",
+        "tone": "muted",
+        "last_shoot": last_shoot.isoformat() if last_shoot else None,
+        "next_shoot": next_shoot.isoformat() if next_shoot else None,
+        "typical_days": None,
+        "due_on": None,
+        "overdue_days": 0,
+        "n_shoots": len(dates),
+    }
+    if next_shoot:
+        cadence.update(
+            {
+                "status": "scheduled",
+                "label": f"scheduled {next_shoot.isoformat()}",
+                "tone": "ok",
+            }
+        )
+        return cadence
+    if len(dates) < 2:
+        if last_shoot:
+            cadence.update(
+                {
+                    "status": "one_shoot",
+                    "label": f"last shoot {last_shoot.isoformat()}",
+                    "tone": "muted",
+                }
+            )
+        return cadence
+    gaps = [(b - a).days for a, b in zip(dates, dates[1:]) if (b - a).days > 0]
+    if not gaps:
+        return cadence
+    typical_days = max(1, round(statistics.median(gaps)))
+    due_on = last_shoot + dt.timedelta(days=typical_days)
+    overdue_days = (today_date - due_on).days
+    cadence.update(
+        {
+            "status": "steady",
+            "label": f"due {due_on.isoformat()}",
+            "tone": "muted",
+            "typical_days": typical_days,
+            "due_on": due_on.isoformat(),
+            "overdue_days": max(overdue_days, 0),
+        }
+    )
+    if overdue_days >= 0:
+        if overdue_days:
+            label = f"due for a shoot ({overdue_days}d overdue)"
+        else:
+            label = "due for a shoot today"
+        cadence.update({"status": "due", "label": label, "tone": "warn"})
+    elif due_on <= today_date + dt.timedelta(days=CADENCE_SOON_DAYS):
+        cadence.update(
+            {
+                "status": "due_soon",
+                "label": f"due soon {due_on.isoformat()}",
+                "tone": "warn",
+            }
+        )
+    return cadence
+
+
+def client_cadence_hints(client_rows) -> dict[int, tuple[str, str]]:
+    """Compact cadence labels for the client list, keyed by client id."""
+    today_date = today()
+    hints = {}
+    for c in client_rows:
+        cadence = shoot_cadence(c["id"], today_date=today_date, include_children=True)
+        if cadence["status"] in {"due", "due_soon"}:
+            hints[c["id"]] = ("warn", cadence["label"])
+        elif cadence["status"] == "scheduled":
+            hints[c["id"]] = ("ok", cadence["label"])
+        elif cadence["last_shoot"]:
+            hints[c["id"]] = ("muted", f"last {cadence['last_shoot']}")
+        else:
+            hints[c["id"]] = ("muted", "no cadence")
+    return hints
 
 
 def gallery_card(g, today_iso: str, soon_iso: str) -> dict:

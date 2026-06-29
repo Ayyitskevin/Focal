@@ -47,7 +47,28 @@
 
       <div class="project-main lead-stack">
 
-        <section class="panel">
+        <section class="panel" id="closeout">
+          <div class="panel-head">
+            <h2>Closeout readiness <span class="muted">{{ closeout.ok }}/{{ closeout.total }} checks ready</span></h2>
+          </div>
+          <p class="muted">
+            {% if closeout.ready %}Ready to close — money, rights, delivery, and workspace are reconciled.
+            {% else %}Needs attention before closeout — each row links to the owning surface.{% endif %}
+          </p>
+          <table class="list">
+            <tr><th>Check</th><th>Status</th><th>Detail</th></tr>
+            {% for item in closeout.rows %}
+            <tr>
+              <td>{{ item.title }}</td>
+              <td><span class="stu-portal stu-portal-{{ item.tone }}">{{ item.badge }}</span></td>
+              <td>{% if item.href %}<a href="{{ item.href }}" style="color:inherit">{{ item.label }}</a>
+                  {% else %}{{ item.label }}{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </table>
+        </section>
+
+        <section class="panel" id="project-details">
           <div class="panel-head"><h2>Project details</h2></div>
           <form method="post" action="/admin/studio/projects/{{ p.id }}" class="stack-form">
             <label>Title <input type="text" name="title" value="{{ p.title }}" required></label>
@@ -158,7 +179,7 @@
           {% if not contracts %}<p class="muted">No contracts yet.</p>{% endif %}
         </section>
 
-        <section class="panel">
+        <section class="panel" id="invoices">
           <div class="panel-head">
             <h2>Invoices</h2>
             <form method="post" action="/admin/studio/projects/{{ p.id }}/invoices" class="inline-form">
@@ -207,7 +228,7 @@
           {% else %}<p class="muted">No recurring plans — add one for a monthly retainer client.</p>{% endif %}
         </section>
 
-        <section class="panel">
+        <section class="panel" id="shot-list">
           <div class="panel-head">
             <h2>Shot list <span class="muted">{{ shots|length }} shot{{ "s" if shots|length != 1 }}</span></h2>
             <form method="post" action="/admin/studio/projects/{{ p.id }}/shots" class="inline-form">
@@ -223,6 +244,14 @@
               </select>
               <input type="number" name="sort_order" value="0" style="width:4em" title="display order">
               <button type="submit" class="ghost">Add shot</button>
+            </form>
+            <form method="post" action="/admin/studio/projects/{{ p.id }}/shots/template" class="inline-form">
+              <select name="template_key">
+                {% for key, tpl in shot_templates.items() %}
+                <option value="{{ key }}">{{ tpl.label }}</option>
+                {% endfor %}
+              </select>
+              <button type="submit" class="ghost">Clone template</button>
             </form>
           </div>
           {% if shots %}
@@ -264,7 +293,7 @@
           {% else %}<p class="muted">No shots yet — build the menu-driven shot list before the shoot.</p>{% endif %}
         </section>
 
-        <section class="panel">
+        <section class="panel" id="deliverables">
           <div class="panel-head">
             <h2>Deliverables <span class="muted">{{ deliverables|length }} line{{ "s" if deliverables|length != 1 }}</span></h2>
             <form method="post" action="/admin/studio/projects/{{ p.id }}/deliverables" class="inline-form">

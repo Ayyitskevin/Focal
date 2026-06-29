@@ -1315,6 +1315,8 @@ progress { width: 100%; }
   font: 600 0.74rem/1 var(--font-ui); padding: .32em .7em; border-radius: 999px;
   border: 1px solid var(--line); white-space: nowrap; }
 .admin-shell .stu-portal-ok { color: #2f7d57; background: #eef6f0; border-color: #cfe6d8; }
+.admin-shell .stu-portal-warn { color: #9a6b2c; background: #fbf3e8; border-color: #e0c2a6; }
+.admin-shell .stu-portal-gap { color: #7C2F38; background: #f3e3e5; border-color: #e2bdc3; }
 .admin-shell .stu-portal-muted { color: #8A9183; background: #FBFAF4; }
 /* "+ New project" popover — a create-client form hanging off the topbar pill. */
 .admin-shell .stu-newproj { position: relative; }
@@ -5539,6 +5541,12 @@ html[data-theme="dark"] .admin-shell .sch-type {
   background: var(--surface); border-color: var(--line);
 }
 html[data-theme="dark"] .admin-shell .stu-portal-muted { background: var(--surface-sunk); }
+html[data-theme="dark"] .admin-shell .stu-portal-warn {
+  background: var(--honey-bg); color: var(--honey); border-color: var(--honey-line);
+}
+html[data-theme="dark"] .admin-shell .stu-portal-gap {
+  background: var(--danger-bg); color: var(--danger); border-color: var(--danger-line);
+}
 
 /* ── 2b. Long-tail #FFFEF8 panels/pills/controls the var-flip can't reach
         (they hardcode the near-white in their own light rule). Map bg→surface,
