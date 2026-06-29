@@ -516,6 +516,83 @@ def _ctx_press_confirm() -> list:
     return press_confirm
 
 
+def _ctx_commercial_actions(today: dt.date) -> list[dict]:
+    """Studio-wide commercial action queue.
+
+    Rolls up the top derived company action per root client into the Activity page. This reuses the
+    company-view ranking and remains read-only: no tasks, sends, charges, publishes, or closes.
+    """
+    from . import recurring
+
+    period = recurring._period()
+    actions: list[dict] = []
+    roots = db.all_(
+        "SELECT id, name, company FROM clients WHERE parent_id IS NULL ORDER BY company, name"
+    )
+    for c in roots:
+        group_ids = _group_ids(c["id"])
+        ph = ",".join("?" * len(group_ids))
+        overdue_rows = db.all_(
+            f"""SELECT i.id, i.slug, i.title, i.status, i.due_date,
+                       CASE WHEN i.status='deposit_paid' THEN i.total_cents - i.deposit_cents
+                            ELSE i.total_cents END AS owed_cents,
+                       c.name AS client_name
+                FROM invoices i
+                JOIN projects p ON p.id=i.project_id
+                JOIN clients c ON c.id=p.client_id
+                WHERE p.client_id IN ({ph}) AND i.status IN ('sent','viewed','deposit_paid')
+                      AND i.due_date IS NOT NULL AND i.due_date < date('now')
+                ORDER BY i.due_date""",
+            group_ids,
+        )
+        active_projects = db.all_(
+            f"""SELECT p.*, c.name AS client_name
+                FROM projects p JOIN clients c ON c.id=p.client_id
+                WHERE p.client_id IN ({ph}) AND p.status NOT IN ('project_closed','archived')
+                ORDER BY p.shoot_date IS NULL, p.shoot_date, p.created_at DESC""",
+            group_ids,
+        )
+        plan_rows = db.all_(
+            f"""SELECT rp.*, c.name AS client_name
+                FROM recurring_plans rp
+                JOIN projects p ON p.id=rp.project_id
+                JOIN clients c ON c.id=p.client_id
+                WHERE p.client_id IN ({ph}) AND rp.active=1 AND rp.deleted_at IS NULL
+                ORDER BY c.name, rp.title""",
+            group_ids,
+        )
+        retainers = []
+        for rp in plan_rows:
+            ov = recurring.compute_overage(rp, period)
+            retainers.append(
+                {
+                    "id": rp["id"],
+                    "title": rp["title"],
+                    "client_name": rp["client_name"],
+                    "behind": [
+                        line["label"] for line in ov["lines"] if line["done"] < line["target"]
+                    ],
+                }
+            )
+        cadence = common.shoot_cadence(c["id"], today_date=today, include_children=True)
+        ranked = _company_next_actions(
+            c["id"], group_ids, cadence, overdue_rows, active_projects, retainers
+        )
+        if not ranked:
+            continue
+        first = dict(ranked[0])
+        first.update(
+            {
+                "company_id": c["id"],
+                "company_name": c["company"] or c["name"],
+                "company_href": f"/admin/studio/companies/{c['id']}",
+            }
+        )
+        actions.append(first)
+    actions.sort(key=lambda item: (item["rank"], item["company_name"], item["title"]))
+    return actions[:8]
+
+
 def _studio_context(request: Request) -> dict:
     """Shared context for the Studio board and its Activity sub-view. Both render
     from the same pipeline + needs-attention computation: the board template reads
@@ -544,6 +621,7 @@ def _studio_context(request: Request) -> dict:
         "quota_behind": _ctx_quota_behind(today),
         "content_due": _ctx_content_due(today),
         "press_confirm": _ctx_press_confirm(),
+        "commercial_actions": _ctx_commercial_actions(today),
     }
 
 
@@ -1135,11 +1213,15 @@ def _company_next_actions(
             if len(overdue_rows) == 1
             else f"/admin/studio/companies/{client_id}/statement"
         )
+        if len(overdue_rows) == 1:
+            label = f"{overdue_rows[0]['title'] or 'Invoice'} · ${owed_cents / 100:,.0f} owed"
+        else:
+            label = f"{len(overdue_rows)} past due · ${owed_cents / 100:,.0f} owed"
         add(
             10,
             "warn",
             "Chase past-due invoice",
-            f"{len(overdue_rows)} past due · ${owed_cents / 100:,.0f} owed",
+            label,
             href,
             "money",
         )

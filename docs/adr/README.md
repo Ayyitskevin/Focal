@@ -46,6 +46,7 @@ states context, the decision, consequences, measured reopen criteria, and altern
 | [0039](0039-commercial-recon-gaps-and-closeout.md) | Commercial recon gaps + closeout readiness (derived repeat-client cadence, canned shot-list templates, project closeout checklist; no new schema, no automation) | Accepted |
 | [0040](0040-project-deliverable-templates.md) | Project deliverable templates (clone canned commercial deliverable specs into normal audited project_deliverables rows; no schema, no automation) | Accepted |
 | [0041](0041-company-next-actions.md) | Company next-action ranking (read-only derived action strip over AR, drafts, retainers, project closeout gaps, and cadence; no task table or automation) | Accepted |
+| [0042](0042-studio-commercial-action-queue.md) | Studio commercial action queue (top derived company action per root client on Activity; no task lifecycle or automation) | Accepted |
 
 See also the operator runbook [`../MISE-SOLO-STUDIO-OS-RUNBOOK.md`](../MISE-SOLO-STUDIO-OS-RUNBOOK.md)
 (how to run it day to day), [`../MISE-SOLO-STUDIO-OS.md`](../MISE-SOLO-STUDIO-OS.md),
