@@ -12,7 +12,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 
-from .. import clients, config, db, jobs, platekit, pricing, security, usage_vocab
+from .. import clients, config, db, jobs, mailer, platekit, pricing, security, usage_vocab
 from ..render import templates
 from . import common
 
@@ -532,19 +532,7 @@ def _ctx_commercial_actions(today: dt.date) -> list[dict]:
     for c in roots:
         group_ids = _group_ids(c["id"])
         ph = ",".join("?" * len(group_ids))
-        overdue_rows = db.all_(
-            f"""SELECT i.id, i.slug, i.title, i.status, i.due_date,
-                       CASE WHEN i.status='deposit_paid' THEN i.total_cents - i.deposit_cents
-                            ELSE i.total_cents END AS owed_cents,
-                       c.name AS client_name
-                FROM invoices i
-                JOIN projects p ON p.id=i.project_id
-                JOIN clients c ON c.id=p.client_id
-                WHERE p.client_id IN ({ph}) AND i.status IN ('sent','viewed','deposit_paid')
-                      AND i.due_date IS NOT NULL AND i.due_date < date('now')
-                ORDER BY i.due_date""",
-            group_ids,
-        )
+        overdue_rows = _company_overdue_rows(group_ids, today)
         active_projects = db.all_(
             f"""SELECT p.*, c.name AS client_name
                 FROM projects p JOIN clients c ON c.id=p.client_id
@@ -957,6 +945,123 @@ def _group_ids(client_id: int) -> list[int]:
     return [client_id, *clients.descendant_ids(client_id)]
 
 
+def _format_cents(cents: int) -> str:
+    return f"${(cents or 0) / 100:,.2f}"
+
+
+def _company_overdue_rows(group_ids: list[int], today: dt.date) -> list[dict]:
+    """Past-due issued invoices for a company group with an actual open balance.
+
+    The due boundary follows the studio wall-clock. Owed is total minus recorded payments, with a
+    deposit-paid fallback for old rows that have status but no payment event. Pure read; used by
+    the company view, Activity action queue, and AR chase assist so those surfaces do not drift.
+    """
+    if not group_ids:
+        return []
+    ph = ",".join("?" * len(group_ids))
+    rows = db.all_(
+        f"""SELECT i.id, i.slug, i.title, i.status, i.due_date, i.total_cents,
+                   i.deposit_cents, p.id AS project_id, p.title AS project_title,
+                   c.name AS client_name, c.company, c.email AS client_email,
+                   c.billing_email,
+                   (SELECT COALESCE(SUM(pm.amount_cents), 0)
+                    FROM payments pm WHERE pm.invoice_id=i.id) AS paid_cents
+            FROM invoices i
+            JOIN projects p ON p.id=i.project_id
+            JOIN clients c ON c.id=p.client_id
+            WHERE p.client_id IN ({ph})
+              AND i.status IN ('sent','viewed','deposit_paid')
+              AND i.due_date IS NOT NULL
+              AND i.due_date < ?
+            ORDER BY i.due_date, i.id""",
+        (*group_ids, today.isoformat()),
+    )
+    overdue: list[dict] = []
+    for row in rows:
+        item = dict(row)
+        paid_cents = item["paid_cents"] or 0
+        if not paid_cents and item["status"] == "deposit_paid":
+            paid_cents = item["deposit_cents"] or 0
+        owed_cents = max((item["total_cents"] or 0) - paid_cents, 0)
+        if owed_cents <= 0:
+            continue
+        item["paid_cents"] = paid_cents
+        item["owed_cents"] = owed_cents
+        overdue.append(item)
+    return overdue
+
+
+def _company_ar_contact(c, rows: list[dict]) -> str:
+    for value in (c["billing_email"], c["email"]):
+        if value:
+            return value
+    for row in rows:
+        for value in (row["billing_email"], row["client_email"]):
+            if value:
+                return value
+    return ""
+
+
+def _ar_chase_message(c, rows: list[dict]) -> str:
+    if not rows:
+        return ""
+    company_name = c["company"] or c["name"]
+    first_name = ((c["name"] or "").strip().split() or ["there"])[0]
+    lines = [
+        f"Hi {first_name},",
+        "",
+        f"Quick follow-up on the open balance for {company_name}.",
+        "",
+        "Outstanding:",
+    ]
+    for row in rows:
+        title = row["title"] or f"Invoice #{row['id']}"
+        if row["client_name"] and row["client_name"] != c["name"]:
+            title = f"{title} ({row['client_name']})"
+        lines.extend(
+            [
+                f"- {title}, due {row['due_date']}: {_format_cents(row['owed_cents'])}",
+                f"  {config.BASE_URL}/i/{row['slug']}",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            f"Total open: {_format_cents(sum(row['owed_cents'] for row in rows))}",
+            "",
+            "If this is already in process, thank you. Otherwise you can pay securely "
+            "from the invoice link above, or reply here if AP needs anything else.",
+            "",
+            "Best,",
+            "Kevin",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _ar_chase_context(client_id: int, invoice_id: int | None = None) -> dict:
+    c = get_client(client_id)
+    rows = _company_overdue_rows(_group_ids(client_id), _today())
+    if invoice_id is not None:
+        rows = [row for row in rows if row["id"] == invoice_id]
+        if not rows:
+            raise HTTPException(
+                status_code=404, detail="overdue invoice not found for this company"
+            )
+    company_name = c["company"] or c["name"]
+    return {
+        "c": c,
+        "rows": rows,
+        "owed_cents": sum(row["owed_cents"] for row in rows),
+        "email_to": _company_ar_contact(c, rows),
+        "email_subject": f"Follow-up on open invoice balance - {company_name}",
+        "email_message": _ar_chase_message(c, rows),
+        "statement_href": f"/admin/studio/companies/{client_id}/statement",
+        "invoice_id": invoice_id,
+        "base_url": config.BASE_URL,
+    }
+
+
 def _project_closeout(project_id: int, p) -> dict:
     """Read-only project closeout checklist.
 
@@ -1208,12 +1313,9 @@ def _company_next_actions(
 
     if overdue_rows:
         owed_cents = sum(r["owed_cents"] or 0 for r in overdue_rows)
-        href = (
-            f"/admin/studio/invoices/{overdue_rows[0]['id']}"
-            if len(overdue_rows) == 1
-            else f"/admin/studio/companies/{client_id}/statement"
-        )
+        href = f"/admin/studio/companies/{client_id}/ar-chase"
         if len(overdue_rows) == 1:
+            href += f"?invoice_id={overdue_rows[0]['id']}"
             label = f"{overdue_rows[0]['title'] or 'Invoice'} · ${owed_cents / 100:,.0f} owed"
         else:
             label = f"{len(overdue_rows)} past due · ${owed_cents / 100:,.0f} owed"
@@ -1356,18 +1458,8 @@ async def company_view(request: Request, client_id: int):
         "n_invoices": inv["n_invoices"],
     }
 
-    # Past-due open invoices (same definition as money-ops: deposit_paid owes total-deposit).
-    overdue_rows = db.all_(
-        f"""SELECT i.id, i.slug, i.title, i.status, i.due_date,
-                   CASE WHEN i.status='deposit_paid' THEN i.total_cents - i.deposit_cents
-                        ELSE i.total_cents END AS owed_cents,
-                   c.name AS client_name
-            FROM invoices i JOIN projects p ON p.id=i.project_id JOIN clients c ON c.id=p.client_id
-            WHERE p.client_id IN ({ph}) AND i.status IN ('sent','viewed','deposit_paid')
-                  AND i.due_date IS NOT NULL AND i.due_date < date('now')
-            ORDER BY i.due_date""",
-        group_ids,
-    )
+    # Past-due open invoices, using recorded payments so settled invoices do not get chased.
+    overdue_rows = _company_overdue_rows(group_ids, _today())
     overdue = {"count": len(overdue_rows), "cents": sum(r["owed_cents"] for r in overdue_rows)}
 
     # Pipeline: counts per status + the live (non-closed) projects, soonest shoot first.
@@ -1561,6 +1653,44 @@ async def company_statement(
         "admin/statement.html",
         {"c": c, "start": start, "end": end, **data},
     )
+
+
+@router.get("/companies/{client_id}/ar-chase", response_class=HTMLResponse)
+async def company_ar_chase(request: Request, client_id: int, invoice_id: int | None = None):
+    """Reviewable company AR follow-up draft. Never sends until the operator submits."""
+    return templates.TemplateResponse(
+        request, "admin/ar_chase.html", _ar_chase_context(client_id, invoice_id)
+    )
+
+
+@router.post("/companies/{client_id}/ar-chase/email")
+async def send_company_ar_chase(
+    client_id: int,
+    to: str = Form(...),
+    subject: str = Form(...),
+    message: str = Form(...),
+    invoice_id: int | None = Form(None),
+):
+    ctx = _ar_chase_context(client_id, invoice_id)
+    if not ctx["rows"]:
+        raise HTTPException(status_code=400, detail="no overdue invoices to chase")
+    if not mailer.configured():
+        raise HTTPException(status_code=503, detail="email is not configured")
+    to, subject, message = to.strip(), subject.strip(), message.strip()
+    if not to or not subject or not message:
+        raise HTTPException(status_code=400, detail="to, subject, and message required")
+    try:
+        mailer.send(to, subject, message)
+    except Exception:
+        log.exception("AR chase send failed for company %s", client_id)
+        raise HTTPException(status_code=502, detail="SMTP send failed - check logs")
+    db.run(
+        """INSERT INTO emails_log (project_id, doc_kind, doc_id, to_email, subject)
+              VALUES (?,?,?,?,?)""",
+        (ctx["rows"][0]["project_id"], "other", client_id, to, subject),
+    )
+    log.info("emailed AR chase for company %s (%s invoices)", client_id, len(ctx["rows"]))
+    return RedirectResponse(f"/admin/studio/companies/{client_id}", status_code=303)
 
 
 def _client_blockers(client_id: int) -> list[str]:

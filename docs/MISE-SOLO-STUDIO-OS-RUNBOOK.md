@@ -31,7 +31,10 @@ The related intake shortcuts are also local/operator-controlled:
 - the company command view ranks the next few derived actions across money, retainers, active
   project closeout gaps, and repeat-shoot cadence; each item links back to its owning surface;
 - the Studio Activity `Needs attention` panel rolls up the top commercial action per company so
-  the morning triage view shows which relationship to open first.
+  the morning triage view shows which relationship to open first;
+- AR chase assist opens from past-due company/action/invoice links, gathers the statement and
+  payable invoice links, and sends only after review. It logs the manual email and never changes
+  invoice or payment state.
 
 ## 1. Start here every morning — `/admin/ai-ops`
 

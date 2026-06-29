@@ -88,6 +88,18 @@ async def invoice_detail(request: Request, invoice_id: int):
     display_items = items + ([overage_row] if overage_row else [])
     rows = display_items + [{} for _ in range(max(0, MAX_ITEM_ROWS - len(display_items)))]
     payments = db.all_("SELECT * FROM payments WHERE invoice_id=? ORDER BY id", (invoice_id,))
+    paid_cents = sum(pay["amount_cents"] or 0 for pay in payments)
+    paid_basis_cents = paid_cents
+    if not paid_basis_cents and d["status"] == "deposit_paid":
+        paid_basis_cents = d["deposit_cents"] or 0
+    try:
+        past_due = bool(d["due_date"]) and date.fromisoformat(d["due_date"][:10]) < date.today()
+    except (TypeError, ValueError):
+        past_due = False
+    balance_cents = max((d["total_cents"] or 0) - paid_basis_cents, 0)
+    ar_chase_url = None
+    if d["status"] in {"sent", "viewed", "deposit_paid"} and past_due and balance_cents > 0:
+        ar_chase_url = f"/admin/studio/companies/{p['client_id']}/ar-chase?invoice_id={invoice_id}"
     # Usage licences granted with this invoice (the rights↔money link, migration 078).
     licenses = db.all_(
         "SELECT id, title, status, usage_tier FROM licenses "
@@ -104,6 +116,7 @@ async def invoice_detail(request: Request, invoice_id: int):
             "payments": payments,
             "licenses": licenses,
             "overage_prefilled": overage_row is not None,
+            "ar_chase_url": ar_chase_url,
             "base_url": config.BASE_URL,
         },
     )

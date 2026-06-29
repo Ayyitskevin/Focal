@@ -10,7 +10,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from app import config, db, jobs
+from app import config, db, jobs, mailer
 from app.admin import common, recurring, studio
 from app.main import app
 
@@ -49,9 +49,10 @@ def _reset_rate_limiter():
     yield
 
 
-def _client(name, *, parent_id=None, company=None):
+def _client(name, *, parent_id=None, company=None, email=None, billing_email=None):
     return db.run(
-        "INSERT INTO clients (name, company, parent_id) VALUES (?,?,?)", (name, company, parent_id)
+        "INSERT INTO clients (name, company, parent_id, email, billing_email) VALUES (?,?,?,?,?)",
+        (name, company, parent_id, email, billing_email),
     )
 
 
@@ -113,6 +114,7 @@ def test_company_view_rolls_up_the_group(admin_client):
     assert "1,200" in html  # outstanding / overdue $1,200
     assert "behind" in html.lower()  # Reels behind pace
     assert "Next actions" in html and "Chase past-due invoice" in html
+    assert f"/admin/studio/companies/{group}/ar-chase" in html
 
 
 def test_company_view_single_client_is_a_group_of_one(admin_client):
@@ -205,6 +207,89 @@ def test_studio_activity_surfaces_top_commercial_actions(admin_client):
     assert "Chase past-due invoice" in html
     assert "Activity Hospitality" in html
     assert "Activity invoice" in html
+    assert "/admin/studio/companies/" in html and "/ar-chase?invoice_id=" in html
+
+
+def test_company_ar_chase_compose_and_manual_send(admin_client, monkeypatch):
+    group = _client(
+        "Activity Group",
+        company="Activity Hospitality",
+        email="owner@activity.test",
+        billing_email="ap@activity.test",
+    )
+    project = _project(group, "Launch closeout", status="project_closed")
+    invoice_id = db.run(
+        "INSERT INTO invoices (project_id, slug, title, total_cents, status, due_date)"
+        " VALUES (?,?,?,?,?,?)",
+        (project, "activity-past-due", "Activity invoice", 140000, "sent", "2000-01-01"),
+    )
+    db.run(
+        "INSERT INTO payments (invoice_id, amount_cents, kind) VALUES (?,?,?)",
+        (invoice_id, 40000, "deposit"),
+    )
+
+    html = admin_client.get(
+        f"/admin/studio/companies/{group}/ar-chase?invoice_id={invoice_id}"
+    ).text
+    assert "Open past-due invoices" in html
+    assert "Activity invoice" in html
+    assert "ap@activity.test" in html
+    assert "/admin/studio/companies/" in html and "/statement" in html
+    assert "/i/activity-past-due" in html
+    assert "1,000.00" in html
+
+    invoice_html = admin_client.get(f"/admin/studio/invoices/{invoice_id}").text
+    assert "Draft AR chase email" in invoice_html
+    assert f"/admin/studio/companies/{group}/ar-chase?invoice_id={invoice_id}" in invoice_html
+
+    sent = []
+    monkeypatch.setattr(mailer, "configured", lambda: True)
+    monkeypatch.setattr(mailer, "send", lambda to, subject, body: sent.append((to, subject, body)))
+    r = admin_client.post(
+        f"/admin/studio/companies/{group}/ar-chase/email",
+        data={
+            "invoice_id": str(invoice_id),
+            "to": "ap@activity.test",
+            "subject": "Follow-up on open invoice balance - Activity Hospitality",
+            "message": "Please see the open invoice.",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"] == f"/admin/studio/companies/{group}"
+    assert sent == [
+        (
+            "ap@activity.test",
+            "Follow-up on open invoice balance - Activity Hospitality",
+            "Please see the open invoice.",
+        )
+    ]
+    row = db.one("SELECT * FROM emails_log WHERE doc_kind='other' AND doc_id=?", (group,))
+    assert row["project_id"] == project
+    assert row["to_email"] == "ap@activity.test"
+    assert db.one("SELECT status FROM invoices WHERE id=?", (invoice_id,))["status"] == "sent"
+
+
+def test_company_ar_chase_skips_settled_overdue_invoice(admin_client):
+    group = _client("Settled Group", company="Settled Hospitality")
+    project = _project(group, "Paid launch", status="project_closed")
+    invoice_id = db.run(
+        "INSERT INTO invoices (project_id, slug, title, total_cents, status, due_date)"
+        " VALUES (?,?,?,?,?,?)",
+        (project, "settled-past-due", "Settled invoice", 80000, "sent", "2000-01-01"),
+    )
+    db.run(
+        "INSERT INTO payments (invoice_id, amount_cents, kind) VALUES (?,?,?)",
+        (invoice_id, 80000, "full"),
+    )
+
+    company_html = admin_client.get(f"/admin/studio/companies/{group}").text
+    assert "Past-due invoices" not in company_html
+    assert "Draft chase email" not in company_html
+
+    html = admin_client.get(f"/admin/studio/companies/{group}/ar-chase").text
+    assert "No overdue open invoices" in html
+    assert "Send email" not in html
 
 
 def test_company_view_requires_admin(tmp_path, monkeypatch):
