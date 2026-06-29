@@ -4,10 +4,10 @@ import json
 import logging
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from .. import config, db, jobs, security
+from .. import audit, config, db, jobs, security
 from ..render import templates
 from . import common
 from .proposals import MAX_ITEM_ROWS, parse_items
@@ -88,6 +88,12 @@ async def invoice_detail(request: Request, invoice_id: int):
     display_items = items + ([overage_row] if overage_row else [])
     rows = display_items + [{} for _ in range(max(0, MAX_ITEM_ROWS - len(display_items)))]
     payments = db.all_("SELECT * FROM payments WHERE invoice_id=? ORDER BY id", (invoice_id,))
+    # Usage licences granted with this invoice (the rights↔money link, migration 078).
+    licenses = db.all_(
+        "SELECT id, title, status, usage_tier FROM licenses "
+        "WHERE invoice_id=? AND deleted_at IS NULL ORDER BY id",
+        (invoice_id,),
+    )
     return templates.TemplateResponse(
         request,
         "admin/invoice.html",
@@ -96,10 +102,44 @@ async def invoice_detail(request: Request, invoice_id: int):
             "p": p,
             "rows": rows,
             "payments": payments,
+            "licenses": licenses,
             "overage_prefilled": overage_row is not None,
             "base_url": config.BASE_URL,
         },
     )
+
+
+@router.post("/invoices/{invoice_id}/grant-license")
+async def grant_license(invoice_id: int, title: str = Form(...)):
+    """Spawn a usage licence linked to this invoice (rights↔money coupling, ADR 0037). Creates a
+    STUB — holder = the invoice's client, with project + invoice_id set — then hands off to the
+    existing licence editor for term/territory/channels. Touches no money: the invoice total and
+    line items are untouched; the licence is its own record the operator fills in and activates."""
+    d = get_invoice(invoice_id)
+    p = get_project(d["project_id"])
+    if not p["client_id"]:
+        raise HTTPException(status_code=400, detail="link this project to a client first")
+    if not title.strip():
+        raise HTTPException(status_code=400, detail="title required")
+    with db.tx() as con:
+        cur = con.execute(
+            "INSERT INTO licenses (holder_client_id, title, project_id, invoice_id) VALUES (?,?,?,?)",
+            (p["client_id"], title.strip(), d["project_id"], invoice_id),
+        )
+        lid = cur.lastrowid
+        audit.log(
+            con,
+            "license",
+            lid,
+            "create",
+            diff={
+                "holder_client_id": p["client_id"],
+                "title": title.strip(),
+                "invoice_id": invoice_id,
+            },
+        )
+    log.info("license %s granted with invoice %s (client %s)", lid, invoice_id, p["client_id"])
+    return RedirectResponse(f"/admin/studio/licenses/{lid}", status_code=303)
 
 
 @router.post("/invoices/{invoice_id}")

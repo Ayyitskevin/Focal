@@ -134,7 +134,7 @@
       {% for l in licenses %}
       <tr style="border-top:1px solid #eef1f2">
         <td style="padding:.4rem"><a href="/admin/studio/licenses/{{ l.id }}" style="color:inherit">{{ l.title }}</a></td>
-        <td>{{ l.holder_name }}</td>
+        <td>{{ l.holder_name }}{% if l.invoice_id %} · <a href="/admin/studio/invoices/{{ l.invoice_id }}" style="color:inherit" class="muted">via invoice</a>{% endif %}</td>
         <td>{{ l.usage_tier.replace('_', ' ') }}{% if l.exclusivity == 'exclusive' %} · exclusive{% endif %}</td>
         <td class="muted">{% if l.perpetual %}perpetual{% elif l.ends_on %}ends {{ l.ends_on }}{% if l.days_left is not none and l.days_left <= 45 %} <span style="color:#9a6b2c">({{ l.days_left }}d)</span>{% endif %}{% endif %}</td>
       </tr>
