@@ -47,6 +47,20 @@
   </section>
 
   <section style="margin-top:1rem">
+    <div class="muted" style="font-size:.8rem; margin:.3rem 0">AR aging — open balances by age</div>
+    <div style="display:flex; gap:.6rem; flex-wrap:wrap">
+      {% for b in aging %}
+      <div style="flex:1 1 150px; border:1px solid {{ '#e0c2a6' if b.stale and b.n else '#e2e6e8' }};
+           background:{{ '#fbf3e8' if b.stale and b.n else '#fff' }}; border-radius:8px; padding:.6rem .7rem">
+        <div style="font-size:1.2rem; font-weight:600; color:{{ '#9a6b2c' if b.stale and b.n else '#2b3a33' }}">{{ _dollars(b.cents) }}</div>
+        <div style="font-size:.82rem; margin-top:.1rem">{{ b.label }}</div>
+        <div class="muted" style="font-size:.72rem">{{ b.n }} invoice{{ '' if b.n == 1 else 's' }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section style="margin-top:1rem">
     <div class="muted" style="font-size:.8rem; margin:.3rem 0">Jump to</div>
     <div style="display:flex; gap:.6rem; flex-wrap:wrap; font-size:.9rem">
       <a class="pgtop-link" href="/admin/financials">Financials &rarr;</a>

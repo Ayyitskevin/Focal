@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 
 from .. import clients, config, db, jobs, platekit, pricing, security, usage_vocab
 from ..render import templates
@@ -1017,6 +1017,98 @@ async def company_view(request: Request, client_id: int):
             "next_shoot": next_shoot,
             "base_url": config.BASE_URL,
         },
+    )
+
+
+def _statement_data(client_id: int, start: str, end: str) -> dict:
+    """Gather a company statement: every issued invoice and every payment for the group in the
+    optional [start, end] date range, with run-rate totals. Pure read; shared by the HTML view and
+    the CSV export. Dates are 'YYYY-MM-DD' (validated by the caller); an open end includes the day."""
+    group_ids = _group_ids(client_id)
+    ph = ",".join("?" * len(group_ids))
+
+    inv_sql = f"""SELECT i.id, i.slug, i.title, i.status, i.total_cents,
+                         COALESCE(i.sent_at, i.created_at) AS issued_at, c.name AS client_name,
+                         (SELECT COALESCE(SUM(amount_cents),0) FROM payments pm WHERE pm.invoice_id=i.id)
+                           AS paid_cents
+                  FROM invoices i JOIN projects p ON p.id=i.project_id JOIN clients c ON c.id=p.client_id
+                  WHERE p.client_id IN ({ph}) AND i.status != 'draft'"""
+    inv_params = list(group_ids)
+    if start:
+        inv_sql += " AND COALESCE(i.sent_at, i.created_at) >= ?"
+        inv_params.append(start)
+    if end:
+        inv_sql += " AND COALESCE(i.sent_at, i.created_at) <= ?"
+        inv_params.append(end + " 23:59:59")
+    inv_sql += " ORDER BY issued_at"
+    invoices = db.all_(inv_sql, tuple(inv_params))
+
+    pay_sql = f"""SELECT pm.amount_cents, pm.kind, pm.created_at, i.id AS invoice_id, i.title
+                  FROM payments pm JOIN invoices i ON i.id=pm.invoice_id
+                  JOIN projects p ON p.id=i.project_id
+                  WHERE p.client_id IN ({ph})"""
+    pay_params = list(group_ids)
+    if start:
+        pay_sql += " AND pm.created_at >= ?"
+        pay_params.append(start)
+    if end:
+        pay_sql += " AND pm.created_at <= ?"
+        pay_params.append(end + " 23:59:59")
+    pay_sql += " ORDER BY pm.created_at"
+    payments = db.all_(pay_sql, tuple(pay_params))
+
+    return {
+        "invoices": invoices,
+        "payments": payments,
+        "invoiced_cents": sum(i["total_cents"] for i in invoices),
+        "received_cents": sum(p["amount_cents"] for p in payments),
+    }
+
+
+def _valid_date(s: str) -> str:
+    """Accept a 'YYYY-MM-DD' string, else '' — so a junk query param is ignored, not injected."""
+    return s if s and re.match(r"^\d{4}-\d{2}-\d{2}$", s) else ""
+
+
+@router.get("/companies/{client_id}/statement")
+async def company_statement(
+    request: Request, client_id: int, start: str = "", end: str = "", format: str = ""
+):
+    """Per-company statement: issued invoices + payments for the whole group over a date range, for
+    client reconciliation. HTML by default; ``?format=csv`` downloads the invoice ledger. Pure read."""
+    c = get_client(client_id)
+    start, end = _valid_date(start), _valid_date(end)
+    data = _statement_data(client_id, start, end)
+
+    if format == "csv":
+
+        def _q(v):  # minimal CSV quoting
+            return '"' + str(v or "").replace('"', '""') + '"'
+
+        lines = ["issued,invoice,status,total_usd,paid_usd,balance_usd"]
+        for i in data["invoices"]:
+            bal = i["total_cents"] - i["paid_cents"]
+            lines.append(
+                f"{(i['issued_at'] or '')[:10]},{_q(i['title'])},{i['status']},"
+                f"{i['total_cents'] / 100:.2f},{i['paid_cents'] / 100:.2f},{bal / 100:.2f}"
+            )
+        lines.append(
+            f"TOTAL,,,{data['invoiced_cents'] / 100:.2f},{data['received_cents'] / 100:.2f},"
+            f"{(data['invoiced_cents'] - data['received_cents']) / 100:.2f}"
+        )
+        fname = (
+            re.sub(r"[^A-Za-z0-9_-]", "_", (c["company"] or c["name"] or "company"))
+            + "-statement.csv"
+        )
+        return PlainTextResponse(
+            "\n".join(lines) + "\n",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
+
+    return templates.TemplateResponse(
+        request,
+        "admin/statement.html",
+        {"c": c, "start": start, "end": end, **data},
     )
 
 
