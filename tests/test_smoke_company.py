@@ -4,13 +4,14 @@ an active licence, then asserts the company page aggregates the whole group: MRR
 overdue AR, retainer utilisation (behind + advisory overage), the licence, the venue, the project.
 """
 
+import datetime as dt
 import json
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app import config, db, jobs
-from app.admin import recurring
+from app.admin import common, recurring, studio
 from app.main import app
 
 
@@ -119,6 +120,37 @@ def test_company_view_single_client_is_a_group_of_one(admin_client):
     assert r.status_code == 200
     assert "Solo Bistro" in r.text
     assert "No active retainers" in r.text and "No open projects" in r.text
+
+
+def test_repeat_client_cadence_flags_due_company_and_client_list(admin_client, monkeypatch):
+    monkeypatch.setattr(studio, "_today", lambda: dt.date(2026, 6, 29))
+    monkeypatch.setattr(common, "today", lambda: dt.date(2026, 6, 29))
+    group = _client("Cadence Group", company="Cadence Hospitality")
+    venue = _client("Cadence Downtown", parent_id=group)
+    for shoot_date in ("2026-01-01", "2026-03-01", "2026-04-29"):
+        _project(venue, f"Menu shoot {shoot_date}", status="project_closed", shoot_date=shoot_date)
+
+    html = admin_client.get(f"/admin/studio/companies/{group}").text
+    assert "Repeat cadence" in html
+    assert "59d" in html  # median interval: Jan→Mar and Mar→Apr are both 59 days
+    assert "due for a shoot (2d overdue)" in html
+
+    clients_html = admin_client.get("/admin/studio/clients").text
+    assert "Cadence" in clients_html
+    assert "due for a shoot (2d overdue)" in clients_html
+
+
+def test_repeat_client_cadence_suppressed_when_future_shoot_exists(admin_client, monkeypatch):
+    monkeypatch.setattr(studio, "_today", lambda: dt.date(2026, 6, 29))
+    monkeypatch.setattr(common, "today", lambda: dt.date(2026, 6, 29))
+    group = _client("Booked Group", company="Booked Hospitality")
+    for shoot_date in ("2026-01-01", "2026-03-01", "2026-04-29"):
+        _project(group, f"Past shoot {shoot_date}", status="project_closed", shoot_date=shoot_date)
+    _project(group, "Summer menu", status="session_planning", shoot_date="2026-07-10")
+
+    html = admin_client.get(f"/admin/studio/companies/{group}").text
+    assert "scheduled 2026-07-10" in html
+    assert "due for a shoot" not in html
 
 
 def test_company_view_requires_admin(tmp_path, monkeypatch):

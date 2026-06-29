@@ -96,10 +96,15 @@ async def studio_playbook(request: Request):
 @router.get("/clients", response_class=HTMLResponse)
 async def studio_clients(request: Request):
     clients, client_portal_hints = common._clients_with_hints()
+    client_cadence_hints = common.client_cadence_hints(clients)
     return templates.TemplateResponse(
         request,
         "admin/studio_clients.html",
-        {"clients": clients, "client_portal_hints": client_portal_hints},
+        {
+            "clients": clients,
+            "client_portal_hints": client_portal_hints,
+            "client_cadence_hints": client_cadence_hints,
+        },
     )
 
 
@@ -874,6 +879,216 @@ def _group_ids(client_id: int) -> list[int]:
     return [client_id, *clients.descendant_ids(client_id)]
 
 
+def _project_closeout(project_id: int, p) -> dict:
+    """Read-only project closeout checklist.
+
+    Pulls together the commercial spine without mutating it: shot list, deliverables,
+    licence, invoice, open AR, gallery, and workspace. The panel points the operator to
+    the owning surface for each gap; it never sends, charges, publishes, or closes.
+    """
+
+    def row(key: str, title: str, tone: str, label: str, href: str | None = None) -> dict:
+        badges = {"ok": "Ready", "warn": "Needs attention", "gap": "Missing"}
+        return {
+            "key": key,
+            "title": title,
+            "tone": tone,
+            "badge": badges[tone],
+            "label": label,
+            "href": href,
+        }
+
+    rows = []
+    shots_n = db.one(
+        "SELECT COUNT(*) AS n FROM shot_list WHERE project_id=? AND deleted_at IS NULL",
+        (project_id,),
+    )["n"]
+    rows.append(
+        row(
+            "shots",
+            "Shot list",
+            "ok" if shots_n else "gap",
+            f"{shots_n} shot{'s' if shots_n != 1 else ''} planned"
+            if shots_n
+            else "No shot list yet",
+            "#shot-list",
+        )
+    )
+
+    deliverables = db.one(
+        """SELECT COUNT(*) AS n, COALESCE(SUM(spec_qty), 0) AS spec,
+                  COALESCE(SUM(delivered_qty), 0) AS done
+           FROM project_deliverables
+           WHERE project_id=? AND deleted_at IS NULL""",
+        (project_id,),
+    )
+    if not deliverables["n"]:
+        rows.append(
+            row("deliverables", "Deliverables", "gap", "No deliverable spec", "#deliverables")
+        )
+    elif not deliverables["spec"]:
+        rows.append(
+            row(
+                "deliverables",
+                "Deliverables",
+                "warn",
+                f"{deliverables['n']} line{'s' if deliverables['n'] != 1 else ''}, no count",
+                "#deliverables",
+            )
+        )
+    else:
+        done = deliverables["done"]
+        spec = deliverables["spec"]
+        rows.append(
+            row(
+                "deliverables",
+                "Deliverables",
+                "ok" if done >= spec else "warn",
+                f"{done}/{spec} delivered",
+                "#deliverables",
+            )
+        )
+
+    licenses = db.all_(
+        """SELECT id, title, status FROM licenses
+           WHERE deleted_at IS NULL
+             AND (project_id=? OR invoice_id IN (SELECT id FROM invoices WHERE project_id=?))
+           ORDER BY (status='active') DESC, id DESC""",
+        (project_id, project_id),
+    )
+    active_license = next((lic for lic in licenses if lic["status"] == "active"), None)
+    first_license = licenses[0] if licenses else None
+    if active_license:
+        rows.append(
+            row(
+                "license",
+                "Usage licence",
+                "ok",
+                f"Active: {active_license['title']}",
+                f"/admin/studio/licenses/{active_license['id']}",
+            )
+        )
+    elif first_license:
+        rows.append(
+            row(
+                "license",
+                "Usage licence",
+                "warn",
+                f"{first_license['status']}: {first_license['title']}",
+                f"/admin/studio/licenses/{first_license['id']}",
+            )
+        )
+    else:
+        rows.append(row("license", "Usage licence", "gap", "No project licence", "#invoices"))
+
+    invoice_rows = db.all_("SELECT * FROM invoices WHERE project_id=? ORDER BY id", (project_id,))
+    issued = [inv for inv in invoice_rows if inv["status"] != "draft"]
+    drafts = [inv for inv in invoice_rows if inv["status"] == "draft"]
+    if issued:
+        latest = issued[-1]
+        tone = "ok" if any(inv["status"] == "paid" for inv in issued) else "warn"
+        rows.append(
+            row(
+                "invoice",
+                "Invoice",
+                tone,
+                f"Latest issued: {latest['status']}",
+                f"/admin/studio/invoices/{latest['id']}",
+            )
+        )
+    elif drafts:
+        rows.append(
+            row(
+                "invoice",
+                "Invoice",
+                "warn",
+                "Draft invoice not sent",
+                f"/admin/studio/invoices/{drafts[-1]['id']}",
+            )
+        )
+    else:
+        rows.append(row("invoice", "Invoice", "gap", "No invoice", "#invoices"))
+
+    paid_by_invoice = {
+        r["invoice_id"]: r["paid_cents"]
+        for r in db.all_(
+            """SELECT invoice_id, COALESCE(SUM(amount_cents), 0) AS paid_cents
+               FROM payments
+               WHERE invoice_id IN (SELECT id FROM invoices WHERE project_id=?)
+               GROUP BY invoice_id""",
+            (project_id,),
+        )
+    }
+    owed_cents = sum(
+        max((inv["total_cents"] or 0) - paid_by_invoice.get(inv["id"], 0), 0) for inv in issued
+    )
+    if issued:
+        rows.append(
+            row(
+                "ar",
+                "Open AR",
+                "ok" if owed_cents == 0 else "warn",
+                "No open balance" if owed_cents == 0 else f"{owed_cents / 100:,.2f} outstanding",
+                "#invoices",
+            )
+        )
+    else:
+        rows.append(row("ar", "Open AR", "gap", "No issued invoice to settle", "#invoices"))
+
+    gallery = None
+    if p["gallery_id"]:
+        gallery = db.one(
+            "SELECT id, title, published FROM galleries WHERE id=?", (p["gallery_id"],)
+        )
+    if gallery and gallery["published"]:
+        rows.append(
+            row(
+                "gallery",
+                "Gallery",
+                "ok",
+                f"Published: {gallery['title']}",
+                f"/admin/galleries/{gallery['id']}",
+            )
+        )
+    elif gallery:
+        rows.append(
+            row(
+                "gallery",
+                "Gallery",
+                "warn",
+                f"Linked draft: {gallery['title']}",
+                f"/admin/galleries/{gallery['id']}",
+            )
+        )
+    else:
+        rows.append(row("gallery", "Gallery", "gap", "No linked gallery", "#project-details"))
+
+    if p["workspace_published"] and p["workspace_slug"]:
+        rows.append(
+            row(
+                "workspace",
+                "Workspace",
+                "ok",
+                "Client workspace is live",
+                f"{config.BASE_URL}/w/{p['workspace_slug']}",
+            )
+        )
+    else:
+        rows.append(row("workspace", "Workspace", "warn", "Client workspace not published", None))
+
+    ok = sum(1 for item in rows if item["tone"] == "ok")
+    warn = sum(1 for item in rows if item["tone"] == "warn")
+    gap = sum(1 for item in rows if item["tone"] == "gap")
+    return {
+        "rows": rows,
+        "ok": ok,
+        "warn": warn,
+        "gap": gap,
+        "total": len(rows),
+        "ready": warn == 0 and gap == 0,
+    }
+
+
 @router.get("/companies/{client_id}", response_class=HTMLResponse)
 async def company_view(request: Request, client_id: int):
     """One read-only command view per company: the whole group (client + venues) on a page —
@@ -997,18 +1212,7 @@ async def company_view(request: Request, client_id: int):
         group_ids,
     )
 
-    last_shoot = db.one(
-        f"""SELECT MAX(shoot_date) AS d FROM projects
-            WHERE client_id IN ({ph}) AND shoot_date IS NOT NULL
-                  AND shoot_date <= date('now','localtime')""",
-        group_ids,
-    )["d"]
-    next_shoot = db.one(
-        f"""SELECT MIN(shoot_date) AS d FROM projects
-            WHERE client_id IN ({ph}) AND shoot_date IS NOT NULL
-                  AND shoot_date >= date('now','localtime')""",
-        group_ids,
-    )["d"]
+    cadence = common.shoot_cadence(client_id, today_date=_today(), include_children=True)
 
     return templates.TemplateResponse(
         request,
@@ -1026,8 +1230,9 @@ async def company_view(request: Request, client_id: int):
             "mrr_cents": mrr_cents,
             "period": period,
             "licenses": licenses,
-            "last_shoot": last_shoot,
-            "next_shoot": next_shoot,
+            "last_shoot": cadence["last_shoot"],
+            "next_shoot": cadence["next_shoot"],
+            "cadence": cadence,
             "base_url": config.BASE_URL,
         },
     )
@@ -1522,6 +1727,7 @@ async def project_detail(request: Request, project_id: int):
         (project_id,),
     )
     timeline = _build_timeline(proposals, contracts, invoices, payments, emails)
+    closeout = _project_closeout(project_id, p)
     # Testimonial requests raised for this project, with the published state of
     # any quote the client has submitted (so the admin sees pending vs. live).
     testimonial_reqs = db.all_(
@@ -1544,10 +1750,12 @@ async def project_detail(request: Request, project_id: int):
             "plans": plans,
             "shots": shots,
             "deliverables": deliverables,
+            "closeout": closeout,
             "timeline": timeline,
             "testimonial_reqs": testimonial_reqs,
             "shot_categories": usage_vocab.SHOT_CATEGORIES,
             "shot_priorities": usage_vocab.SHOT_PRIORITIES,
+            "shot_templates": usage_vocab.SHOT_TEMPLATES,
             "deliverable_units": usage_vocab.DELIVERABLE_UNITS,
             "statuses": PROJECT_STATUSES,
             "base_url": config.BASE_URL,

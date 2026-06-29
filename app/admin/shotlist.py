@@ -16,11 +16,11 @@ the shot list has no standalone index; it lives inside project_detail.
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
 from .. import audit, db, security
-from ..usage_vocab import SHOT_CATEGORIES, SHOT_PRIORITIES
+from ..usage_vocab import SHOT_CATEGORIES, SHOT_PRIORITIES, SHOT_TEMPLATES
 from .studio import get_project
 
 log = logging.getLogger("mise.admin.shotlist")
@@ -66,6 +66,13 @@ def _get_shot(shot_id: int) -> "db.sqlite3.Row":
     return s
 
 
+def _template(template_key: str) -> dict:
+    tpl = SHOT_TEMPLATES.get((template_key or "").strip())
+    if not tpl:
+        raise HTTPException(status_code=400, detail="bad shot template")
+    return tpl
+
+
 @router.post("/projects/{project_id}/shots")
 async def create_shot(request: Request, project_id: int):
     get_project(project_id)  # 404 if the project doesn't exist
@@ -93,6 +100,53 @@ async def create_shot(request: Request, project_id: int):
             diff={**{k: new[k] for k in _FIELDS if new[k] is not None}, "project_id": project_id},
         )
     log.info("shot %s created on project %s (priority=%s)", sid, project_id, new["priority"])
+    return RedirectResponse(f"/admin/studio/projects/{project_id}", status_code=303)
+
+
+@router.post("/projects/{project_id}/shots/template")
+async def clone_shot_template(project_id: int, template_key: str = Form(...)):
+    get_project(project_id)  # 404 if the project doesn't exist
+    tpl = _template(template_key)
+    with db.tx() as con:
+        row = con.execute(
+            "SELECT COALESCE(MAX(sort_order), 0) AS n FROM shot_list "
+            "WHERE project_id=? AND deleted_at IS NULL",
+            (project_id,),
+        ).fetchone()
+        base_sort = row["n"] if row else 0
+        created = 0
+        for shot in tpl["shots"]:
+            sort_order = base_sort + int(shot["sort_order"])
+            cur = con.execute(
+                """INSERT INTO shot_list (project_id, title, category, priority,
+                                          sort_order, note)
+                   VALUES (?,?,?,?,?,?)""",
+                (
+                    project_id,
+                    shot["title"],
+                    shot["category"],
+                    shot["priority"],
+                    sort_order,
+                    shot.get("note"),
+                ),
+            )
+            sid = cur.lastrowid
+            audit.log(
+                con,
+                "shot_list",
+                sid,
+                "create",
+                diff={
+                    "project_id": project_id,
+                    "template": template_key,
+                    "title": shot["title"],
+                    "category": shot["category"],
+                    "priority": shot["priority"],
+                    "sort_order": sort_order,
+                },
+            )
+            created += 1
+    log.info("shot template %s cloned on project %s (%d shots)", template_key, project_id, created)
     return RedirectResponse(f"/admin/studio/projects/{project_id}", status_code=303)
 
 

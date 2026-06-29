@@ -46,6 +46,16 @@
         <div class="muted" style="font-size:.75rem">
           {% if last_shoot %}last shoot {{ last_shoot }}{% else %}no shoots logged{% endif %}{% if next_shoot %} · next {{ next_shoot }}{% endif %}</div>
       </div>
+      <div style="flex:1 1 170px; border:1px solid {{ '#e0c2a6' if cadence.tone == 'warn' else '#e2e6e8' }};
+         background:{{ '#fbf3e8' if cadence.tone == 'warn' else '#fff' }}; border-radius:8px; padding:.7rem .8rem">
+        <div style="font-size:1.5rem; font-weight:600; color:{{ '#9a6b2c' if cadence.tone == 'warn' else '#2b3a33' }}">
+          {% if cadence.typical_days %}{{ cadence.typical_days }}d{% else %}—{% endif %}
+        </div>
+        <div style="font-size:.85rem; margin-top:.15rem">Repeat cadence</div>
+        <div class="muted" style="font-size:.75rem">
+          {{ cadence.label }}{% if cadence.due_on and cadence.status == 'steady' %} · projected {{ cadence.due_on }}{% endif %}
+        </div>
+      </div>
     </div>
   </section>
 

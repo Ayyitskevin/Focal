@@ -31,15 +31,17 @@
   {% if clients %}
   <table class="list">
     <thead>
-      <tr><th>Client</th><th>Company</th><th class="num">Sessions</th><th>Portal</th></tr>
+      <tr><th>Client</th><th>Company</th><th class="num">Sessions</th><th>Cadence</th><th>Portal</th></tr>
     </thead>
     <tbody>
     {% for c in clients %}
     {% set hint = client_portal_hints.get(c.id, ('muted', '—')) %}
+    {% set cadence = client_cadence_hints.get(c.id, ('muted', 'no cadence')) %}
     <tr>
       <td><a href="/admin/studio/clients/{{ c.id }}">{{ c.name }}</a></td>
       <td>{% if c.company %}{{ c.company }}{% else %}<span class="muted">—</span>{% endif %}</td>
       <td class="num">{{ c.n_projects }}</td>
+      <td><span class="stu-portal stu-portal-{{ cadence[0] }}">{{ cadence[1] }}</span></td>
       <td><span class="stu-portal stu-portal-{{ hint[0] }}">{{ hint[1] }}</span></td>
     </tr>
     {% endfor %}
