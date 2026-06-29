@@ -266,6 +266,57 @@
 
         <section class="panel">
           <div class="panel-head">
+            <h2>Deliverables <span class="muted">{{ deliverables|length }} line{{ "s" if deliverables|length != 1 }}</span></h2>
+            <form method="post" action="/admin/studio/projects/{{ p.id }}/deliverables" class="inline-form">
+              <input type="text" name="label" placeholder="Deliverable (e.g. Hero images)" required>
+              <input type="number" name="spec_qty" value="0" min="0" style="width:4em" title="contracted count">
+              <select name="unit">
+                {% for u in deliverable_units %}<option value="{{ u }}">{{ u }}</option>{% endfor %}
+              </select>
+              <input type="text" name="spec_format" placeholder="format (e.g. JPEG sRGB)">
+              <button type="submit" class="ghost">Add deliverable</button>
+            </form>
+          </div>
+          {% if deliverables %}
+          {% for d in deliverables %}
+          <form method="post" action="/admin/studio/deliverables/{{ d.id }}" id="deliv-{{ d.id }}"></form>
+          <form method="post" action="/admin/studio/deliverables/{{ d.id }}/delete" id="deliv-del-{{ d.id }}"
+                onsubmit="return confirm('Remove this deliverable?')"></form>
+          {% endfor %}
+          <div class="table-scroll">
+          <table class="list">
+            <tr><th class="num">#</th><th>Deliverable</th><th>Delivered / spec</th><th>Unit</th><th>Format</th><th>Note</th><th></th></tr>
+            {% for d in deliverables %}
+            {% set done = d.spec_qty and d.delivered_qty >= d.spec_qty %}
+            <tr>
+              <td><input type="number" form="deliv-{{ d.id }}" name="sort_order" value="{{ d.sort_order }}" style="width:4em"></td>
+              <td><input type="text" form="deliv-{{ d.id }}" name="label" value="{{ d.label }}" required></td>
+              <td style="white-space:nowrap">
+                <input type="number" form="deliv-{{ d.id }}" name="delivered_qty" value="{{ d.delivered_qty }}" min="0" style="width:3.5em"
+                       title="delivered so far"> /
+                <input type="number" form="deliv-{{ d.id }}" name="spec_qty" value="{{ d.spec_qty }}" min="0" style="width:3.5em"
+                       title="contracted count">
+                {% if done %}<span title="met" style="color:#2f7d57">✓</span>{% endif %}
+              </td>
+              <td><select form="deliv-{{ d.id }}" name="unit">
+                {% for u in deliverable_units %}
+                <option value="{{ u }}" {% if d.unit == u %}selected{% endif %}>{{ u }}</option>
+                {% endfor %}
+              </select></td>
+              <td><input type="text" form="deliv-{{ d.id }}" name="spec_format" value="{{ d.spec_format or '' }}" placeholder="—"></td>
+              <td><input type="text" form="deliv-{{ d.id }}" name="note" value="{{ d.note or '' }}" placeholder="—"></td>
+              <td><div class="row-actions">
+                  <button type="submit" form="deliv-{{ d.id }}" class="tiny">Save</button>
+                  <button type="submit" form="deliv-del-{{ d.id }}" class="danger tiny">Delete</button></div></td>
+            </tr>
+            {% endfor %}
+          </table>
+          </div>
+          {% else %}<p class="muted">No deliverable spec yet — record what this shoot owes (counts, units, formats).</p>{% endif %}
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
             <h2>Email activity <span class="muted">{{ emails|length }} send{{ "s" if emails|length != 1 }}
               · <a href="/admin/sent">View all in Sent log</a></span></h2>
           </div>

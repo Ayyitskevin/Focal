@@ -42,6 +42,7 @@ states context, the decision, consequences, measured reopen criteria, and altern
 | [0035](0035-recurring-revenue-forecast.md) | Recurring-revenue forecast (studio-wide MRR/ARR + pure 12-month projection honouring pause-at-term + renewals due; read-only) | Accepted |
 | [0036](0036-ar-aging-and-statements.md) | AR aging buckets (30/60/90+, pure bucketer) on money-ops + per-company statement (issued invoices + payments over a range, CSV export); read-only | Accepted |
 | [0037](0037-license-invoice-coupling.md) | Licence ↔ invoice coupling (licenses.invoice_id; grant a stub licence from the invoice page → existing editor; money path untouched; visible on invoice + company view) | Accepted |
+| [0038](0038-project-deliverable-specs.md) | Project deliverable specs (per-shoot contracted deliverables: count/unit/format + manual delivered count; project panel + company-view roll-up; mirrors the shot-list module) | Accepted |
 
 See also the operator runbook [`../MISE-SOLO-STUDIO-OS-RUNBOOK.md`](../MISE-SOLO-STUDIO-OS-RUNBOOK.md)
 (how to run it day to day), [`../MISE-SOLO-STUDIO-OS.md`](../MISE-SOLO-STUDIO-OS.md),
