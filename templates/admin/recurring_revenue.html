@@ -1,0 +1,105 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Recurring revenue · Mise{% endblock %}
+{% block topbar %}
+<header class="admin-topbar pgtop">
+  <div class="pgtop-lead">
+    <h1>Recurring revenue</h1>
+    <p class="pgtop-sub">Your recurring book at a glance — current run-rate, a 12-month projection,
+      and renewals coming up. Read-only; act on a plan from its page.</p>
+  </div>
+  <div class="pgtop-actions">
+    <a class="pgtop-link" href="/admin/money-ops">Money ops &rarr;</a>
+  </div>
+</header>
+{% endblock %}
+{% block admin_body %}
+<main class="admin-main">
+
+  {# ---- headline tiles ------------------------------------------------ #}
+  <section>
+    <div style="display:flex; gap:.6rem; flex-wrap:wrap">
+      <div style="flex:1 1 170px; border:1px solid #e2e6e8; border-radius:8px; padding:.7rem .8rem">
+        <div style="font-size:1.5rem; font-weight:600">${{ mrr_cents | usd0 }}</div>
+        <div style="font-size:.85rem; margin-top:.15rem">Recurring / month (MRR)</div>
+        <div class="muted" style="font-size:.75rem">{{ n_active }} active plan{{ 's' if n_active != 1 }}</div>
+      </div>
+      <div style="flex:1 1 170px; border:1px solid #e2e6e8; border-radius:8px; padding:.7rem .8rem">
+        <div style="font-size:1.5rem; font-weight:600">${{ arr_cents | usd0 }}</div>
+        <div style="font-size:.85rem; margin-top:.15rem">Annualised (MRR &times; 12)</div>
+        <div class="muted" style="font-size:.75rem">at the current run-rate</div>
+      </div>
+      <div style="flex:1 1 170px; border:1px solid #e2e6e8; border-radius:8px; padding:.7rem .8rem">
+        <div style="font-size:1.5rem; font-weight:600">{{ renewals|length }}</div>
+        <div style="font-size:.85rem; margin-top:.15rem">Renewals in 90 days</div>
+        <div class="muted" style="font-size:.75rem">{% if renewals %}next {{ renewals[0].renews_on }}{% else %}none upcoming{% endif %}</div>
+      </div>
+    </div>
+  </section>
+
+  {# ---- 12-month projection ------------------------------------------ #}
+  <section style="margin-top:1.2rem">
+    <div class="muted" style="font-size:.8rem; margin:.3rem 0">12-month projection
+      <span style="font-weight:400">— assumes evergreen/auto-roll plans continue; pause-at-term plans stop at their term</span></div>
+    {% if projection %}
+    {% set maxc = (projection | map(attribute='cents') | max) or 1 %}
+    <div style="display:flex; flex-direction:column; gap:.2rem">
+      {% for m in projection %}
+      <div style="display:flex; align-items:center; gap:.6rem; font-size:.82rem">
+        <span style="width:5.5rem; color:#6b7280; font-variant-numeric:tabular-nums">{{ m.month }}</span>
+        <div style="flex:1; background:#f1f3f4; border-radius:4px; height:1.1rem; position:relative">
+          <div style="width:{{ (m.cents / maxc * 100) | round(1) }}%; background:#2f7d57; height:100%; border-radius:4px; min-width:1px"></div>
+        </div>
+        <span style="width:6rem; text-align:right; font-variant-numeric:tabular-nums">${{ m.cents | usd0 }}</span>
+        <span style="width:3rem; text-align:right; color:#9aa0a6; font-size:.72rem">{{ m.n }} pl</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="muted" style="font-size:.85rem">No active recurring plans yet.</p>
+    {% endif %}
+  </section>
+
+  {# ---- renewals coming up -------------------------------------------- #}
+  {% if renewals %}
+  <section style="margin-top:1.2rem">
+    <div class="muted" style="font-size:.8rem; margin:.3rem 0">Renewals in the next 90 days</div>
+    <table style="width:100%; border-collapse:collapse; font-size:.9rem">
+      <tbody>
+      {% for r in renewals %}
+      <tr style="border-top:1px solid #eef1f2">
+        <td style="padding:.4rem"><a href="/admin/studio/recurring/{{ r.id }}" style="color:inherit">{{ r.title }}</a></td>
+        <td>{{ r.company or r.client_name }}</td>
+        <td style="color:#9a6b2c">renews {{ r.renews_on }}</td>
+        <td>{% if r.pause_at_term %}<span style="color:#9a6b2c">pauses at term</span>{% else %}auto-rolls{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endif %}
+
+  {# ---- all active plans ---------------------------------------------- #}
+  <section style="margin-top:1.2rem">
+    <div class="muted" style="font-size:.8rem; margin:.3rem 0">Active plans</div>
+    {% if plans %}
+    <table style="width:100%; border-collapse:collapse; font-size:.9rem">
+      <thead><tr style="text-align:left; color:#6b7280; font-size:.78rem">
+        <th style="padding:.35rem .4rem">Plan</th><th>Client</th><th>Per month</th><th>Term</th></tr></thead>
+      <tbody>
+      {% for p in plans %}
+      <tr style="border-top:1px solid #eef1f2">
+        <td style="padding:.4rem"><a href="/admin/studio/recurring/{{ p.id }}" style="color:inherit">{{ p.title }}</a></td>
+        <td><a href="/admin/studio/companies/{{ p.client_id }}" style="color:inherit">{{ p.company or p.client_name }}</a></td>
+        <td>${{ p.total_cents | usd0 }}</td>
+        <td class="muted">{% if p.renews_on %}renews {{ p.renews_on }}{% if p.pause_at_term %} · pauses{% endif %}{% else %}evergreen{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted" style="font-size:.85rem">No active recurring plans.</p>
+    {% endif %}
+  </section>
+
+</main>
+{% endblock %}

@@ -178,6 +178,80 @@ def compute_overage(plan: "db.sqlite3.Row", period: str) -> dict:
     return out
 
 
+# ── Recurring-revenue forecast (studio-wide, read-only) ──────────────────────
+
+
+def _add_months(d: dt.date, n: int) -> dt.date:
+    """First of the month n months after d (n may be 0). Pure date math, no I/O."""
+    m = d.month - 1 + n
+    return dt.date(d.year + m // 12, m % 12 + 1, 1)
+
+
+def _forecast_months(start: dt.date, n: int) -> list[str]:
+    """n consecutive 'YYYY-MM' keys starting at start's month (inclusive)."""
+    base = start.replace(day=1)
+    return [_add_months(base, i).strftime("%Y-%m") for i in range(n)]
+
+
+def _plan_active_in(plan, month_key: str) -> bool:
+    """Whether an active plan still GENERATES in month_key ('YYYY-MM'). A pause_at_term plan with
+    a renewal date stops after its renewal month (the operator must renew to continue); evergreen
+    and auto-rolling-term plans carry on. 'YYYY-MM' strings compare chronologically as-is."""
+    if plan["pause_at_term"] and plan["renews_on"]:
+        return month_key <= plan["renews_on"][:7]
+    return True
+
+
+def forecast(plans, months: list[str]) -> list[dict]:
+    """PURE recurring projection (no DB, unit-tested): for each month key, the summed monthly
+    total of the plans still generating that month + how many. A projection, not a promise —
+    it assumes evergreen/auto-roll plans continue and pause_at_term plans stop at their term."""
+    out = []
+    for mk in months:
+        active = [p for p in plans if _plan_active_in(p, mk)]
+        out.append(
+            {"month": mk, "cents": sum((p["total_cents"] or 0) for p in active), "n": len(active)}
+        )
+    return out
+
+
+@router.get("/recurring-revenue", response_class=HTMLResponse)
+async def recurring_revenue(request: Request):
+    """Studio-wide recurring book: current MRR/ARR, a 12-month projection (honouring
+    pause_at_term), renewals coming up, and every active plan. Pure read over recurring_plans —
+    generalises the per-company MRR roll-up (ADR 0034). Writes nothing; never bills."""
+    plans = db.all_(
+        """SELECT rp.id, rp.title, rp.total_cents, rp.renews_on, rp.pause_at_term, rp.term_start,
+                  c.id AS client_id, c.name AS client_name, c.company
+           FROM recurring_plans rp
+           JOIN projects p ON p.id=rp.project_id
+           JOIN clients c ON c.id=p.client_id
+           WHERE rp.active=1 AND rp.deleted_at IS NULL
+           ORDER BY c.name, rp.title"""
+    )
+    today = dt.date.today()
+    months = _forecast_months(today, 12)
+    projection = forecast(plans, months)
+    mrr = projection[0]["cents"] if projection else 0
+    horizon = (today + dt.timedelta(days=90)).isoformat()
+    renewals = sorted(
+        (p for p in plans if p["renews_on"] and today.isoformat() <= p["renews_on"] <= horizon),
+        key=lambda p: p["renews_on"],
+    )
+    return templates.TemplateResponse(
+        request,
+        "admin/recurring_revenue.html",
+        {
+            "plans": plans,
+            "projection": projection,
+            "mrr_cents": mrr,
+            "arr_cents": mrr * 12,
+            "n_active": len(plans),
+            "renewals": renewals,
+        },
+    )
+
+
 @router.post("/projects/{project_id}/recurring")
 async def create_plan(project_id: int, title: str = Form(...)):
     get_project(project_id)
