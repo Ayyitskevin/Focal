@@ -39,6 +39,7 @@ states context, the decision, consequences, measured reopen criteria, and altern
 | [0032](0032-cull-delivery-gate.md) | AI-assisted culling: the client-delivery gate (a cut frame stops being listed/served/zipped/portal-shown; flag-gated rollback; public-site & transfers excluded) | Accepted |
 | [0033](0033-local-keeper-scorer.md) | Local keeper-scorer for culling (per-asset Qwen scores into argus_keeper_score; score-only, asset_id-keyed, own flag; decoupled from the Argus→Qwen production cutover) | Accepted |
 | [0034](0034-company-command-view.md) | Per-company command view (read-only group roll-up: MRR + retainer utilisation, AR + overdue, pipeline, active licences, shoot cadence over client+venues) | Accepted |
+| [0035](0035-recurring-revenue-forecast.md) | Recurring-revenue forecast (studio-wide MRR/ARR + pure 12-month projection honouring pause-at-term + renewals due; read-only) | Accepted |
 
 See also the operator runbook [`../MISE-SOLO-STUDIO-OS-RUNBOOK.md`](../MISE-SOLO-STUDIO-OS-RUNBOOK.md)
 (how to run it day to day), [`../MISE-SOLO-STUDIO-OS.md`](../MISE-SOLO-STUDIO-OS.md),
