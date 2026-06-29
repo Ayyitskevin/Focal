@@ -977,7 +977,7 @@ async def company_view(request: Request, client_id: int):
 
     licenses = db.all_(
         f"""SELECT l.id, l.title, l.usage_tier, l.exclusivity, l.published, l.starts_on, l.ends_on,
-                   l.perpetual, c.name AS holder_name,
+                   l.perpetual, l.invoice_id, c.name AS holder_name,
                    CAST(julianday(l.ends_on) - julianday(date('now','localtime')) AS INTEGER) AS days_left
             FROM licenses l JOIN clients c ON c.id=l.holder_client_id
             WHERE l.holder_client_id IN ({ph}) AND l.deleted_at IS NULL AND l.status='active'

@@ -211,5 +211,28 @@
     {% include "admin/_email_form.html" %}
   </section>
   {% endif %}
+
+  <section class="inv-card" style="margin-top:1rem">
+    <span class="inv-label">Usage licences</span>
+    {% if licenses %}
+    <ul class="inv-payments">
+      {% for l in licenses %}
+      <li><span><a href="/admin/studio/licenses/{{ l.id }}">{{ l.title }}</a>
+        <small>{{ l.usage_tier|replace('_', ' ') }} · {{ l.status }}</small></span></li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">No licences granted with this invoice yet.</p>
+    {% endif %}
+    {% if p.client_id %}
+    <form method="post" action="/admin/studio/invoices/{{ d.id }}/grant-license" class="inline-form" style="margin-top:.5rem">
+      <input type="text" name="title" placeholder="e.g. Q1 social — US, 1 year" required>
+      <button type="submit" class="ghost">Grant a licence with this invoice</button>
+      <small class="muted">Creates a draft licence for this client; you set term / territory / channels next. Doesn't touch the invoice total.</small>
+    </form>
+    {% else %}
+    <p class="muted">Link this invoice's project to a client to grant a licence.</p>
+    {% endif %}
+  </section>
 </main>
 {% endblock %}
