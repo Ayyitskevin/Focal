@@ -305,6 +305,14 @@
               <input type="text" name="spec_format" placeholder="format (e.g. JPEG sRGB)">
               <button type="submit" class="ghost">Add deliverable</button>
             </form>
+            <form method="post" action="/admin/studio/projects/{{ p.id }}/deliverables/template" class="inline-form">
+              <select name="template_key">
+                {% for key, tpl in deliverable_templates.items() %}
+                <option value="{{ key }}">{{ tpl.label }}</option>
+                {% endfor %}
+              </select>
+              <button type="submit" class="ghost">Clone template</button>
+            </form>
           </div>
           {% if deliverables %}
           {% for d in deliverables %}

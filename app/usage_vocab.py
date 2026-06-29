@@ -24,6 +24,98 @@ CHANNELS = [
     "broadcast",
 ]
 
+# Canned deliverable-spec templates for commercial intake. Cloning a template creates normal
+# audited project_deliverables rows; it does not deliver files, charge, send, or publish anything.
+DELIVERABLE_TEMPLATES = {
+    "menu_stills": {
+        "label": "Menu stills",
+        "deliverables": [
+            {
+                "label": "Edited hero/detail images",
+                "spec_qty": 25,
+                "unit": "images",
+                "spec_format": "JPEG sRGB",
+                "sort_order": 10,
+                "note": "Final retouched selects from the menu shoot.",
+            },
+            {
+                "label": "Social crop pack",
+                "spec_qty": 1,
+                "unit": "files",
+                "spec_format": "ZIP, 4:5 and 9:16 crops",
+                "sort_order": 20,
+                "note": "Cropped exports for feed and stories.",
+            },
+            {
+                "label": "Web gallery",
+                "spec_qty": 1,
+                "unit": "files",
+                "spec_format": "PIN-gated gallery",
+                "sort_order": 30,
+                "note": "Client-facing gallery/download hub.",
+            },
+        ],
+    },
+    "hero_reels": {
+        "label": "Hero + reels",
+        "deliverables": [
+            {
+                "label": "Hero images",
+                "spec_qty": 15,
+                "unit": "images",
+                "spec_format": "JPEG sRGB",
+                "sort_order": 10,
+                "note": "Campaign-ready stills.",
+            },
+            {
+                "label": "Short-form reels",
+                "spec_qty": 3,
+                "unit": "reels",
+                "spec_format": "Vertical MP4, 9:16",
+                "sort_order": 20,
+                "note": "Edited vertical motion deliverables.",
+            },
+            {
+                "label": "Cover stills",
+                "spec_qty": 3,
+                "unit": "images",
+                "spec_format": "JPEG sRGB, 9:16",
+                "sort_order": 30,
+                "note": "Poster/thumbnail stills for each reel.",
+            },
+        ],
+    },
+    "print_web": {
+        "label": "Print + web",
+        "deliverables": [
+            {
+                "label": "Web-ready images",
+                "spec_qty": 20,
+                "unit": "images",
+                "spec_format": "JPEG sRGB",
+                "sort_order": 10,
+                "note": "Optimized for web, social, and email use.",
+            },
+            {
+                "label": "Print files",
+                "spec_qty": 10,
+                "unit": "files",
+                "spec_format": "CMYK TIFF, 300dpi",
+                "sort_order": 20,
+                "note": "Press/menu-ready print exports.",
+            },
+            {
+                "label": "Usage-rights summary",
+                "spec_qty": 1,
+                "unit": "files",
+                "spec_format": "Licence record",
+                "sort_order": 30,
+                "note": "Structured licence terms recorded in Mise.",
+            },
+        ],
+    },
+}
+
 # Domain F shoot-production vocab. SHOT_CATEGORIES groups a project's shot list
 # the way Kevin frames an F&B shoot; SHOT_PRIORITIES is the must/want/if-time
 # triage he works down on the day. Both are validated app-side in

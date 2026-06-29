@@ -14,11 +14,11 @@ there is no standalone index; deliverables live inside project_detail.
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
 from .. import audit, db, security
-from ..usage_vocab import DELIVERABLE_UNITS
+from ..usage_vocab import DELIVERABLE_TEMPLATES, DELIVERABLE_UNITS
 from .studio import get_project
 
 log = logging.getLogger("mise.admin.deliverables")
@@ -65,6 +65,13 @@ def _get(deliverable_id: int) -> "db.sqlite3.Row":
     return d
 
 
+def _template(template_key: str) -> dict:
+    tpl = DELIVERABLE_TEMPLATES.get((template_key or "").strip())
+    if not tpl:
+        raise HTTPException(status_code=400, detail="bad deliverable template")
+    return tpl
+
+
 @router.post("/projects/{project_id}/deliverables")
 async def create_deliverable(request: Request, project_id: int):
     get_project(project_id)  # 404 if the project doesn't exist
@@ -94,6 +101,61 @@ async def create_deliverable(request: Request, project_id: int):
             diff={"project_id": project_id, "label": new["label"], "spec_qty": new["spec_qty"]},
         )
     log.info("deliverable %s created on project %s (%s)", did, project_id, new["label"])
+    return RedirectResponse(f"/admin/studio/projects/{project_id}", status_code=303)
+
+
+@router.post("/projects/{project_id}/deliverables/template")
+async def clone_deliverable_template(project_id: int, template_key: str = Form(...)):
+    get_project(project_id)  # 404 if the project doesn't exist
+    tpl = _template(template_key)
+    with db.tx() as con:
+        row = con.execute(
+            "SELECT COALESCE(MAX(sort_order), 0) AS n FROM project_deliverables "
+            "WHERE project_id=? AND deleted_at IS NULL",
+            (project_id,),
+        ).fetchone()
+        base_sort = row["n"] if row else 0
+        created = 0
+        for deliverable in tpl["deliverables"]:
+            sort_order = base_sort + int(deliverable["sort_order"])
+            cur = con.execute(
+                """INSERT INTO project_deliverables
+                     (project_id, label, spec_qty, unit, spec_format, delivered_qty,
+                      sort_order, note)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (
+                    project_id,
+                    deliverable["label"],
+                    deliverable["spec_qty"],
+                    deliverable["unit"],
+                    deliverable.get("spec_format"),
+                    0,
+                    sort_order,
+                    deliverable.get("note"),
+                ),
+            )
+            did = cur.lastrowid
+            audit.log(
+                con,
+                "project_deliverable",
+                did,
+                "create",
+                diff={
+                    "project_id": project_id,
+                    "template": template_key,
+                    "label": deliverable["label"],
+                    "spec_qty": deliverable["spec_qty"],
+                    "unit": deliverable["unit"],
+                    "sort_order": sort_order,
+                },
+            )
+            created += 1
+    log.info(
+        "deliverable template %s cloned on project %s (%d lines)",
+        template_key,
+        project_id,
+        created,
+    )
     return RedirectResponse(f"/admin/studio/projects/{project_id}", status_code=303)
 
 
