@@ -27,7 +27,9 @@ The related intake shortcuts are also local/operator-controlled:
 - company and client-list cadence cues are derived from past `shoot_date`s and suppress themselves
   once a future shoot is scheduled;
 - shot-list templates clone normal audited rows into the project, then you edit them like any other
-  shot list.
+  shot list;
+- the company command view ranks the next few derived actions across money, retainers, active
+  project closeout gaps, and repeat-shoot cadence; each item links back to its owning surface.
 
 ## 1. Start here every morning — `/admin/ai-ops`
 

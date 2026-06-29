@@ -70,8 +70,9 @@ Do NOT:
 
 ## Current commercial spine handoff
 
-Recent F&B/commercial work is documented in ADRs 0034–0039. That spine now includes
-derived repeat-client cadence, canned shot-list templates, and a project closeout-readiness panel.
+Recent F&B/commercial work is documented in ADRs 0034–0041. That spine now includes
+derived repeat-client cadence, canned shot-list and deliverable templates, a project closeout-readiness
+panel, and a read-only company next-action ranking.
 These are deterministic/operator surfaces only: no auto-send, auto-charge, auto-publish, or
 auto-close.
 

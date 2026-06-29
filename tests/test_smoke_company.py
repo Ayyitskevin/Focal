@@ -112,6 +112,7 @@ def test_company_view_rolls_up_the_group(admin_client):
     assert "250.00" in html  # advisory overage 5 × $50 (usd)
     assert "1,200" in html  # outstanding / overdue $1,200
     assert "behind" in html.lower()  # Reels behind pace
+    assert "Next actions" in html and "Chase past-due invoice" in html
 
 
 def test_company_view_single_client_is_a_group_of_one(admin_client):
@@ -120,6 +121,7 @@ def test_company_view_single_client_is_a_group_of_one(admin_client):
     assert r.status_code == 200
     assert "Solo Bistro" in r.text
     assert "No active retainers" in r.text and "No open projects" in r.text
+    assert "No urgent next actions" in r.text
 
 
 def test_repeat_client_cadence_flags_due_company_and_client_list(admin_client, monkeypatch):
@@ -151,6 +153,42 @@ def test_repeat_client_cadence_suppressed_when_future_shoot_exists(admin_client,
     html = admin_client.get(f"/admin/studio/companies/{group}").text
     assert "scheduled 2026-07-10" in html
     assert "due for a shoot" not in html
+
+
+def test_company_next_actions_rank_money_project_and_cadence(admin_client, monkeypatch):
+    monkeypatch.setattr(studio, "_today", lambda: dt.date(2026, 6, 29))
+    monkeypatch.setattr(common, "today", lambda: dt.date(2026, 6, 29))
+    group = _client("Action Group", company="Action Hospitality")
+    overdue_project = _project(group, "Past launch", status="project_closed")
+    active_project = _project(group, "Fall menu", status="session_planning")
+    for shoot_date in ("2026-01-01", "2026-03-01", "2026-04-29"):
+        _project(
+            group, f"Closed shoot {shoot_date}", status="project_closed", shoot_date=shoot_date
+        )
+
+    db.run(
+        "INSERT INTO invoices (project_id, slug, title, total_cents, status, due_date)"
+        " VALUES (?,?,?,?,?,?)",
+        (overdue_project, "past-due", "Past due balance", 90000, "sent", "2026-05-01"),
+    )
+    db.run(
+        "INSERT INTO invoices (project_id, slug, title, total_cents, status) VALUES (?,?,?,?,?)",
+        (active_project, "draft-fall", "Fall draft", 180000, "draft"),
+    )
+
+    html = admin_client.get(f"/admin/studio/companies/{group}").text
+    assert "Next actions" in html
+    assert "Chase past-due invoice" in html
+    assert "Send draft invoice" in html
+    assert "Record usage licence" in html
+    assert "Schedule repeat shoot" in html
+    positions = [
+        html.index("Chase past-due invoice"),
+        html.index("Send draft invoice"),
+        html.index("Record usage licence"),
+        html.index("Schedule repeat shoot"),
+    ]
+    assert positions == sorted(positions)
 
 
 def test_company_view_requires_admin(tmp_path, monkeypatch):
