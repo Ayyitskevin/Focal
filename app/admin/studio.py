@@ -41,6 +41,7 @@ BRAND_EXTS = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".eps", ".ai", "
 # vector EPS/PDF/AI and archives can't be pasted onto a JPEG).
 KIT_EXTS = {".png", ".webp", ".jpg", ".jpeg"}
 KIT_POSITIONS = {"tl", "tc", "tr", "ml", "c", "mr", "bl", "bc", "br"}
+AR_CHASE_SUBJECT_PREFIX = "Follow-up on open invoice balance - "
 
 
 def get_client(client_id: int) -> "db.sqlite3.Row":
@@ -564,7 +565,13 @@ def _ctx_commercial_actions(today: dt.date) -> list[dict]:
             )
         cadence = common.shoot_cadence(c["id"], today_date=today, include_children=True)
         ranked = _company_next_actions(
-            c["id"], group_ids, cadence, overdue_rows, active_projects, retainers
+            c["id"],
+            group_ids,
+            cadence,
+            overdue_rows,
+            active_projects,
+            retainers,
+            _ar_chase_history(c["id"], today),
         )
         if not ranked:
             continue
@@ -1002,6 +1009,63 @@ def _company_ar_contact(c, rows: list[dict]) -> str:
     return ""
 
 
+def _ar_chase_history(client_id: int, today: dt.date | None = None) -> dict:
+    """Latest manual AR chase send for a company, derived from the existing send log.
+
+    No schema or task lifecycle: the assist's default subject prefix is the marker that separates
+    company AR follow-ups from other catch-all `emails_log` rows.
+    """
+    today = today or _today()
+    row = db.one(
+        """SELECT id, to_email, subject, created_at
+           FROM emails_log
+           WHERE doc_kind='other' AND doc_id=? AND subject LIKE ?
+           ORDER BY created_at DESC, id DESC
+           LIMIT 1""",
+        (client_id, f"{AR_CHASE_SUBJECT_PREFIX}%"),
+    )
+    if not row:
+        return {
+            "status": "never",
+            "followup_due": True,
+            "days_since": None,
+            "last_sent_at": None,
+            "last_to": "",
+            "next_due_on": None,
+            "action_meta": "never chased",
+            "detail": "No AR chase logged for this company.",
+        }
+    try:
+        sent_on = dt.date.fromisoformat((row["created_at"] or "")[:10])
+    except (TypeError, ValueError):
+        sent_on = today
+    days_since = max((today - sent_on).days, 0)
+    next_due_on = sent_on + dt.timedelta(days=config.AR_CHASE_FOLLOWUP_DAYS)
+    followup_due = days_since >= config.AR_CHASE_FOLLOWUP_DAYS
+    if days_since == 0:
+        label = "last chased today"
+    elif days_since == 1:
+        label = "last chased yesterday"
+    else:
+        label = f"last chased {days_since}d ago"
+    if followup_due:
+        detail = f"{label}; follow-up due."
+        status = "due"
+    else:
+        detail = f"{label}; next follow-up {next_due_on.isoformat()}."
+        status = "recent"
+    return {
+        "status": status,
+        "followup_due": followup_due,
+        "days_since": days_since,
+        "last_sent_at": row["created_at"],
+        "last_to": row["to_email"],
+        "next_due_on": next_due_on.isoformat(),
+        "action_meta": label,
+        "detail": detail,
+    }
+
+
 def _ar_chase_message(c, rows: list[dict]) -> str:
     if not rows:
         return ""
@@ -1054,8 +1118,9 @@ def _ar_chase_context(client_id: int, invoice_id: int | None = None) -> dict:
         "rows": rows,
         "owed_cents": sum(row["owed_cents"] for row in rows),
         "email_to": _company_ar_contact(c, rows),
-        "email_subject": f"Follow-up on open invoice balance - {company_name}",
+        "email_subject": f"{AR_CHASE_SUBJECT_PREFIX}{company_name}",
         "email_message": _ar_chase_message(c, rows),
+        "ar_history": _ar_chase_history(client_id),
         "statement_href": f"/admin/studio/companies/{client_id}/statement",
         "invoice_id": invoice_id,
         "base_url": config.BASE_URL,
@@ -1279,6 +1344,7 @@ def _company_next_actions(
     overdue_rows,
     active_projects,
     retainers,
+    ar_history: dict | None = None,
 ) -> list[dict]:
     """Read-only ranked action hints for the company command view.
 
@@ -1312,6 +1378,7 @@ def _company_next_actions(
         return True
 
     if overdue_rows:
+        ar_history = ar_history or _ar_chase_history(client_id)
         owed_cents = sum(r["owed_cents"] or 0 for r in overdue_rows)
         href = f"/admin/studio/companies/{client_id}/ar-chase"
         if len(overdue_rows) == 1:
@@ -1319,13 +1386,18 @@ def _company_next_actions(
             label = f"{overdue_rows[0]['title'] or 'Invoice'} · ${owed_cents / 100:,.0f} owed"
         else:
             label = f"{len(overdue_rows)} past due · ${owed_cents / 100:,.0f} owed"
+        title = "Chase past-due invoice"
+        rank = 10
+        if ar_history["status"] == "recent":
+            title = "Past-due invoice chased recently"
+            rank = 25
         add(
-            10,
+            rank,
             "warn",
-            "Chase past-due invoice",
+            title,
             label,
             href,
-            "money",
+            ar_history["action_meta"],
         )
 
     ph = ",".join("?" * len(group_ids))
@@ -1534,8 +1606,9 @@ async def company_view(request: Request, client_id: int):
     )
 
     cadence = common.shoot_cadence(client_id, today_date=_today(), include_children=True)
+    ar_history = _ar_chase_history(client_id, _today())
     next_actions = _company_next_actions(
-        client_id, group_ids, cadence, overdue_rows, active_projects, retainers
+        client_id, group_ids, cadence, overdue_rows, active_projects, retainers, ar_history
     )
 
     return templates.TemplateResponse(
@@ -1547,6 +1620,7 @@ async def company_view(request: Request, client_id: int):
             "money": money,
             "overdue": overdue,
             "overdue_rows": overdue_rows,
+            "ar_history": ar_history,
             "status_counts": status_counts,
             "active_projects": active_projects,
             "deliverables_by_project": deliverables_by_project,

@@ -114,6 +114,7 @@ def test_company_view_rolls_up_the_group(admin_client):
     assert "1,200" in html  # outstanding / overdue $1,200
     assert "behind" in html.lower()  # Reels behind pace
     assert "Next actions" in html and "Chase past-due invoice" in html
+    assert "never chased" in html
     assert f"/admin/studio/companies/{group}/ar-chase" in html
 
 
@@ -237,6 +238,7 @@ def test_company_ar_chase_compose_and_manual_send(admin_client, monkeypatch):
     assert "/admin/studio/companies/" in html and "/statement" in html
     assert "/i/activity-past-due" in html
     assert "1,000.00" in html
+    assert "No AR chase logged for this company" in html
 
     invoice_html = admin_client.get(f"/admin/studio/invoices/{invoice_id}").text
     assert "Draft AR chase email" in invoice_html
@@ -266,8 +268,70 @@ def test_company_ar_chase_compose_and_manual_send(admin_client, monkeypatch):
     ]
     row = db.one("SELECT * FROM emails_log WHERE doc_kind='other' AND doc_id=?", (group,))
     assert row["project_id"] == project
+    assert row["subject"].startswith("Follow-up on open invoice balance - ")
     assert row["to_email"] == "ap@activity.test"
     assert db.one("SELECT status FROM invoices WHERE id=?", (invoice_id,))["status"] == "sent"
+
+
+def test_company_ar_chase_cadence_tracks_recent_and_due(admin_client, monkeypatch):
+    monkeypatch.setattr(studio, "_today", lambda: dt.date(2026, 6, 29))
+    recent = _client("Recent Group", company="Recent Hospitality")
+    recent_project = _project(recent, "Recent launch", status="project_closed")
+    db.run(
+        "INSERT INTO invoices (project_id, slug, title, total_cents, status, due_date)"
+        " VALUES (?,?,?,?,?,?)",
+        (recent_project, "recent-past-due", "Recent invoice", 100000, "sent", "2026-06-01"),
+    )
+    db.run(
+        "INSERT INTO emails_log (project_id, doc_kind, doc_id, to_email, subject, created_at)"
+        " VALUES (?,?,?,?,?,?)",
+        (
+            recent_project,
+            "other",
+            recent,
+            "ap@recent.test",
+            "Follow-up on open invoice balance - Recent Hospitality",
+            "2026-06-27 09:00:00",
+        ),
+    )
+
+    recent_html = admin_client.get(f"/admin/studio/companies/{recent}").text
+    assert "Past-due invoice chased recently" in recent_html
+    assert "last chased 2d ago" in recent_html
+    assert "next follow-up 2026-07-04" in recent_html
+
+    activity_html = admin_client.get("/admin/studio/activity").text
+    assert "Past-due invoice chased recently" in activity_html
+    assert "last chased 2d ago" in activity_html
+
+    chase_html = admin_client.get(f"/admin/studio/companies/{recent}/ar-chase").text
+    assert "Follow-up cadence" in chase_html
+    assert "ap@recent.test" in chase_html
+
+    due = _client("Due Group", company="Due Hospitality")
+    due_project = _project(due, "Due launch", status="project_closed")
+    db.run(
+        "INSERT INTO invoices (project_id, slug, title, total_cents, status, due_date)"
+        " VALUES (?,?,?,?,?,?)",
+        (due_project, "due-past-due", "Due invoice", 100000, "sent", "2026-06-01"),
+    )
+    db.run(
+        "INSERT INTO emails_log (project_id, doc_kind, doc_id, to_email, subject, created_at)"
+        " VALUES (?,?,?,?,?,?)",
+        (
+            due_project,
+            "other",
+            due,
+            "ap@due.test",
+            "Follow-up on open invoice balance - Due Hospitality",
+            "2026-06-20 09:00:00",
+        ),
+    )
+
+    due_html = admin_client.get(f"/admin/studio/companies/{due}").text
+    assert "Chase past-due invoice" in due_html
+    assert "last chased 9d ago" in due_html
+    assert "follow-up due" in due_html
 
 
 def test_company_ar_chase_skips_settled_overdue_invoice(admin_client):
