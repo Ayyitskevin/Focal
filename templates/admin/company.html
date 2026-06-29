@@ -59,6 +59,29 @@
     </div>
   </section>
 
+  {# ---- next actions -------------------------------------------------- #}
+  <section style="margin-top:1.2rem">
+    <div class="muted" style="font-size:.8rem; margin:.3rem 0">Next actions</div>
+    {% if next_actions %}
+    <div style="display:grid; gap:.45rem">
+      {% for a in next_actions %}
+      <a href="{{ a.href }}" style="display:flex; justify-content:space-between; gap:.75rem;
+         text-decoration:none; color:inherit; border:1px solid {{ '#e0c2a6' if a.tone == 'warn' else '#e5b7b7' }};
+         background:{{ '#fbf3e8' if a.tone == 'warn' else '#fff5f5' }};
+         border-radius:8px; padding:.55rem .7rem">
+        <span>
+          <b>{{ a.title }}</b>
+          <span class="muted"> · {{ a.label }}</span>
+        </span>
+        {% if a.meta %}<span class="muted" style="white-space:nowrap">{{ a.meta }}</span>{% endif %}
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="muted" style="font-size:.85rem">No urgent next actions.</p>
+    {% endif %}
+  </section>
+
   {# ---- recurring book ------------------------------------------------ #}
   <section style="margin-top:1.2rem">
     <div class="muted" style="font-size:.8rem; margin:.3rem 0">Recurring book · {{ period }} utilisation</div>

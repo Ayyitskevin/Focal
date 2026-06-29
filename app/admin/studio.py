@@ -1089,6 +1089,153 @@ def _project_closeout(project_id: int, p) -> dict:
     }
 
 
+def _company_next_actions(
+    client_id: int,
+    group_ids: list[int],
+    cadence: dict,
+    overdue_rows,
+    active_projects,
+    retainers,
+) -> list[dict]:
+    """Read-only ranked action hints for the company command view.
+
+    This derives from existing project, invoice, licence, cadence, and retainer state. It creates
+    no task rows and performs no side effects; every item links to the surface that owns the fix.
+    """
+    actions: list[dict] = []
+    seen_hrefs: set[str] = set()
+
+    def add(
+        rank: int,
+        tone: str,
+        title: str,
+        label: str,
+        href: str,
+        meta: str | None = None,
+    ) -> bool:
+        if href in seen_hrefs:
+            return False
+        seen_hrefs.add(href)
+        actions.append(
+            {
+                "rank": rank,
+                "tone": tone,
+                "title": title,
+                "label": label,
+                "href": href,
+                "meta": meta,
+            }
+        )
+        return True
+
+    if overdue_rows:
+        owed_cents = sum(r["owed_cents"] or 0 for r in overdue_rows)
+        href = (
+            f"/admin/studio/invoices/{overdue_rows[0]['id']}"
+            if len(overdue_rows) == 1
+            else f"/admin/studio/companies/{client_id}/statement"
+        )
+        add(
+            10,
+            "warn",
+            "Chase past-due invoice",
+            f"{len(overdue_rows)} past due · ${owed_cents / 100:,.0f} owed",
+            href,
+            "money",
+        )
+
+    ph = ",".join("?" * len(group_ids))
+    draft = db.one(
+        f"""SELECT i.id, i.title, i.total_cents, c.name AS client_name
+            FROM invoices i
+            JOIN projects p ON p.id=i.project_id
+            JOIN clients c ON c.id=p.client_id
+            WHERE p.client_id IN ({ph}) AND i.status='draft'
+            ORDER BY i.created_at DESC, i.id DESC
+            LIMIT 1""",
+        group_ids,
+    )
+    if draft:
+        add(
+            20,
+            "warn",
+            "Send draft invoice",
+            f"{draft['client_name']} · {draft['title'] or 'Draft invoice'}",
+            f"/admin/studio/invoices/{draft['id']}",
+            "money",
+        )
+
+    for r in retainers:
+        if not r["behind"]:
+            continue
+        behind = ", ".join(r["behind"][:2])
+        if len(r["behind"]) > 2:
+            behind = f"{behind} +{len(r['behind']) - 2} more"
+        add(
+            30,
+            "warn",
+            "Catch up retainer quota",
+            f"{r['client_name']} · {behind}",
+            f"/admin/studio/recurring/{r['id']}",
+            r["title"],
+        )
+
+    project_rank = {
+        "ar": 35,
+        "invoice": 40,
+        "license": 45,
+        "deliverables": 50,
+        "gallery": 60,
+        "workspace": 70,
+        "shots": 80,
+    }
+    project_titles = {
+        "ar": "Settle project balance",
+        "invoice": "Issue project invoice",
+        "license": "Record usage licence",
+        "deliverables": "Update deliverables",
+        "gallery": "Publish delivery gallery",
+        "workspace": "Publish client workspace",
+        "shots": "Build shot list",
+    }
+    for p in active_projects:
+        closeout = _project_closeout(p["id"], p)
+        gaps = [
+            item
+            for item in closeout["rows"]
+            if item["tone"] != "ok" and not (item["key"] == "ar" and item["tone"] == "gap")
+        ]
+        gaps.sort(key=lambda item: project_rank.get(item["key"], 99))
+        for item in gaps:
+            href = item["href"]
+            if href and href.startswith("#"):
+                href = f"/admin/studio/projects/{p['id']}{href}"
+            elif not href:
+                href = f"/admin/studio/projects/{p['id']}"
+            if add(
+                project_rank.get(item["key"], 99),
+                item["tone"],
+                project_titles.get(item["key"], item["title"]),
+                f"{p['title']} · {item['label']}",
+                href,
+                p["client_name"],
+            ):
+                break
+
+    if cadence["status"] in {"due", "due_soon"}:
+        add(
+            90 if cadence["status"] == "due" else 95,
+            "warn",
+            "Schedule repeat shoot",
+            cadence["label"],
+            f"/admin/studio/clients/{client_id}",
+            "derived cadence",
+        )
+
+    actions.sort(key=lambda item: (item["rank"], item["title"], item["label"]))
+    return actions[:6]
+
+
 @router.get("/companies/{client_id}", response_class=HTMLResponse)
 async def company_view(request: Request, client_id: int):
     """One read-only command view per company: the whole group (client + venues) on a page —
@@ -1150,7 +1297,7 @@ async def company_view(request: Request, client_id: int):
         )
     }
     active_projects = db.all_(
-        f"""SELECT p.id, p.title, p.status, p.shoot_date, c.name AS client_name
+        f"""SELECT p.*, c.name AS client_name
             FROM projects p JOIN clients c ON c.id=p.client_id
             WHERE p.client_id IN ({ph}) AND p.status NOT IN ('project_closed','archived')
             ORDER BY p.shoot_date IS NULL, p.shoot_date, p.created_at DESC""",
@@ -1213,6 +1360,9 @@ async def company_view(request: Request, client_id: int):
     )
 
     cadence = common.shoot_cadence(client_id, today_date=_today(), include_children=True)
+    next_actions = _company_next_actions(
+        client_id, group_ids, cadence, overdue_rows, active_projects, retainers
+    )
 
     return templates.TemplateResponse(
         request,
@@ -1233,6 +1383,7 @@ async def company_view(request: Request, client_id: int):
             "last_shoot": cadence["last_shoot"],
             "next_shoot": cadence["next_shoot"],
             "cadence": cadence,
+            "next_actions": next_actions,
             "base_url": config.BASE_URL,
         },
     )
