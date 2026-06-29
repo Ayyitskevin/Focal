@@ -44,6 +44,7 @@ states context, the decision, consequences, measured reopen criteria, and altern
 | [0037](0037-license-invoice-coupling.md) | Licence ↔ invoice coupling (licenses.invoice_id; grant a stub licence from the invoice page → existing editor; money path untouched; visible on invoice + company view) | Accepted |
 | [0038](0038-project-deliverable-specs.md) | Project deliverable specs (per-shoot contracted deliverables: count/unit/format + manual delivered count; project panel + company-view roll-up; mirrors the shot-list module) | Accepted |
 | [0039](0039-commercial-recon-gaps-and-closeout.md) | Commercial recon gaps + closeout readiness (derived repeat-client cadence, canned shot-list templates, project closeout checklist; no new schema, no automation) | Accepted |
+| [0040](0040-project-deliverable-templates.md) | Project deliverable templates (clone canned commercial deliverable specs into normal audited project_deliverables rows; no schema, no automation) | Accepted |
 
 See also the operator runbook [`../MISE-SOLO-STUDIO-OS-RUNBOOK.md`](../MISE-SOLO-STUDIO-OS-RUNBOOK.md)
 (how to run it day to day), [`../MISE-SOLO-STUDIO-OS.md`](../MISE-SOLO-STUDIO-OS.md),

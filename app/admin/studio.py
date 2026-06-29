@@ -1757,6 +1757,7 @@ async def project_detail(request: Request, project_id: int):
             "shot_priorities": usage_vocab.SHOT_PRIORITIES,
             "shot_templates": usage_vocab.SHOT_TEMPLATES,
             "deliverable_units": usage_vocab.DELIVERABLE_UNITS,
+            "deliverable_templates": usage_vocab.DELIVERABLE_TEMPLATES,
             "statuses": PROJECT_STATUSES,
             "base_url": config.BASE_URL,
         },
