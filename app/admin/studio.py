@@ -534,6 +534,7 @@ def _ctx_commercial_actions(today: dt.date) -> list[dict]:
         group_ids = _group_ids(c["id"])
         ph = ",".join("?" * len(group_ids))
         overdue_rows = _company_overdue_rows(group_ids, today)
+        billing_readiness = _company_billing_readiness(c["id"], group_ids, overdue_rows)
         active_projects = db.all_(
             f"""SELECT p.*, c.name AS client_name
                 FROM projects p JOIN clients c ON c.id=p.client_id
@@ -572,6 +573,7 @@ def _ctx_commercial_actions(today: dt.date) -> list[dict]:
             active_projects,
             retainers,
             _ar_chase_history(c["id"], today),
+            billing_readiness,
         )
         if not ranked:
             continue
@@ -969,7 +971,7 @@ def _company_overdue_rows(group_ids: list[int], today: dt.date) -> list[dict]:
     rows = db.all_(
         f"""SELECT i.id, i.slug, i.title, i.status, i.due_date, i.total_cents,
                    i.deposit_cents, p.id AS project_id, p.title AS project_title,
-                   c.name AS client_name, c.company, c.email AS client_email,
+                   c.id AS client_id, c.name AS client_name, c.company, c.email AS client_email,
                    c.billing_email,
                    (SELECT COALESCE(SUM(pm.amount_cents), 0)
                     FROM payments pm WHERE pm.invoice_id=i.id) AS paid_cents
@@ -1200,6 +1202,158 @@ def _company_communication_rows(client_id: int, limit: int = 8) -> list[dict]:
     return rows[:limit]
 
 
+def _company_billing_readiness(
+    client_id: int,
+    group_ids: list[int] | None = None,
+    overdue_rows: list[dict] | None = None,
+) -> dict:
+    """Read-only billing/AP completeness for a company group.
+
+    Uses the existing client billing fields and invoice state to show whether a company and its
+    venues have the contact data needed before draft or past-due invoices leave the studio.
+    """
+    group_ids = group_ids or _group_ids(client_id)
+    if not group_ids:
+        return {
+            "rows": [],
+            "ready": True,
+            "missing_billing_email": 0,
+            "missing_billing_address": 0,
+            "missing_tax_id": 0,
+            "missing_invoice_recipient": 0,
+            "fallback_invoice_recipient": 0,
+            "needs_ap_action": False,
+            "ap_action_docs": 0,
+            "action_label": "",
+        }
+
+    ph = ",".join("?" * len(group_ids))
+    rows = db.all_(
+        f"""SELECT c.id, c.name, c.company, c.parent_id, c.email, c.billing_email,
+                   c.billing_address, c.tax_id,
+                   COUNT(i.id) AS invoice_count,
+                   COALESCE(SUM(CASE WHEN i.status='draft' THEN 1 ELSE 0 END), 0)
+                     AS draft_invoices,
+                   COALESCE(SUM(CASE WHEN i.status!='draft' THEN 1 ELSE 0 END), 0)
+                     AS issued_invoices
+            FROM clients c
+            LEFT JOIN projects p ON p.client_id=c.id
+            LEFT JOIN invoices i ON i.project_id=p.id
+            WHERE c.id IN ({ph})
+            GROUP BY c.id
+            ORDER BY CASE WHEN c.id=? THEN 0 ELSE 1 END, lower(c.name)""",
+        (*group_ids, client_id),
+    )
+
+    overdue_rows = (
+        overdue_rows if overdue_rows is not None else _company_overdue_rows(group_ids, _today())
+    )
+    overdue_by_client: dict[int, int] = {}
+    for row in overdue_rows:
+        row_client_id = row["client_id"]
+        overdue_by_client[row_client_id] = overdue_by_client.get(row_client_id, 0) + 1
+
+    readiness_rows: list[dict] = []
+    missing_billing_email = 0
+    missing_billing_address = 0
+    missing_tax_id = 0
+    missing_invoice_recipient = 0
+    fallback_invoice_recipient = 0
+    ap_action_docs = 0
+
+    for row in rows:
+        item = dict(row)
+        billing_email = (item["billing_email"] or "").strip()
+        email = (item["email"] or "").strip()
+        billing_address = (item["billing_address"] or "").strip()
+        tax_id = (item["tax_id"] or "").strip()
+
+        if billing_email:
+            invoice_recipient = billing_email
+            invoice_recipient_label = "AP email"
+            recipient_gap = False
+            recipient_fallback = False
+        elif email:
+            invoice_recipient = email
+            invoice_recipient_label = "client email fallback"
+            recipient_gap = False
+            recipient_fallback = True
+        else:
+            invoice_recipient = ""
+            invoice_recipient_label = "missing recipient"
+            recipient_gap = True
+            recipient_fallback = False
+
+        draft_invoices = item["draft_invoices"] or 0
+        overdue_invoices = overdue_by_client.get(item["id"], 0)
+        money_docs = draft_invoices + overdue_invoices
+        has_billing_email = bool(billing_email)
+        has_billing_address = bool(billing_address)
+        has_tax_id = bool(tax_id)
+
+        gaps = []
+        if not has_billing_email:
+            missing_billing_email += 1
+            gaps.append("AP email")
+        if not has_billing_address:
+            missing_billing_address += 1
+            gaps.append("billing address")
+        if not has_tax_id:
+            missing_tax_id += 1
+            gaps.append("tax ID")
+        if recipient_gap:
+            missing_invoice_recipient += 1
+            gaps.append("invoice recipient")
+        if recipient_fallback:
+            fallback_invoice_recipient += 1
+        if money_docs and not has_billing_email:
+            ap_action_docs += money_docs
+
+        item.update(
+            {
+                "display_name": item["company"] or item["name"],
+                "billing_email": billing_email,
+                "email": email,
+                "billing_address": billing_address,
+                "tax_id": tax_id,
+                "has_billing_email": has_billing_email,
+                "has_billing_address": has_billing_address,
+                "has_tax_id": has_tax_id,
+                "invoice_recipient": invoice_recipient,
+                "invoice_recipient_label": invoice_recipient_label,
+                "invoice_recipient_gap": recipient_gap,
+                "invoice_recipient_fallback": recipient_fallback,
+                "overdue_invoices": overdue_invoices,
+                "money_docs": money_docs,
+                "gaps": gaps,
+            }
+        )
+        readiness_rows.append(item)
+
+    if ap_action_docs == 1:
+        action_label = "1 draft/past-due invoice needs AP email"
+    else:
+        action_label = f"{ap_action_docs} draft/past-due invoices need AP email"
+
+    return {
+        "rows": readiness_rows,
+        "ready": not (
+            missing_billing_email
+            or missing_billing_address
+            or missing_tax_id
+            or missing_invoice_recipient
+        ),
+        "missing_billing_email": missing_billing_email,
+        "missing_billing_address": missing_billing_address,
+        "missing_tax_id": missing_tax_id,
+        "missing_invoice_recipient": missing_invoice_recipient,
+        "fallback_invoice_recipient": fallback_invoice_recipient,
+        "needs_ap_action": ap_action_docs > 0,
+        "ap_action_docs": ap_action_docs,
+        "action_label": action_label if ap_action_docs else "",
+    }
+
+
 def _project_closeout(project_id: int, p) -> dict:
     """Read-only project closeout checklist.
 
@@ -1418,6 +1572,7 @@ def _company_next_actions(
     active_projects,
     retainers,
     ar_history: dict | None = None,
+    billing_readiness: dict | None = None,
 ) -> list[dict]:
     """Read-only ranked action hints for the company command view.
 
@@ -1449,6 +1604,16 @@ def _company_next_actions(
             }
         )
         return True
+
+    if billing_readiness and billing_readiness.get("needs_ap_action"):
+        add(
+            5,
+            "warn",
+            "Add billing email",
+            billing_readiness["action_label"],
+            f"/admin/studio/companies/{client_id}#billing-readiness",
+            "billing readiness",
+        )
 
     if overdue_rows:
         ar_history = ar_history or _ar_chase_history(client_id)
@@ -1680,9 +1845,17 @@ async def company_view(request: Request, client_id: int):
 
     cadence = common.shoot_cadence(client_id, today_date=_today(), include_children=True)
     ar_history = _ar_chase_history(client_id, _today())
+    billing_readiness = _company_billing_readiness(client_id, group_ids, overdue_rows)
     communication_rows = _company_communication_rows(client_id)
     next_actions = _company_next_actions(
-        client_id, group_ids, cadence, overdue_rows, active_projects, retainers, ar_history
+        client_id,
+        group_ids,
+        cadence,
+        overdue_rows,
+        active_projects,
+        retainers,
+        ar_history,
+        billing_readiness,
     )
 
     return templates.TemplateResponse(
@@ -1696,6 +1869,7 @@ async def company_view(request: Request, client_id: int):
             "overdue_rows": overdue_rows,
             "ar_history": ar_history,
             "communication_rows": communication_rows,
+            "billing_readiness": billing_readiness,
             "status_counts": status_counts,
             "active_projects": active_projects,
             "deliverables_by_project": deliverables_by_project,

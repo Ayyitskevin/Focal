@@ -49,10 +49,20 @@ def _reset_rate_limiter():
     yield
 
 
-def _client(name, *, parent_id=None, company=None, email=None, billing_email=None):
+def _client(
+    name,
+    *,
+    parent_id=None,
+    company=None,
+    email=None,
+    billing_email=None,
+    billing_address=None,
+    tax_id=None,
+):
     return db.run(
-        "INSERT INTO clients (name, company, parent_id, email, billing_email) VALUES (?,?,?,?,?)",
-        (name, company, parent_id, email, billing_email),
+        "INSERT INTO clients (name, company, parent_id, email, billing_email, "
+        "billing_address, tax_id) VALUES (?,?,?,?,?,?,?)",
+        (name, company, parent_id, email, billing_email, billing_address, tax_id),
     )
 
 
@@ -129,6 +139,40 @@ def test_company_view_single_client_is_a_group_of_one(admin_client):
     assert "No urgent next actions" in r.text
 
 
+def test_company_billing_readiness_surfaces_gaps_and_action(admin_client):
+    group = _client(
+        "Billing Group",
+        company="Billing Hospitality",
+        email="owner@billing.test",
+    )
+    venue = _client("Billing Downtown", company="Billing DT LLC", parent_id=group)
+    project = _project(group, "Menu refresh", status="session_planning")
+    db.run(
+        "INSERT INTO invoices (project_id, slug, title, total_cents, status) VALUES (?,?,?,?,?)",
+        (project, "billing-draft", "Billing draft", 125000, "draft"),
+    )
+
+    html = admin_client.get(f"/admin/studio/companies/{group}").text
+    assert "Billing readiness" in html
+    assert "Add billing email" in html
+    assert "1 draft/past-due invoice needs AP email" in html
+    assert f"/admin/studio/companies/{group}#billing-readiness" in html
+    assert "missing AP email" in html
+    assert "missing billing address" in html
+    assert "missing tax ID" in html
+    assert "missing invoice recipient" in html
+    assert "owner@billing.test" in html
+    assert "client email fallback" in html
+    assert f"/admin/studio/clients/{group}" in html
+    assert f"/admin/studio/clients/{venue}" in html
+
+    activity_html = admin_client.get("/admin/studio/activity").text
+    assert "Commercial actions" in activity_html
+    assert "Add billing email" in activity_html
+    assert "Billing Hospitality" in activity_html
+    assert f"/admin/studio/companies/{group}#billing-readiness" in activity_html
+
+
 def test_repeat_client_cadence_flags_due_company_and_client_list(admin_client, monkeypatch):
     monkeypatch.setattr(studio, "_today", lambda: dt.date(2026, 6, 29))
     monkeypatch.setattr(common, "today", lambda: dt.date(2026, 6, 29))
@@ -163,7 +207,7 @@ def test_repeat_client_cadence_suppressed_when_future_shoot_exists(admin_client,
 def test_company_next_actions_rank_money_project_and_cadence(admin_client, monkeypatch):
     monkeypatch.setattr(studio, "_today", lambda: dt.date(2026, 6, 29))
     monkeypatch.setattr(common, "today", lambda: dt.date(2026, 6, 29))
-    group = _client("Action Group", company="Action Hospitality")
+    group = _client("Action Group", company="Action Hospitality", billing_email="ap@action.test")
     overdue_project = _project(group, "Past launch", status="project_closed")
     active_project = _project(group, "Fall menu", status="session_planning")
     for shoot_date in ("2026-01-01", "2026-03-01", "2026-04-29"):
@@ -197,7 +241,9 @@ def test_company_next_actions_rank_money_project_and_cadence(admin_client, monke
 
 
 def test_studio_activity_surfaces_top_commercial_actions(admin_client):
-    group = _client("Activity Group", company="Activity Hospitality")
+    group = _client(
+        "Activity Group", company="Activity Hospitality", billing_email="ap@activity.test"
+    )
     project = _project(group, "Launch closeout", status="project_closed")
     db.run(
         "INSERT INTO invoices (project_id, slug, title, total_cents, status, due_date)"
@@ -372,7 +418,7 @@ def test_company_ar_chase_compose_and_manual_send(admin_client, monkeypatch):
 
 def test_company_ar_chase_cadence_tracks_recent_and_due(admin_client, monkeypatch):
     monkeypatch.setattr(studio, "_today", lambda: dt.date(2026, 6, 29))
-    recent = _client("Recent Group", company="Recent Hospitality")
+    recent = _client("Recent Group", company="Recent Hospitality", billing_email="ap@recent.test")
     recent_project = _project(recent, "Recent launch", status="project_closed")
     db.run(
         "INSERT INTO invoices (project_id, slug, title, total_cents, status, due_date)"
@@ -405,7 +451,7 @@ def test_company_ar_chase_cadence_tracks_recent_and_due(admin_client, monkeypatc
     assert "Follow-up cadence" in chase_html
     assert "ap@recent.test" in chase_html
 
-    due = _client("Due Group", company="Due Hospitality")
+    due = _client("Due Group", company="Due Hospitality", billing_email="ap@due.test")
     due_project = _project(due, "Due launch", status="project_closed")
     db.run(
         "INSERT INTO invoices (project_id, slug, title, total_cents, status, due_date)"
