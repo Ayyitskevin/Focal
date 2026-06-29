@@ -1,0 +1,163 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}{{ c.company or c.name }} · Company · Mise{% endblock %}
+{% block topbar %}
+<header class="admin-topbar pgtop">
+  <div class="pgtop-lead">
+    <a class="gd-back" href="/admin/studio/clients/{{ c.id }}" aria-label="Back to client">&larr;</a>
+    <div class="gd-lead-text">
+      <p class="gd-eyebrow">Company command view</p>
+      <h1>{{ c.company or c.name }}</h1>
+    </div>
+  </div>
+  <div class="pgtop-actions">
+    <a class="pgtop-link" href="/admin/studio/clients/{{ c.id }}">Client detail &rarr;</a>
+  </div>
+</header>
+{% endblock %}
+{% block admin_body %}
+<main class="admin-main">
+
+  {# ---- headline tiles ------------------------------------------------ #}
+  <section>
+    <div class="muted" style="font-size:.8rem; margin:.3rem 0">The whole group at a glance
+      {% if venues %}· {{ venues|length }} venue{{ 's' if venues|length != 1 }} under it{% endif %}</div>
+    <div style="display:flex; gap:.6rem; flex-wrap:wrap">
+      <div style="flex:1 1 170px; border:1px solid #e2e6e8; border-radius:8px; padding:.7rem .8rem">
+        <div style="font-size:1.5rem; font-weight:600">${{ mrr_cents | usd0 }}</div>
+        <div style="font-size:.85rem; margin-top:.15rem">Recurring / month</div>
+        <div class="muted" style="font-size:.75rem">{{ retainers|length }} active plan{{ 's' if retainers|length != 1 }}</div>
+      </div>
+      <div style="flex:1 1 170px; border:1px solid #e2e6e8; border-radius:8px; padding:.7rem .8rem">
+        <div style="font-size:1.5rem; font-weight:600">${{ money.outstanding_cents | usd0 }}</div>
+        <div style="font-size:.85rem; margin-top:.15rem">Outstanding AR</div>
+        <div class="muted" style="font-size:.75rem">{{ money.n_invoices }} issued invoice{{ 's' if money.n_invoices != 1 }}</div>
+      </div>
+      <a href="/admin/financials" style="text-decoration:none; color:inherit; flex:1 1 170px; min-width:170px;
+         border:1px solid {{ '#e0c2a6' if overdue.count else '#e2e6e8' }};
+         background:{{ '#fbf3e8' if overdue.count else '#fff' }}; border-radius:8px; padding:.7rem .8rem">
+        <div style="font-size:1.5rem; font-weight:600; color:{{ '#9a6b2c' if overdue.count else '#2b3a33' }}">{{ overdue.count }}</div>
+        <div style="font-size:.85rem; margin-top:.15rem">Past due</div>
+        <div class="muted" style="font-size:.75rem">${{ overdue.cents | usd0 }} owed past due date</div>
+      </a>
+      <div style="flex:1 1 170px; border:1px solid #e2e6e8; border-radius:8px; padding:.7rem .8rem">
+        <div style="font-size:1.5rem; font-weight:600">${{ money.paid_cents | usd0 }}</div>
+        <div style="font-size:.85rem; margin-top:.15rem">Collected lifetime</div>
+        <div class="muted" style="font-size:.75rem">
+          {% if last_shoot %}last shoot {{ last_shoot }}{% else %}no shoots logged{% endif %}{% if next_shoot %} · next {{ next_shoot }}{% endif %}</div>
+      </div>
+    </div>
+  </section>
+
+  {# ---- recurring book ------------------------------------------------ #}
+  <section style="margin-top:1.2rem">
+    <div class="muted" style="font-size:.8rem; margin:.3rem 0">Recurring book · {{ period }} utilisation</div>
+    {% if retainers %}
+    <table style="width:100%; border-collapse:collapse; font-size:.9rem">
+      <thead><tr style="text-align:left; color:#6b7280; font-size:.78rem">
+        <th style="padding:.35rem .4rem">Plan</th><th>Client</th><th>Per month</th>
+        <th>This period</th><th>Advisory overage</th></tr></thead>
+      <tbody>
+      {% for r in retainers %}
+      <tr style="border-top:1px solid #eef1f2">
+        <td style="padding:.4rem"><a href="/admin/studio/recurring/{{ r.id }}" style="color:inherit">{{ r.title }}</a>
+          {% if r.renews_on %}<span class="muted" style="font-size:.72rem"> · renews {{ r.renews_on }}</span>{% endif %}</td>
+        <td>{{ r.client_name }}</td>
+        <td>${{ r.total_cents | usd0 }}</td>
+        <td>{% if r.behind %}<span style="color:#9a6b2c">behind: {{ r.behind | join(', ') }}</span>
+            {% else %}<span style="color:#2f7d57">on track</span>{% endif %}</td>
+        <td>{% if r.overage_cents %}${{ r.overage_cents | usd }}{% else %}<span class="muted">—</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div class="muted" style="font-size:.75rem; margin-top:.3rem">Overage is advisory only — it never bills until you add it to a draft and send.</div>
+    {% else %}
+    <p class="muted" style="font-size:.85rem">No active retainers in this group.</p>
+    {% endif %}
+  </section>
+
+  {# ---- pipeline ------------------------------------------------------ #}
+  <section style="margin-top:1.2rem">
+    <div class="muted" style="font-size:.8rem; margin:.3rem 0">Pipeline</div>
+    {% if status_counts %}
+    <div style="display:flex; gap:.4rem; flex-wrap:wrap; margin-bottom:.5rem">
+      {% for status, n in status_counts.items() %}
+      <span style="border:1px solid #e2e6e8; border-radius:999px; padding:.15rem .6rem; font-size:.78rem">
+        {{ status.replace('_', ' ') }} <b>{{ n }}</b></span>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if active_projects %}
+    <table style="width:100%; border-collapse:collapse; font-size:.9rem">
+      <tbody>
+      {% for p in active_projects %}
+      <tr style="border-top:1px solid #eef1f2">
+        <td style="padding:.4rem"><a href="/admin/studio/projects/{{ p.id }}" style="color:inherit">{{ p.title }}</a></td>
+        <td>{{ p.client_name }}</td>
+        <td>{{ p.status.replace('_', ' ') }}</td>
+        <td class="muted">{% if p.shoot_date %}shoot {{ p.shoot_date }}{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted" style="font-size:.85rem">No open projects.</p>
+    {% endif %}
+  </section>
+
+  {# ---- overdue AR ---------------------------------------------------- #}
+  {% if overdue_rows %}
+  <section style="margin-top:1.2rem">
+    <div class="muted" style="font-size:.8rem; margin:.3rem 0">Past-due invoices</div>
+    <table style="width:100%; border-collapse:collapse; font-size:.9rem">
+      <tbody>
+      {% for i in overdue_rows %}
+      <tr style="border-top:1px solid #eef1f2">
+        <td style="padding:.4rem"><a href="/admin/studio/invoices/{{ i.id }}" style="color:inherit">{{ i.title or 'Invoice' }}</a></td>
+        <td>{{ i.client_name }}</td>
+        <td style="color:#9a6b2c">due {{ i.due_date }}</td>
+        <td>${{ i.owed_cents | usd0 }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endif %}
+
+  {# ---- active licences ----------------------------------------------- #}
+  <section style="margin-top:1.2rem">
+    <div class="muted" style="font-size:.8rem; margin:.3rem 0">Active licences</div>
+    {% if licenses %}
+    <table style="width:100%; border-collapse:collapse; font-size:.9rem">
+      <tbody>
+      {% for l in licenses %}
+      <tr style="border-top:1px solid #eef1f2">
+        <td style="padding:.4rem"><a href="/admin/studio/licenses/{{ l.id }}" style="color:inherit">{{ l.title }}</a></td>
+        <td>{{ l.holder_name }}</td>
+        <td>{{ l.usage_tier.replace('_', ' ') }}{% if l.exclusivity == 'exclusive' %} · exclusive{% endif %}</td>
+        <td class="muted">{% if l.perpetual %}perpetual{% elif l.ends_on %}ends {{ l.ends_on }}{% if l.days_left is not none and l.days_left <= 45 %} <span style="color:#9a6b2c">({{ l.days_left }}d)</span>{% endif %}{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted" style="font-size:.85rem">No active licences in this group.</p>
+    {% endif %}
+  </section>
+
+  {# ---- venues -------------------------------------------------------- #}
+  {% if venues %}
+  <section style="margin-top:1.2rem">
+    <div class="muted" style="font-size:.8rem; margin:.3rem 0">Venues in this group</div>
+    <div style="display:flex; gap:.4rem; flex-wrap:wrap">
+      {% for v in venues %}
+      <a href="/admin/studio/clients/{{ v.id }}" style="text-decoration:none; color:inherit;
+         border:1px solid #e2e6e8; border-radius:8px; padding:.4rem .7rem; font-size:.85rem">
+        {{ v.name }}{% if v.company %} <span class="muted">· {{ v.company }}</span>{% endif %}</a>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+</main>
+{% endblock %}

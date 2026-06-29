@@ -867,6 +867,159 @@ async def client_detail(request: Request, client_id: int):
     )
 
 
+def _group_ids(client_id: int) -> list[int]:
+    """A client and every venue/region under it (Domain A hierarchy) — the set a company
+    command view rolls up over. Always includes the client itself, so a flat client with no
+    children is a degenerate group of one."""
+    return [client_id, *clients.descendant_ids(client_id)]
+
+
+@router.get("/companies/{client_id}", response_class=HTMLResponse)
+async def company_view(request: Request, client_id: int):
+    """One read-only command view per company: the whole group (client + venues) on a page —
+    recurring book + utilization, pipeline, AR + overdue, active licences, shoot cadence. Pure
+    aggregation over invoices/payments/projects/recurring_plans/licenses; writes nothing, and
+    every row links to the surface that owns the action."""
+    c = get_client(client_id)
+    group_ids = _group_ids(client_id)
+    ph = ",".join("?" * len(group_ids))
+
+    desc = clients.descendant_ids(client_id)
+    venues = []
+    if desc:
+        dph = ",".join("?" * len(desc))
+        venues = db.all_(
+            f"SELECT id, name, company FROM clients WHERE id IN ({dph}) ORDER BY name", desc
+        )
+
+    # Lifetime money across the group: invoiced (issued only), paid (ground truth), outstanding.
+    inv = db.one(
+        f"""SELECT COALESCE(SUM(CASE WHEN status != 'draft' THEN total_cents END), 0) AS invoiced_cents,
+                   COUNT(CASE WHEN status != 'draft' THEN 1 END) AS n_invoices
+            FROM invoices WHERE project_id IN (SELECT id FROM projects WHERE client_id IN ({ph}))""",
+        group_ids,
+    )
+    paid = db.one(
+        f"""SELECT COALESCE(SUM(amount_cents), 0) AS paid_cents FROM payments
+            WHERE invoice_id IN (SELECT i.id FROM invoices i JOIN projects p ON p.id=i.project_id
+                                 WHERE p.client_id IN ({ph}))""",
+        group_ids,
+    )
+    money = {
+        "invoiced_cents": inv["invoiced_cents"],
+        "paid_cents": paid["paid_cents"],
+        "outstanding_cents": max(inv["invoiced_cents"] - paid["paid_cents"], 0),
+        "n_invoices": inv["n_invoices"],
+    }
+
+    # Past-due open invoices (same definition as money-ops: deposit_paid owes total-deposit).
+    overdue_rows = db.all_(
+        f"""SELECT i.id, i.slug, i.title, i.status, i.due_date,
+                   CASE WHEN i.status='deposit_paid' THEN i.total_cents - i.deposit_cents
+                        ELSE i.total_cents END AS owed_cents,
+                   c.name AS client_name
+            FROM invoices i JOIN projects p ON p.id=i.project_id JOIN clients c ON c.id=p.client_id
+            WHERE p.client_id IN ({ph}) AND i.status IN ('sent','viewed','deposit_paid')
+                  AND i.due_date IS NOT NULL AND i.due_date < date('now')
+            ORDER BY i.due_date""",
+        group_ids,
+    )
+    overdue = {"count": len(overdue_rows), "cents": sum(r["owed_cents"] for r in overdue_rows)}
+
+    # Pipeline: counts per status + the live (non-closed) projects, soonest shoot first.
+    status_counts = {
+        r["status"]: r["n"]
+        for r in db.all_(
+            f"SELECT status, COUNT(*) AS n FROM projects WHERE client_id IN ({ph}) GROUP BY status",
+            group_ids,
+        )
+    }
+    active_projects = db.all_(
+        f"""SELECT p.id, p.title, p.status, p.shoot_date, c.name AS client_name
+            FROM projects p JOIN clients c ON c.id=p.client_id
+            WHERE p.client_id IN ({ph}) AND p.status NOT IN ('project_closed','archived')
+            ORDER BY p.shoot_date IS NULL, p.shoot_date, p.created_at DESC""",
+        group_ids,
+    )
+
+    # Recurring book: active plans across the group, each with this period's utilization. Local
+    # import — recurring imports studio.get_project at module load, so a top-level import cycles.
+    from . import recurring
+
+    period = recurring._period()
+    plan_rows = db.all_(
+        f"""SELECT rp.*, c.name AS client_name
+            FROM recurring_plans rp
+            JOIN projects p ON p.id=rp.project_id
+            JOIN clients c ON c.id=p.client_id
+            WHERE p.client_id IN ({ph}) AND rp.active=1 AND rp.deleted_at IS NULL
+            ORDER BY c.name, rp.title""",
+        group_ids,
+    )
+    retainers = []
+    mrr_cents = 0
+    for rp in plan_rows:
+        mrr_cents += rp["total_cents"] or 0
+        ov = recurring.compute_overage(rp, period)
+        behind = [line["label"] for line in ov["lines"] if line["done"] < line["target"]]
+        retainers.append(
+            {
+                "id": rp["id"],
+                "title": rp["title"],
+                "client_name": rp["client_name"],
+                "total_cents": rp["total_cents"] or 0,
+                "renews_on": rp["renews_on"],
+                "lines": ov["lines"],
+                "behind": behind,
+                "overage_cents": ov["total_cents"],
+            }
+        )
+
+    licenses = db.all_(
+        f"""SELECT l.id, l.title, l.usage_tier, l.exclusivity, l.published, l.starts_on, l.ends_on,
+                   l.perpetual, c.name AS holder_name,
+                   CAST(julianday(l.ends_on) - julianday(date('now','localtime')) AS INTEGER) AS days_left
+            FROM licenses l JOIN clients c ON c.id=l.holder_client_id
+            WHERE l.holder_client_id IN ({ph}) AND l.deleted_at IS NULL AND l.status='active'
+            ORDER BY l.ends_on IS NULL, l.ends_on""",
+        group_ids,
+    )
+
+    last_shoot = db.one(
+        f"""SELECT MAX(shoot_date) AS d FROM projects
+            WHERE client_id IN ({ph}) AND shoot_date IS NOT NULL
+                  AND shoot_date <= date('now','localtime')""",
+        group_ids,
+    )["d"]
+    next_shoot = db.one(
+        f"""SELECT MIN(shoot_date) AS d FROM projects
+            WHERE client_id IN ({ph}) AND shoot_date IS NOT NULL
+                  AND shoot_date >= date('now','localtime')""",
+        group_ids,
+    )["d"]
+
+    return templates.TemplateResponse(
+        request,
+        "admin/company.html",
+        {
+            "c": c,
+            "venues": venues,
+            "money": money,
+            "overdue": overdue,
+            "overdue_rows": overdue_rows,
+            "status_counts": status_counts,
+            "active_projects": active_projects,
+            "retainers": retainers,
+            "mrr_cents": mrr_cents,
+            "period": period,
+            "licenses": licenses,
+            "last_shoot": last_shoot,
+            "next_shoot": next_shoot,
+            "base_url": config.BASE_URL,
+        },
+    )
+
+
 def _client_blockers(client_id: int) -> list[str]:
     """Reasons NOT to silently delete a client — surface as friendly copy so
     Kevin can choose to force-delete with eyes open."""

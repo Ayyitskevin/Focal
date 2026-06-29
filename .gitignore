@@ -5,6 +5,10 @@
 
 # Runtime data: SQLite DBs, client media, zips, tmp, brand uploads (+ owned by mise user)
 data/
+# Stray SQLite files (e.g. a test/migrate run with the default DB_PATH landing in-repo)
+*.db
+*.db-wal
+*.db-shm
 
 # Local backup snapshots (may contain DB dumps / client PII — never commit)
 _bak/
