@@ -29,7 +29,10 @@ The related intake shortcuts are also local/operator-controlled:
 - shot-list templates clone normal audited rows into the project, then you edit them like any other
   shot list;
 - the company command view ranks the next few derived actions across money, retainers, active
-  project closeout gaps, and repeat-shoot cadence; each item links back to its owning surface;
+  project closeout gaps, billing readiness, and repeat-shoot cadence; each item links back to
+  its owning surface;
+- company billing readiness rolls up AP email, billing address, tax ID, and recipient fallback
+  gaps across the root company and venues before drafts or AR chases leave the studio;
 - the Studio Activity `Needs attention` panel rolls up the top commercial action per company so
   the morning triage view shows which relationship to open first;
 - AR chase assist opens from past-due company/action/invoice links, gathers the statement and

@@ -83,6 +83,63 @@
     {% endif %}
   </section>
 
+  {# ---- billing readiness -------------------------------------------- #}
+  <section id="billing-readiness" style="margin-top:1.2rem">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:.75rem; margin:.3rem 0">
+      <div class="muted" style="font-size:.8rem">Billing readiness</div>
+      {% if billing_readiness.ready %}
+      <span style="color:#2f7d57; font-size:.78rem">complete across group</span>
+      {% else %}
+      <span style="color:#9a6b2c; font-size:.78rem">profile gaps</span>
+      {% endif %}
+    </div>
+    <div style="display:flex; gap:.4rem; flex-wrap:wrap; margin-bottom:.5rem">
+      {% if billing_readiness.missing_billing_email %}
+      <span style="border:1px solid #e0c2a6; background:#fbf3e8; border-radius:999px; padding:.15rem .6rem; font-size:.78rem">{{ billing_readiness.missing_billing_email }} missing AP email{{ 's' if billing_readiness.missing_billing_email != 1 }}</span>
+      {% endif %}
+      {% if billing_readiness.missing_billing_address %}
+      <span style="border:1px solid #e0c2a6; background:#fbf3e8; border-radius:999px; padding:.15rem .6rem; font-size:.78rem">{{ billing_readiness.missing_billing_address }} missing billing address{{ 'es' if billing_readiness.missing_billing_address != 1 }}</span>
+      {% endif %}
+      {% if billing_readiness.missing_tax_id %}
+      <span style="border:1px solid #e0c2a6; background:#fbf3e8; border-radius:999px; padding:.15rem .6rem; font-size:.78rem">{{ billing_readiness.missing_tax_id }} missing tax ID{{ 's' if billing_readiness.missing_tax_id != 1 }}</span>
+      {% endif %}
+      {% if billing_readiness.missing_invoice_recipient %}
+      <span style="border:1px solid #e5b7b7; background:#fff5f5; border-radius:999px; padding:.15rem .6rem; font-size:.78rem">{{ billing_readiness.missing_invoice_recipient }} missing invoice recipient{{ 's' if billing_readiness.missing_invoice_recipient != 1 }}</span>
+      {% endif %}
+      {% if billing_readiness.fallback_invoice_recipient %}
+      <span style="border:1px solid #e2e6e8; border-radius:999px; padding:.15rem .6rem; font-size:.78rem">{{ billing_readiness.fallback_invoice_recipient }} using client email fallback</span>
+      {% endif %}
+      {% if billing_readiness.ready %}
+      <span style="border:1px solid #d6eadc; background:#f1faf4; border-radius:999px; padding:.15rem .6rem; font-size:.78rem">AP profile ready</span>
+      {% endif %}
+    </div>
+    <table style="width:100%; border-collapse:collapse; font-size:.9rem">
+      <thead><tr style="text-align:left; color:#6b7280; font-size:.78rem">
+        <th style="padding:.35rem .4rem">Account</th><th>AP email</th><th>Invoice recipient</th><th>Billing address</th><th>Tax ID</th><th>Draft / past due</th>
+      </tr></thead>
+      <tbody>
+      {% for b in billing_readiness.rows %}
+      <tr style="border-top:1px solid #eef1f2">
+        <td style="padding:.4rem"><a href="/admin/studio/clients/{{ b.id }}" style="color:inherit">{{ b.display_name }}</a>
+          {% if b.id == c.id %}<span class="muted"> · root</span>{% endif %}</td>
+        <td>{% if b.billing_email %}{{ b.billing_email }}{% else %}<span class="muted">missing AP email</span>{% endif %}</td>
+        <td>
+          {% if b.invoice_recipient %}
+          {{ b.invoice_recipient }} <span class="muted">· {{ b.invoice_recipient_label }}</span>
+          {% else %}
+          <span class="muted">missing recipient</span>
+          {% endif %}
+        </td>
+        <td>{% if b.has_billing_address %}<span style="color:#2f7d57">set</span>{% else %}<span class="muted">missing</span>{% endif %}</td>
+        <td>{% if b.has_tax_id %}<span style="color:#2f7d57">set</span>{% else %}<span class="muted">missing</span>{% endif %}</td>
+        <td>{% if b.money_docs %}{{ b.money_docs }}{% else %}<span class="muted">—</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+
   {# ---- recurring book ------------------------------------------------ #}
   <section style="margin-top:1.2rem">
     <div class="muted" style="font-size:.8rem; margin:.3rem 0">Recurring book · {{ period }} utilisation</div>

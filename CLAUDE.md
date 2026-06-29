@@ -70,12 +70,12 @@ Do NOT:
 
 ## Current commercial spine handoff
 
-Recent F&B/commercial work is documented in ADRs 0034–0045. That spine now includes
+Recent F&B/commercial work is documented in ADRs 0034–0046. That spine now includes
 derived repeat-client cadence, canned shot-list and deliverable templates, a project closeout-readiness
 panel, read-only company next-action ranking, a Studio Activity commercial action queue, manual AR
-chase assist for past-due invoices, AR follow-up cadence from send-log history, and company
-communication history. These are deterministic/operator surfaces only: no auto-send, auto-charge,
-auto-publish, or auto-close.
+chase assist for past-due invoices, AR follow-up cadence from send-log history, company
+communication history, and company billing readiness. These are deterministic/operator surfaces only:
+no auto-send, auto-charge, auto-publish, or auto-close.
 
 ## Provider facade quick reference
 

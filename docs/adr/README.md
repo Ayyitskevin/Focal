@@ -50,6 +50,7 @@ states context, the decision, consequences, measured reopen criteria, and altern
 | [0043](0043-ar-chase-assist.md) | AR chase assist (company-level review/send draft for past-due invoices, linked from commercial actions and invoices; no invoice/payment mutation) | Accepted |
 | [0044](0044-ar-chase-cadence.md) | AR chase follow-up cadence (derived from manual send log; distinguishes never chased, recently chased, and due follow-ups; no automation) | Accepted |
 | [0045](0045-company-communication-history.md) | Company communication history (read-only company-group sent-email roll-up for proposal/contract/invoice sends and AR chases; no schema or automation) | Accepted |
+| [0046](0046-company-billing-readiness.md) | Company billing readiness (read-only company-group AP profile gaps plus action when draft/past-due invoices lack AP email; no schema or automation) | Accepted |
 
 See also the operator runbook [`../MISE-SOLO-STUDIO-OS-RUNBOOK.md`](../MISE-SOLO-STUDIO-OS-RUNBOOK.md)
 (how to run it day to day), [`../MISE-SOLO-STUDIO-OS.md`](../MISE-SOLO-STUDIO-OS.md),
