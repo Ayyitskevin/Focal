@@ -124,6 +124,8 @@ def test_company_view_single_client_is_a_group_of_one(admin_client):
     assert r.status_code == 200
     assert "Solo Bistro" in r.text
     assert "No active retainers" in r.text and "No open projects" in r.text
+    assert "Communication history" in r.text
+    assert "No sent emails for this company group yet" in r.text
     assert "No urgent next actions" in r.text
 
 
@@ -209,6 +211,101 @@ def test_studio_activity_surfaces_top_commercial_actions(admin_client):
     assert "Activity Hospitality" in html
     assert "Activity invoice" in html
     assert "/admin/studio/companies/" in html and "/ar-chase?invoice_id=" in html
+
+
+def test_company_communication_history_rolls_up_group_sends(admin_client):
+    group = _client("Comms Group", company="Comms Hospitality")
+    venue = _client("Comms Downtown", company="Comms DT LLC", parent_id=group)
+    group_project = _project(group, "Retainer")
+    venue_project = _project(venue, "Launch")
+    other = _client("Other Group", company="Other Hospitality")
+    other_project = _project(other, "Other launch")
+
+    proposal_id = db.run(
+        "INSERT INTO proposals (project_id, slug, title, status) VALUES (?,?,?,?)",
+        (venue_project, "comms-prop", "Launch proposal", "sent"),
+    )
+    contract_id = db.run(
+        "INSERT INTO contracts (project_id, slug, title, body, status) VALUES (?,?,?,?,?)",
+        (group_project, "comms-contract", "Retainer contract", "Terms", "sent"),
+    )
+    invoice_id = db.run(
+        "INSERT INTO invoices (project_id, slug, title, total_cents, status) VALUES (?,?,?,?,?)",
+        (venue_project, "comms-invoice", "Launch invoice", 120000, "sent"),
+    )
+    db.run(
+        "INSERT INTO invoices (project_id, slug, title, total_cents, status) VALUES (?,?,?,?,?)",
+        (other_project, "other-invoice", "Other invoice", 120000, "sent"),
+    )
+
+    sends = [
+        (
+            venue_project,
+            "proposal",
+            proposal_id,
+            "chef@comms.test",
+            "Proposal ready",
+            "2026-06-20 10:00:00",
+        ),
+        (
+            group_project,
+            "contract",
+            contract_id,
+            "owner@comms.test",
+            "Contract ready",
+            "2026-06-21 10:00:00",
+        ),
+        (
+            venue_project,
+            "invoice",
+            invoice_id,
+            "ap@comms.test",
+            "Invoice ready",
+            "2026-06-22 10:00:00",
+        ),
+        (
+            group_project,
+            "other",
+            group,
+            "ap@comms.test",
+            "Follow-up on open invoice balance - Comms Hospitality",
+            "2026-06-23 10:00:00",
+        ),
+        (
+            venue_project,
+            "other",
+            999,
+            "owner@comms.test",
+            "Gallery delivery ready",
+            "2026-06-24 10:00:00",
+        ),
+        (
+            other_project,
+            "invoice",
+            invoice_id,
+            "ap@other.test",
+            "Other invoice ready",
+            "2026-06-25 10:00:00",
+        ),
+    ]
+    for project_id, kind, doc_id, to, subject, created_at in sends:
+        db.run(
+            "INSERT INTO emails_log (project_id, doc_kind, doc_id, to_email, subject, created_at)"
+            " VALUES (?,?,?,?,?,?)",
+            (project_id, kind, doc_id, to, subject, created_at),
+        )
+
+    html = admin_client.get(f"/admin/studio/companies/{group}").text
+    assert "Communication history" in html
+    assert "AR chase" in html
+    assert "Proposal" in html and "Contract" in html and "Invoice" in html
+    assert f"/admin/studio/proposals/{proposal_id}" in html
+    assert f"/admin/studio/contracts/{contract_id}" in html
+    assert f"/admin/studio/invoices/{invoice_id}" in html
+    assert f"/admin/studio/companies/{group}/ar-chase" in html
+    assert "Comms Downtown" in html and "Comms DT LLC" in html
+    assert "Gallery delivery ready" not in html
+    assert "Other invoice ready" not in html
 
 
 def test_company_ar_chase_compose_and_manual_send(admin_client, monkeypatch):

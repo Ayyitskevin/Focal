@@ -37,8 +37,10 @@ The related intake shortcuts are also local/operator-controlled:
   invoice or payment state.
 - AR follow-up cadence is derived from those manual send-log rows: company and Activity surfaces
   show never chased, recently chased, or follow-up due after `MISE_AR_CHASE_FOLLOWUP_DAYS`
-  (default seven). It does not schedule or
-  send anything by itself.
+  (default seven). It does not schedule or send anything by itself.
+- company communication history rolls up recent proposal, contract, invoice, and AR chase sends
+  across the company group. It is a scoped read-only view over the existing sent-email log, not a
+  new mailbox or task queue.
 
 ## 1. Start here every morning — `/admin/ai-ops`
 

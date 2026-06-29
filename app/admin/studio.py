@@ -1127,6 +1127,79 @@ def _ar_chase_context(client_id: int, invoice_id: int | None = None) -> dict:
     }
 
 
+def _company_communication_rows(client_id: int, limit: int = 8) -> list[dict]:
+    """Recent manual sends for a company group.
+
+    Includes proposal/contract/invoice emails sent from projects owned by the company or its
+    child venues, plus company-level AR chases marked by the AR subject prefix. Other catch-all
+    sends stay on the global sent log so gallery deliveries do not pollute commercial context.
+    """
+    group_ids = _group_ids(client_id)
+    if not group_ids:
+        return []
+    ph = ",".join("?" * len(group_ids))
+    doc_rows = db.all_(
+        f"""SELECT e.id, e.doc_kind, e.doc_id, e.to_email, e.subject, e.created_at,
+                   p.id AS project_id, p.title AS project_title,
+                   c.name AS client_name, c.company,
+                   COALESCE(pr.title, ct.title, inv.title) AS doc_title
+            FROM emails_log e
+            JOIN projects p ON p.id=e.project_id
+            JOIN clients c ON c.id=p.client_id
+            LEFT JOIN proposals pr ON e.doc_kind='proposal' AND pr.id=e.doc_id
+            LEFT JOIN contracts ct ON e.doc_kind='contract' AND ct.id=e.doc_id
+            LEFT JOIN invoices inv ON e.doc_kind='invoice' AND inv.id=e.doc_id
+            WHERE p.client_id IN ({ph}) AND e.doc_kind IN ('proposal','contract','invoice')
+            ORDER BY e.created_at DESC, e.id DESC
+            LIMIT ?""",
+        (*group_ids, limit),
+    )
+    ar_rows = db.all_(
+        f"""SELECT e.id, e.doc_kind, e.doc_id, e.to_email, e.subject, e.created_at,
+                   p.id AS project_id, p.title AS project_title,
+                   pc.name AS client_name, pc.company,
+                   ac.name AS doc_client_name, ac.company AS doc_company
+            FROM emails_log e
+            LEFT JOIN projects p ON p.id=e.project_id
+            LEFT JOIN clients pc ON pc.id=p.client_id
+            LEFT JOIN clients ac ON ac.id=e.doc_id
+            WHERE e.doc_kind='other'
+              AND e.doc_id IN ({ph})
+              AND e.subject LIKE ?
+            ORDER BY e.created_at DESC, e.id DESC
+            LIMIT ?""",
+        (*group_ids, f"{AR_CHASE_SUBJECT_PREFIX}%", limit),
+    )
+    plural = {"proposal": "proposals", "contract": "contracts", "invoice": "invoices"}
+    labels = {"proposal": "Proposal", "contract": "Contract", "invoice": "Invoice"}
+    rows: list[dict] = []
+    for row in doc_rows:
+        item = dict(row)
+        kind = item["doc_kind"]
+        item.update(
+            {
+                "kind_label": labels[kind],
+                "badge_kind": kind,
+                "href": f"/admin/studio/{plural[kind]}/{item['doc_id']}",
+                "context_label": item["doc_title"] or item["project_title"] or labels[kind],
+            }
+        )
+        rows.append(item)
+    for row in ar_rows:
+        item = dict(row)
+        item.update(
+            {
+                "kind_label": "AR chase",
+                "badge_kind": "other",
+                "href": f"/admin/studio/companies/{item['doc_id']}/ar-chase",
+                "context_label": item["doc_company"] or item["doc_client_name"] or "Company AR",
+            }
+        )
+        rows.append(item)
+    rows.sort(key=lambda item: (item["created_at"] or "", item["id"] or 0), reverse=True)
+    return rows[:limit]
+
+
 def _project_closeout(project_id: int, p) -> dict:
     """Read-only project closeout checklist.
 
@@ -1607,6 +1680,7 @@ async def company_view(request: Request, client_id: int):
 
     cadence = common.shoot_cadence(client_id, today_date=_today(), include_children=True)
     ar_history = _ar_chase_history(client_id, _today())
+    communication_rows = _company_communication_rows(client_id)
     next_actions = _company_next_actions(
         client_id, group_ids, cadence, overdue_rows, active_projects, retainers, ar_history
     )
@@ -1621,6 +1695,7 @@ async def company_view(request: Request, client_id: int):
             "overdue": overdue,
             "overdue_rows": overdue_rows,
             "ar_history": ar_history,
+            "communication_rows": communication_rows,
             "status_counts": status_counts,
             "active_projects": active_projects,
             "deliverables_by_project": deliverables_by_project,

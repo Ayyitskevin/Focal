@@ -169,6 +169,35 @@
   </section>
   {% endif %}
 
+  {# ---- communication history --------------------------------------- #}
+  <section style="margin-top:1.2rem">
+    <div class="muted" style="font-size:.8rem; margin:.3rem 0">Communication history</div>
+    {% if communication_rows %}
+    <table style="width:100%; border-collapse:collapse; font-size:.9rem">
+      <thead><tr style="text-align:left; color:#6b7280; font-size:.78rem">
+        <th style="padding:.35rem .4rem">Date</th><th>Kind</th><th>To</th><th>Subject</th><th>Context</th>
+      </tr></thead>
+      <tbody>
+      {% for e in communication_rows %}
+      <tr style="border-top:1px solid #eef1f2">
+        <td class="muted" style="padding:.4rem">{{ e.created_at[:10] }}</td>
+        <td><span class="kind-badge kind-{{ e.badge_kind }}">{{ e.kind_label }}</span></td>
+        <td>{{ e.to_email }}</td>
+        <td><a href="{{ e.href }}" style="color:inherit">{{ e.subject }}</a></td>
+        <td>
+          {{ e.context_label }}
+          {% if e.project_id %}<span class="muted"> · <a href="/admin/studio/projects/{{ e.project_id }}" style="color:inherit">{{ e.project_title }}</a></span>{% endif %}
+          {% if e.client_name %}<span class="muted"> · {{ e.client_name }}{% if e.company %} ({{ e.company }}){% endif %}</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted" style="font-size:.85rem">No sent emails for this company group yet.</p>
+    {% endif %}
+  </section>
+
   {# ---- active licences ----------------------------------------------- #}
   <section style="margin-top:1.2rem">
     <div class="muted" style="font-size:.8rem; margin:.3rem 0">Active licences</div>

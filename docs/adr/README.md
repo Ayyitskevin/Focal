@@ -49,6 +49,7 @@ states context, the decision, consequences, measured reopen criteria, and altern
 | [0042](0042-studio-commercial-action-queue.md) | Studio commercial action queue (top derived company action per root client on Activity; no task lifecycle or automation) | Accepted |
 | [0043](0043-ar-chase-assist.md) | AR chase assist (company-level review/send draft for past-due invoices, linked from commercial actions and invoices; no invoice/payment mutation) | Accepted |
 | [0044](0044-ar-chase-cadence.md) | AR chase follow-up cadence (derived from manual send log; distinguishes never chased, recently chased, and due follow-ups; no automation) | Accepted |
+| [0045](0045-company-communication-history.md) | Company communication history (read-only company-group sent-email roll-up for proposal/contract/invoice sends and AR chases; no schema or automation) | Accepted |
 
 See also the operator runbook [`../MISE-SOLO-STUDIO-OS-RUNBOOK.md`](../MISE-SOLO-STUDIO-OS-RUNBOOK.md)
 (how to run it day to day), [`../MISE-SOLO-STUDIO-OS.md`](../MISE-SOLO-STUDIO-OS.md),
