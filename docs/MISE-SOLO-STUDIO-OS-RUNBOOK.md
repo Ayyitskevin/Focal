@@ -9,9 +9,9 @@ the operator-facing companion to the architecture docs — see
 
 > **Single rule that governs everything here:** the model proposes, deterministic code
 > validates, **a human approves**. Nothing on these surfaces sends a client message, charges
-> a card, creates an invoice, prints an album, or promotes a model on its own. Every such act
-> is an explicit human action, and every AI output is at least a reviewable draft (audit
-> §11.4, ADR 0006).
+> a card, creates an invoice, hides a photo from a client, or promotes a model on its own.
+> Every such act is an explicit human action, and every AI output is at least a reviewable
+> draft (audit §11.4, ADR 0006).
 
 ---
 
@@ -20,8 +20,6 @@ the operator-facing companion to the architecture docs — see
 `/admin/ai-ops` is the one pane over every AI capability (ADR 0013). It shows, with links
 straight to the queue that owns each action:
 
-- **Offers awaiting a decision** — count + proposed value → `/admin/offers?decision=undecided`
-- **Album drafts to review** → `/admin/albums?status=draft`
 - **Vision promotion gate** — ready / not-ready + paired coverage → `/admin/validation`
 - **Provider errors in the ledger** → `/admin/ai-runs`
 - **Ledger summary** — runs, last-7-day volume, reported cost, per-capability breakdown
@@ -94,57 +92,12 @@ nothing until you set the relevant flag. Flags live in flow's `.env`
   fresh download after a decision rebuilds it. To permanently un-cut a frame, use **restore**, not
   the flag.
 
-### Offers (Plutus) — ADRs 0006, 0012
-
-- **What it does:** print/album bundle recommendations after a gallery is analyzed; the
-  summary lands on the gallery (`plutus_last_*`).
-- **Surface:** `/admin/offers` — a triage queue. Approve the offers worth pursuing, reject
-  the rest (persisted; migration 068). Filter by status (ready/error) and by decision
-  (undecided/approved/rejected). The header shows **proposed** vs **approved** pipeline value.
-- **Send (approved offers):** an approved offer with a client email on file shows **Send to
-  client** → a compose page with an editable draft (a warm note + the offer link only;
-  pricing stays on the offer page). You review/edit and click Send; it goes out through the
-  same Gmail path as proposals/invoices, is recorded in the email log, and the offer is
-  marked **Sent** (migration 069). Nothing auto-sends — the button only appears for a ready,
-  approved offer, and the email is a draft until you send it. ADR 0018.
-- **Arm:** `MISE_PLUTUS_URL` + `MISE_PLUTUS_TOKEN` (proposals). Sending also needs Gmail
-  configured (`MISE_GMAIL_USER` / `MISE_GMAIL_APP_PASSWORD`). Optional Phase-3 facade
-  provenance into the ledger: `MISE_PROVIDER_FACADE_OFFERS=true` (legacy path runs unchanged
-  when off).
-- **Scorecard:** `/admin/offers-scorecard` answers "is this capability earning its keep?"
-  (audit §19.4) — the proposed → approved → sent funnel (all-time / 60d / 30d) plus a
-  **project-level revenue attribution proxy** (payments on offered projects after the send;
-  labelled a proxy because there's no offer→sale link). Read-only; it informs the keep/retire
-  call, never decides it. ADR 0020.
-- **Bounded:** approving records your call; sending emails the **link** only. Neither charges
-  the client nor creates an invoice — acceptance flows through your existing, human-initiated
-  invoice workflow. The money path is never touched by an AI proposal.
-- **Rollback:** `MISE_PROVIDER_FACADE_OFFERS=false` reverts to the legacy path; clearing the
-  Plutus URL/token makes offers dormant. Migration 069 is additive (see §6).
-
-### Albums (Mnemosyne) — ADRs 0009, 0011
-
-- **What it does:** proposes a curated, ordered subset of a gallery's photos laid into
-  spreads. A deterministic baseline proposer ships today; a Mnemosyne model can register on
-  the same seam later.
-- **Surface:** `/admin/albums` — propose a baseline for a gallery, review the spreads (with
-  thumbnails) and the **omitted** photos, then approve or reject.
-- **Order (approved albums):** an approved album's detail page has an **Order** block —
-  record the spec (size, cover, notes) and mark it **Ordered** (migration 070). It's
-  record-only: it prints nothing, contacts no vendor, and charges nothing — you place the
-  order with your lab however you do today, and this captures the decision + spec (and an
-  audit row) for the record. ADR 0019.
-- **Export (approved albums):** the Order block also offers a print-ready **Order sheet**
-  (`/admin/albums/{id}/order-sheet` — a standalone page you print or Save-as-PDF for the lab,
-  spec + every photo in spread/slot order) and a **CSV manifest** (`…/order.csv` — the
-  ordered file list). Read-only; no PDF dependency (the browser does the PDF).
-- **Arm:** nothing to arm — the baseline proposer is always available. The deterministic
-  validator guarantees a draft never silently omits, duplicates, or misassigns a photo, and
-  refuses to store one that would.
-- **Bounded:** approval records your decision; ordering records the spec. Neither prints,
-  orders from a vendor, nor charges.
-- **Rollback:** the tables (migration 066) and the order columns (migration 070) are additive
-  and dormant; see §6.
+> **Decommissioned (ADR 0026, migration 075).** The **Offers (Plutus)** and **Albums
+> (Mnemosyne)** consumer-upsell capabilities were removed — print/album bundles and lay-flat
+> album layout don't fit a solo B2B food-and-beverage workflow (companies receive licensed
+> digital files, not coffee-table books). Their code, admin surfaces, provider-facade
+> capabilities, and schema are gone; the historical ADRs (0009/0011/0012/0018–0020/0022/0023)
+> are marked Superseded.
 
 ### Content / captions (Odysseus, Dionysus) — ADR 0006
 
@@ -333,13 +286,12 @@ arm it. The controlled cutover to `2025-09-03` (data-source model) is its own ru
 | `MISE_VISION_PROVIDER` | `argus` | Which provider serves **production** vision. `qwen` is honored only once the interlock is satisfied (see §3.1); otherwise it falls back to Argus and logs why |
 | `MISE_VALIDATION_MIN_PAIRED` | `20` | Paired scores required before the gate evaluates parity |
 | `MISE_VALIDATION_PARITY_MARGIN` | `0.0` | How far the challenger must clear the baseline (0 = parity) |
-| `MISE_PROVIDER_FACADE_OFFERS` | `false` | Route Plutus offers through the facade + ledger provenance |
 | `MISE_PRODUCTS_RENDER_URL` | — | Aphrodite render backend; unset = products dormant |
 | `MISE_PRODUCTS_BUDGET_USD` | `0` | Hard cap on total product-render spend (0 = disabled) |
 | `MISE_NOTION_VERSION` | `2022-06-28` | Notion API version (set `2025-09-03` only after staging validation) |
 | `MISE_NOTION_BOOKINGS_DS` / `…_SESSIONS_DS` | — | Data-source ids for the 2025-09-03 create path |
 
-Provider arming (Argus / Plutus / Odysseus URLs + tokens) and all other settings are in
+Provider arming (Argus / Odysseus URLs + tokens) and all other settings are in
 [`.env.example`](../.env.example).
 
 ---
@@ -352,16 +304,14 @@ feature dormant changes nothing. Run via the app's normal `db.migrate()` on boot
 | Migration | Adds | Rollback |
 | --- | --- | --- |
 | `065_ai_runs.sql` | `ai_runs` provenance ledger | `rollback/065_ai_runs.sql` (drops the table) |
-| `066_album_drafts.sql` | `album_drafts` + `album_placements` | `rollback/066_album_drafts.sql` |
 | `067_validation_set.sql` | `validation_items` + `validation_scores` | `rollback/067_validation_set.sql` |
-| `068_plutus_offer_decision.sql` | `galleries.plutus_offer_decision` + `…_decided_at` | `rollback/068…` (DROP COLUMN; SQLite ≥3.35) |
-| `069_plutus_offer_sent.sql` | `galleries.plutus_offer_sent_at` + `…_sent_to` | `rollback/069…` (DROP COLUMN; SQLite ≥3.35) |
-| `070_album_order.sql` | `album_drafts.ordered_at` + `order_size/cover/notes` | `rollback/070…` (DROP COLUMN; SQLite ≥3.35) |
+| `075_decommission_albums_offers.sql` | **drops** `album_drafts`/`album_placements` + 13 `plutus_*` columns (decommission, ADR 0026) | `rollback/075…` (recreates the dropped schema; the features stay gone in code) |
 | `077_asset_cull_state.sql` | `assets.cull_state` + `cull_decided_at/cull_source` + index | `rollback/077…` (DROP COLUMN; SQLite ≥3.45) |
 
 Each rollback is safe because the tables/columns are dormant and referenced by no money,
 invoice, or business record. Rolling a feature back is normally a **flag**, not a migration —
-reach for a rollback script only to remove the schema itself.
+reach for a rollback script only to remove the schema itself. (The album/offer migrations
+066/068/069/070 that 075 reverses are historical — their schema no longer exists.)
 
 ---
 
@@ -386,9 +336,8 @@ CI runs the `-m unit` gate and `tests/test_smoke.py`. Topic smoke files
 ## 8. Safety invariants (do not cross without a deliberate, reviewed change)
 
 - **Money path is sacred.** No AI output sends a message, charges, invoices, or checks out.
-  Offer approval and album approval record a decision only.
-- **Human approval gate.** Captions, offers, album layouts, and any model output are drafts
-  until you accept them. Provider promotion is manual even when the gate is green.
+- **Human approval gate.** Captions, cull rankings, and any model output are drafts until you
+  accept them. Provider promotion is manual even when the gate is green.
 - **Provider failure ≠ business-state failure.** A disabled/errored/invalid provider call
   records a ledger row and writes nothing else (ADR 0006).
 - **The ledger carries metadata only** — provider, model, status, latency, cost — never the
@@ -405,8 +354,8 @@ CI runs the `-m unit` gate and `tests/test_smoke.py`. Topic smoke files
 
 ## 9. Operating checklist
 
-**Daily:** open `/admin/ai-ops`; clear undecided offers; review pending album drafts; glance
-at provider errors.
+**Daily:** open `/admin/ai-ops`; glance at provider errors; cull fresh galleries in the deck
+when scores are in.
 
 **While evaluating vision:** confirm shadow pairs are landing in the ledger; enrol a
 representative set; score steadily; watch the gate verdict and the cost/latency line.
