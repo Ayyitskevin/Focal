@@ -148,7 +148,10 @@
   {% if overdue_rows %}
   <section style="margin-top:1.2rem">
     <div style="display:flex; align-items:center; justify-content:space-between; gap:.75rem; margin:.3rem 0">
-      <div class="muted" style="font-size:.8rem">Past-due invoices</div>
+      <div>
+        <div class="muted" style="font-size:.8rem">Past-due invoices</div>
+        {% if ar_history %}<div class="muted" style="font-size:.75rem">{{ ar_history.detail }}</div>{% endif %}
+      </div>
       <a class="pgtop-link" href="/admin/studio/companies/{{ c.id }}/ar-chase">Draft chase email &rarr;</a>
     </div>
     <table style="width:100%; border-collapse:collapse; font-size:.9rem">

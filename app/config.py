@@ -269,6 +269,10 @@ GALLERY_PROOF_NUDGE_DAYS = int(os.environ.get("MISE_GALLERY_PROOF_NUDGE_DAYS", "
 # contract via the nudged_unsigned flag; never a message to the client.
 CONTRACT_NUDGE_DAYS = int(os.environ.get("MISE_CONTRACT_NUDGE_DAYS", "3"))
 
+# Manual AR follow-up cadence: after an AR chase send is logged, company and Activity
+# surfaces treat the chase as recent for this many days. No message is scheduled or sent.
+AR_CHASE_FOLLOWUP_DAYS = int(os.environ.get("MISE_AR_CHASE_FOLLOWUP_DAYS", "7"))
+
 # Internal Telegram nudge: a retainer whose renews_on is within this many days gets one
 # heads-up to Kevin (retainer_reminders). One-shot per plan via the nudged_renewal flag
 # (reset only when the renewal date actually changes); never a message to the client.

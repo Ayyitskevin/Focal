@@ -19,6 +19,12 @@
 <main class="admin-main">
   {% if rows %}
   <section>
+    <div style="border:1px solid #e2e6e8; border-radius:8px; padding:.6rem .7rem; margin:.3rem 0 .8rem">
+      <div class="muted" style="font-size:.75rem">Follow-up cadence</div>
+      <div style="font-size:.9rem">
+        {{ ar_history.detail }}{% if ar_history.last_to %} &middot; {{ ar_history.last_to }}{% endif %}
+      </div>
+    </div>
     <div class="muted" style="font-size:.8rem; margin:.3rem 0">Open past-due invoices</div>
     <table style="width:100%; border-collapse:collapse; font-size:.9rem">
       <thead><tr style="text-align:left; color:#6b7280; font-size:.78rem">

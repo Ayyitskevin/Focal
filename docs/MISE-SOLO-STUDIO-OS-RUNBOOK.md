@@ -35,6 +35,10 @@ The related intake shortcuts are also local/operator-controlled:
 - AR chase assist opens from past-due company/action/invoice links, gathers the statement and
   payable invoice links, and sends only after review. It logs the manual email and never changes
   invoice or payment state.
+- AR follow-up cadence is derived from those manual send-log rows: company and Activity surfaces
+  show never chased, recently chased, or follow-up due after `MISE_AR_CHASE_FOLLOWUP_DAYS`
+  (default seven). It does not schedule or
+  send anything by itself.
 
 ## 1. Start here every morning — `/admin/ai-ops`
 
