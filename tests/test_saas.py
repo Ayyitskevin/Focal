@@ -181,6 +181,9 @@ def test_operator_overview_summarizes_tenants(tmp_path, monkeypatch):
     assert overview["counts"]["active"] == 1
     assert overview["counts"]["attention"] == 1
     assert overview["counts"]["custom_domains_pending"] == 1
+    assert overview["counts"]["active_mrr_cents"] == 2000
+    assert overview["counts"]["trial_pipeline_cents"] == 0
+    assert overview["counts"]["support_queue"] == 2
     beta_row = next(r for r in overview["rows"] if r["tenant"]["slug"] == "beta")
     assert beta_row["domain_state"] == "pending"
     assert beta_row["tenant_url"] == "https://beta.mise.test/admin/login"
