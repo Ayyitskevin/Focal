@@ -14,6 +14,8 @@ def test_readme_keeps_flat_hosted_positioning():
         "docs/LAUNCH-KIT.md",
         "docs/BETA-LAUNCH.md",
         "scripts/launch-hosted-production.sh",
+        "utm_source",
+        "operator growth analytics",
         "MISE_SAAS_MODE=true",
         "2000",
     ]
@@ -48,6 +50,8 @@ def test_beta_launch_docs_keep_invite_and_security_checklist():
         "5-10 trusted photographers",
         "MISE_COOKIE_SECURE=true",
         "exactly `$20/month`",
+        "Beta Acquisition Links",
+        "at-risk trials",
         "python scripts/hosted-preflight.py",
     ]
     for phrase in required:

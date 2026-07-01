@@ -72,6 +72,29 @@ def test_hosted_trial_route_creates_isolated_tenant_and_onboarding(tmp_path, mon
         assert login.headers["location"] == onboarding.ADMIN_ONBOARDING_PATH
 
 
+def test_hosted_trial_route_persists_signup_attribution(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+
+    trial = asyncio.run(
+        saas.start_trial(
+            _request("/start-trial", "mise.test", method="POST"),
+            studio_name="Referral Studio",
+            owner_email="referral@example.com",
+            slug="referralstudio",
+            password="secret123",
+            signup_source="newsletter",
+            signup_campaign="beta",
+            signup_referrer="https://mise.test/demo",
+        )
+    )
+
+    assert trial.status_code == 303
+    tenant = saas.tenant_by_slug("referralstudio")
+    assert tenant["signup_source"] == "newsletter"
+    assert tenant["signup_campaign"] == "beta"
+    assert tenant["signup_referrer"] == "https://mise.test/demo"
+
+
 def test_tenant_middleware_scopes_hosted_requests(tmp_path, monkeypatch):
     _configure_saas(tmp_path, monkeypatch)
     saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")

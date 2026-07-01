@@ -89,6 +89,24 @@ def test_tenant_databases_are_isolated(tmp_path, monkeypatch):
         assert db.one("SELECT name FROM clients")["name"] == "Alpha Client"
 
 
+def test_signup_attribution_is_sanitized_and_stored(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+
+    tenant = saas.create_tenant(
+        "source-test",
+        "Source Studio",
+        "source@example.com",
+        "secret123",
+        signup_source="x / twitter <script>",
+        signup_campaign="beta launch!",
+        signup_referrer="https://example.com/post?x=<bad>",
+    )
+
+    assert tenant["signup_source"] == "x / twitter script"
+    assert tenant["signup_campaign"] == "beta launch"
+    assert tenant["signup_referrer"] == "https://example.com/post?x=bad"
+
+
 def test_platform_admin_password_is_separate_from_tenant_password(tmp_path, monkeypatch):
     _configure_saas(tmp_path, monkeypatch)
     monkeypatch.setattr(config, "ADMIN_PASSWORD", "operator-secret")
@@ -184,9 +202,15 @@ def test_operator_overview_summarizes_tenants(tmp_path, monkeypatch):
     assert overview["counts"]["active_mrr_cents"] == 2000
     assert overview["counts"]["trial_pipeline_cents"] == 0
     assert overview["counts"]["support_queue"] == 2
+    assert overview["counts"]["launch_ready"] == 0
+    assert overview["counts"]["trials_at_risk"] == 0
+    assert overview["growth"]["active_rate"] == 50
+    assert overview["growth"]["top_source"] == "direct"
+    assert overview["growth"]["source_rows"] == [{"source": "direct", "count": 2}]
     beta_row = next(r for r in overview["rows"] if r["tenant"]["slug"] == "beta")
     assert beta_row["domain_state"] == "pending"
     assert beta_row["tenant_url"] == "https://beta.mise.test/admin/login"
+    assert beta_row["launch"]["score"] == 25
 
 
 def test_operator_launch_checklist_tracks_launch_blockers(tmp_path, monkeypatch):
@@ -208,6 +232,73 @@ def test_operator_launch_checklist_tracks_launch_blockers(tmp_path, monkeypatch)
         "Public demo and pricing are linked",
         "At least one test studio exists",
         "Support queue is clear",
+    ]
+
+
+def test_operator_overview_reports_launch_health_and_trial_risk(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    ready = saas.create_tenant("ready", "Ready Studio", "ready@example.com", "secret123")
+    risk = saas.create_tenant("risk", "Risk Studio", "risk@example.com", "secret123")
+    saas.update_tenant_billing(ready["id"], plan_status="active")
+    with saas.control_connect() as con:
+        con.execute(
+            "UPDATE tenants SET trial_ends_at=? WHERE id=?",
+            (saas._iso(datetime.now(UTC) + timedelta(days=2)), risk["id"]),
+        )
+
+    with saas.tenant_runtime(ready):
+        db.run(
+            "INSERT INTO packages (slug, name, price_cents) VALUES (?,?,?)",
+            ("starter", "Starter", 20000),
+        )
+        db.run(
+            """INSERT INTO workflow_rules
+               (name, trigger_key, action_key, task_title, delay_days)
+               VALUES (?,?,?,?,?)""",
+            ("Delivery follow-up", "gallery_published", "task", "Follow up", 1),
+        )
+        saas_demo.seed_preset("fnb")
+
+    overview = saas.operator_tenant_overview()
+
+    assert overview["counts"]["launch_ready"] == 1
+    assert overview["counts"]["trials_at_risk"] == 1
+    assert overview["counts"]["average_launch_score"] == 62
+    ready_row = next(r for r in overview["rows"] if r["tenant"]["slug"] == "ready")
+    risk_row = next(r for r in overview["rows"] if r["tenant"]["slug"] == "risk")
+    assert ready_row["launch"]["complete"] is True
+    assert ready_row["launch"]["score"] == 100
+    assert risk_row["launch"]["complete"] is False
+    assert risk_row["launch"]["score"] == 25
+
+
+def test_operator_growth_metrics_track_sources_and_activation(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    saas.create_tenant(
+        "newsletter-one",
+        "Newsletter One",
+        "one@example.com",
+        "secret123",
+        signup_source="newsletter",
+    )
+    two = saas.create_tenant(
+        "newsletter-two",
+        "Newsletter Two",
+        "two@example.com",
+        "secret123",
+        signup_source="newsletter",
+    )
+    saas.create_tenant("direct-one", "Direct One", "direct@example.com", "secret123")
+    saas.update_tenant_billing(two["id"], plan_status="active")
+
+    overview = saas.operator_tenant_overview()
+
+    assert overview["growth"]["active_rate"] == 33
+    assert overview["growth"]["activation_rate"] == 0
+    assert overview["growth"]["top_source"] == "newsletter"
+    assert overview["growth"]["source_rows"] == [
+        {"source": "newsletter", "count": 2},
+        {"source": "direct", "count": 1},
     ]
 
 

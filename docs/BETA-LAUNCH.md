@@ -22,6 +22,21 @@ into the hosted `$20/month` beta.
   billing, and reach account settings.
 - Data volume backups are configured for the Docker host before public launch.
 
+## Beta Acquisition Links
+
+Use simple tagged pricing links so `/admin/saas` can show which outreach creates
+trial studios:
+
+```text
+https://mise.example.com/pricing?utm_source=email&utm_campaign=private-beta
+https://mise.example.com/pricing?utm_source=x&utm_campaign=launch-thread
+https://mise.example.com/pricing?utm_source=referral&utm_campaign=beta
+```
+
+Mise stores the sanitized source, campaign, and referrer on each tenant. The
+operator dashboard summarizes source counts, activation rate, active rate,
+average launch score, and at-risk trials.
+
 ## Recommended Production Launch Command
 
 From the repo root, after `.env` has hosted production values:
