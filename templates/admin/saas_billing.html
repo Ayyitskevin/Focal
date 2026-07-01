@@ -8,6 +8,7 @@
     <p class="muted">$20/month flat plan - 14-day trial - cancel anytime</p>
   </div>
   <div class="pgtop-actions">
+    <a class="pgtop-link" href="/admin/account">Account</a>
     <a class="pgtop-link" href="/admin/onboarding">Onboarding</a>
   </div>
 </section>
@@ -19,6 +20,9 @@
     <tr><th>Status</th><td>{{ tenant.plan_status }}</td></tr>
     <tr><th>Trial ends</th><td>{{ tenant.trial_ends_at }}</td></tr>
     <tr><th>Studio URL</th><td><a href="{{ base_url }}">{{ base_url }}</a></td></tr>
+    {% if tenant.custom_domain %}
+    <tr><th>Custom domain</th><td>{{ tenant.custom_domain }}{% if not tenant.custom_domain_verified_at %} (pending){% endif %}</td></tr>
+    {% endif %}
     {% if tenant.stripe_subscription_id %}
     <tr><th>Stripe subscription</th><td>{{ tenant.stripe_subscription_id }}</td></tr>
     {% endif %}

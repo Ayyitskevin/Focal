@@ -100,7 +100,9 @@ SAAS_TENANT_DATA_DIR = Path(
     os.environ.get("MISE_SAAS_TENANT_DATA_DIR", str(_BASE_DATA_DIR / "tenants"))
 )
 SAAS_TRIAL_DAYS = int(os.environ.get("MISE_SAAS_TRIAL_DAYS", "14"))
-SAAS_PRICE_CENTS = int(os.environ.get("MISE_SAAS_PRICE_CENTS", "2000"))
+# The hosted plan is intentionally one flat price for clean accounting: $20/mo.
+# Do not make this env-configurable unless the product model changes.
+SAAS_PRICE_CENTS = 2000
 SAAS_STRIPE_PRICE_ID = os.environ.get("MISE_SAAS_STRIPE_PRICE_ID", "")
 SAAS_STRIPE_WEBHOOK_SECRET = os.environ.get("MISE_SAAS_STRIPE_WEBHOOK_SECRET", "")
 
