@@ -13,6 +13,21 @@ log = logging.getLogger("mise.public.pay")
 router = APIRouter()
 
 
+def _stripe_field(obj, key: str, default=None):
+    """Read from dict-like Stripe objects without relying on `.get()`.
+
+    stripe.StripeObject supports item access but intentionally treats unknown
+    attributes as missing Stripe fields, so calling obj.get(...) raises
+    AttributeError in webhook smoke tests.
+    """
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    try:
+        return obj[key]
+    except (KeyError, TypeError, AttributeError):
+        return default
+
+
 def _stripe():
     import stripe
 
@@ -164,7 +179,8 @@ async def stripe_webhook(request: Request):
     session = event["data"]["object"]
     if session["payment_status"] != "paid":  # ACH settles via the async event
         return {"ok": True, "pending": True}
-    tenant_slug = (session.get("metadata") or {}).get("tenant_slug")
+    metadata = _stripe_field(session, "metadata", {}) or {}
+    tenant_slug = _stripe_field(metadata, "tenant_slug")
     if config.SAAS_MODE:
         from .. import saas
 

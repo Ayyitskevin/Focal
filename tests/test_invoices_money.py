@@ -16,7 +16,7 @@ from fastapi import HTTPException
 
 from app.admin.invoices import due_date_from_net_days
 from app.admin.proposals import parse_items
-from app.public.pay import next_payment
+from app.public.pay import _stripe_field, next_payment
 
 pytestmark = pytest.mark.unit
 
@@ -159,3 +159,24 @@ def test_zero_net_days_means_no_net_terms():
 
 def test_negative_net_days_never_produces_a_past_due_date():
     assert due_date_from_net_days("2026-06-01", -5) is None
+
+
+# --- Stripe webhook object access -------------------------------------------
+
+
+def test_stripe_field_reads_stripe_object_without_get_method():
+    class FakeStripeObject:
+        def __init__(self, data):
+            self._data = data
+
+        def __getitem__(self, key):
+            try:
+                return self._data[key]
+            except KeyError as exc:
+                raise KeyError(key) from exc
+
+    metadata = FakeStripeObject({"tenant_slug": "alpha"})
+    session = FakeStripeObject({"metadata": metadata})
+
+    assert _stripe_field(_stripe_field(session, "metadata"), "tenant_slug") == "alpha"
+    assert _stripe_field(session, "missing", "fallback") == "fallback"
