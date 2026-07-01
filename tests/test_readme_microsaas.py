@@ -10,6 +10,7 @@ def test_readme_keeps_flat_hosted_positioning():
         "14-day trial",
         "python scripts/hosted-preflight.py",
         "/admin/saas",
+        "/demo",
         "MISE_SAAS_MODE=true",
         "2000",
     ]

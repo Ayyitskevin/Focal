@@ -89,3 +89,13 @@ def test_tenant_middleware_scopes_hosted_requests(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert seen["tenant"] == "alpha"
     assert seen["db"].endswith("/tenants/alpha/mise.db")
+
+
+def test_platform_demo_tour_renders(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+
+    response = asyncio.run(saas.demo(_request("/demo", "mise.test")))
+
+    assert response.status_code == 200
+    assert "Restaurant content day" in response.body.decode()
+    assert "Wedding story collection" in response.body.decode()

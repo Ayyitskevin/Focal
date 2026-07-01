@@ -42,6 +42,7 @@ Hosted mode adds:
 - isolated SQLite database and media tree per studio
 - 14-day trial and Stripe subscription billing for the flat $20 plan
 - root-host operator console at `/admin/saas`
+- public demo tour at `/demo`
 - launch readiness checks with `python scripts/hosted-preflight.py`
 - onboarding checklist, demo data, and niche preset packs
 

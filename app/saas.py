@@ -609,7 +609,7 @@ def tenant_billing_context(tenant: dict | None) -> dict | None:
 
 def _platform_path(path: str) -> bool:
     return (
-        path in {"/", "/pricing", "/start-trial", "/healthz", "/favicon.ico"}
+        path in {"/", "/pricing", "/demo", "/start-trial", "/healthz", "/favicon.ico"}
         or path.startswith("/static/")
         or path in {"/admin/login", "/admin/logout", "/admin/saas"}
         or path.startswith("/admin/saas/")
@@ -677,6 +677,11 @@ async def saas_home(request: Request):
 @router.get("/pricing", response_class=HTMLResponse)
 async def pricing(request: Request):
     return templates.TemplateResponse(request, "saas/pricing.html", _pricing_context())
+
+
+@router.get("/demo", response_class=HTMLResponse)
+async def demo(request: Request):
+    return templates.TemplateResponse(request, "saas/demo.html", _pricing_context())
 
 
 @router.post("/start-trial")
