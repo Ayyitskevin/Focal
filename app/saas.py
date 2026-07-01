@@ -208,6 +208,14 @@ def migrate_control() -> None:
         _ensure_column(con, "tenants", "signup_source", "signup_source TEXT")
         _ensure_column(con, "tenants", "signup_campaign", "signup_campaign TEXT")
         _ensure_column(con, "tenants", "signup_referrer", "signup_referrer TEXT")
+        # A tenant's OWN Stripe credentials for charging its client invoices.
+        # NULL/empty = payments off for that studio (fail-closed): the platform
+        # operator's Stripe key is never used to charge a studio's client. Populated
+        # by the tenant's own Stripe connection (Connect onboarding follow-up).
+        _ensure_column(con, "tenants", "client_stripe_secret_key", "client_stripe_secret_key TEXT")
+        _ensure_column(
+            con, "tenants", "client_stripe_webhook_secret", "client_stripe_webhook_secret TEXT"
+        )
         con.execute(
             """CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_custom_domain
                ON tenants(custom_domain) WHERE custom_domain IS NOT NULL"""

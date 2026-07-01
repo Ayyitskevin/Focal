@@ -10,12 +10,51 @@ should prefer features.* for consistency. Modules can delegate to here.
 from . import config
 
 
+def client_stripe_secret_key() -> str:
+    """Stripe secret used to CHARGE a client invoice.
+
+    Single-tenant: the operator's own key (unchanged).
+    Hosted (SAAS_MODE): the *tenant's own* key — never the platform operator's —
+    so a studio's client can only ever pay into that studio's own Stripe account.
+    Fail-closed: with no tenant in context, or a tenant that has not connected its
+    own Stripe, this returns "" and online payment stays off. The operator key is
+    NEVER used to charge a studio's client (that would route a customer's payment
+    into the host's account — the money-boundary violation this closes).
+    """
+    if config.SAAS_MODE:
+        from . import saas
+
+        tenant = saas.current_tenant()
+        if not tenant:
+            return ""
+        return (tenant.get("client_stripe_secret_key") or "").strip()
+    return config.STRIPE_SECRET_KEY
+
+
+def client_stripe_webhook_secret() -> str:
+    """Webhook secret for the client-invoice payment webhook.
+
+    Mirrors ``client_stripe_secret_key``: the operator's global secret only in
+    single-tenant mode; per-tenant (fail-closed to "") in hosted mode. The
+    platform-subscription webhook is separate (``SAAS_STRIPE_WEBHOOK_SECRET``)
+    and unaffected.
+    """
+    if config.SAAS_MODE:
+        from . import saas
+
+        tenant = saas.current_tenant()
+        if not tenant:
+            return ""
+        return (tenant.get("client_stripe_webhook_secret") or "").strip()
+    return config.STRIPE_WEBHOOK_SECRET
+
+
 def stripe_enabled() -> bool:
-    return bool(config.STRIPE_SECRET_KEY)
+    return bool(client_stripe_secret_key())
 
 
 def stripe_webhook_enabled() -> bool:
-    return bool(config.STRIPE_WEBHOOK_SECRET)
+    return bool(client_stripe_webhook_secret())
 
 
 def odysseus_caption_enabled() -> bool:

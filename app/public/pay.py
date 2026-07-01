@@ -134,8 +134,12 @@ async def pay_invoice(request: Request, slug: str):
             metadata["tenant_slug"] = tenant["slug"]
     base = urls.public_base_url(request)
     stripe_mod = _stripe()
+    # Charge with the *serving context's* Stripe key: the operator's own in
+    # single-tenant mode, the tenant's own in hosted mode. features.stripe_enabled()
+    # above already fails closed (503) when hosted and the tenant has no key, so the
+    # operator's platform key can never be used to charge a studio's client.
     session = stripe_mod.checkout.Session.create(
-        api_key=config.STRIPE_SECRET_KEY,
+        api_key=features.client_stripe_secret_key(),
         mode="payment",
         payment_method_types=["card", "us_bank_account"],
         line_items=[
@@ -166,7 +170,9 @@ async def stripe_webhook(request: Request):
     stripe_mod = _stripe()
     try:
         event = stripe_mod.Webhook.construct_event(
-            payload, request.headers.get("stripe-signature", ""), config.STRIPE_WEBHOOK_SECRET
+            payload,
+            request.headers.get("stripe-signature", ""),
+            features.client_stripe_webhook_secret(),
         )
     except (ValueError, stripe_mod.SignatureVerificationError):
         raise HTTPException(status_code=400, detail="bad signature")
