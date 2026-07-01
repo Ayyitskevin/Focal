@@ -25,12 +25,35 @@
   <div class="panel">
     <p class="muted">Studios</p>
     <h2>{{ overview.counts.total }}</h2>
-    <span class="muted">{{ overview.counts.active }} active · {{ overview.counts.trialing }} trialing</span>
+    <span class="muted">{{ overview.counts.active }} active · {{ overview.counts.trialing }} trialing · {{ overview.counts.launch_ready }} ready</span>
   </div>
   <div class="panel">
     <p class="muted">Support queue</p>
     <h2>{{ overview.counts.support_queue }}</h2>
-    <span class="muted">{{ overview.counts.attention }} billing · {{ overview.counts.custom_domains_pending }} domains</span>
+    <span class="muted">{{ overview.counts.attention }} billing · {{ overview.counts.custom_domains_pending }} domains · {{ overview.counts.trials_at_risk }} trial risk</span>
+  </div>
+</section>
+
+<section class="grid four">
+  <div class="panel">
+    <p class="muted">Activation</p>
+    <h2>{{ overview.growth.activation_rate }}%</h2>
+    <span class="muted">{{ overview.counts.launch_ready }} launch-ready studios</span>
+  </div>
+  <div class="panel">
+    <p class="muted">Active rate</p>
+    <h2>{{ overview.growth.active_rate }}%</h2>
+    <span class="muted">{{ overview.counts.active }} paying or live subscriptions</span>
+  </div>
+  <div class="panel">
+    <p class="muted">Avg launch score</p>
+    <h2>{{ overview.growth.average_launch_score }}%</h2>
+    <span class="muted">Across all hosted studios</span>
+  </div>
+  <div class="panel">
+    <p class="muted">Top source</p>
+    <h2>{{ overview.growth.top_source }}</h2>
+    <span class="muted">{{ overview.counts.trials_at_risk }} at-risk trial{{ 's' if overview.counts.trials_at_risk != 1 else '' }}</span>
   </div>
 </section>
 
@@ -50,6 +73,24 @@
       <td><strong>{{ item.label }}</strong><br><span class="muted">{{ item.detail }}</span></td>
       <td><a href="{{ item.href }}">Open</a></td>
     </tr>
+    {% endfor %}
+  </table>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Acquisition sources</h2>
+    <span class="muted">Captured from trial links like <code>?utm_source=newsletter</code></span>
+  </div>
+  <table class="list">
+    <tr><th>Source</th><th>Studios</th></tr>
+    {% for source in overview.growth.source_rows %}
+    <tr>
+      <td><strong>{{ source.source }}</strong></td>
+      <td>{{ source.count }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="2" class="muted">No trial sources yet.</td></tr>
     {% endfor %}
   </table>
 </section>
@@ -81,6 +122,7 @@
     <tr>
       <th>Studio</th>
       <th>Billing</th>
+      <th>Launch</th>
       <th>Domain</th>
       <th>Data</th>
       <th>Support</th>
@@ -104,6 +146,10 @@
           </select>
           <button type="submit">Save</button>
         </form>
+      </td>
+      <td>
+        <span class="badge {{ 'is-active' if row.launch.complete else 'is-sent' if row.launch.score >= 50 else 'is-draft' }}">{{ row.launch.score }}%</span><br>
+        <span class="muted">{{ row.launch.detail }}</span>
       </td>
       <td>
         {% if tenant.custom_domain %}
@@ -133,7 +179,7 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="5" class="muted">No hosted tenants yet.</td></tr>
+    <tr><td colspan="6" class="muted">No hosted tenants yet.</td></tr>
     {% endfor %}
   </table>
 </section>

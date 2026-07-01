@@ -92,6 +92,9 @@
         <label>Admin password
           <input type="password" name="password" minlength="8" autocomplete="new-password" required>
         </label>
+        <input type="hidden" name="signup_source" value="{{ values.signup_source or '' }}">
+        <input type="hidden" name="signup_campaign" value="{{ values.signup_campaign or '' }}">
+        <input type="hidden" name="signup_referrer" value="{{ values.signup_referrer or '' }}">
         <button type="submit">Start 14-day trial</button>
       </div>
       <div class="pr-note">Cancel anytime. No paid tiers. No setup fee.</div>

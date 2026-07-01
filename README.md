@@ -45,6 +45,10 @@ Hosted mode adds:
 - public demo tour at `/demo`
 - launch readiness checks with `python scripts/hosted-preflight.py`
 - onboarding checklist, demo data, and niche preset packs
+- signup source tracking from tagged trial links such as
+  `/pricing?utm_source=newsletter&utm_campaign=beta`
+- operator growth analytics for activation, active rate, launch score, trial
+  risk, and acquisition sources
 
 Production billing uses:
 
@@ -102,6 +106,9 @@ On the root hosted domain, `/admin/login` uses `MISE_ADMIN_PASSWORD` and opens
 The operator console shows:
 
 - tenant count, active/trialing/support counts, and readiness state
+- acquisition source breakdown from `utm_source`, `utm_campaign`, and referrer
+- launch score and at-risk trial counts for retention follow-up
+- activation rate, active rate, average launch score, and top source
 - per-tenant billing status and Stripe IDs
 - custom-domain pending/verified state
 - isolated data path and tenant DB presence
@@ -152,3 +159,12 @@ Public launch assets:
 - 5-post X launch thread in `docs/LAUNCH-KIT.md`
 - prioritized 7-day launch checklist in `docs/LAUNCH-KIT.md`
 - beta invitation email in `docs/BETA-LAUNCH.md`
+
+Beta acquisition links can be tagged without any external analytics service:
+
+```text
+https://mise.example.com/pricing?utm_source=newsletter&utm_campaign=beta
+https://mise.example.com/pricing?utm_source=x&utm_campaign=launch-thread
+```
+
+Those values are stored on the tenant record and summarized in `/admin/saas`.

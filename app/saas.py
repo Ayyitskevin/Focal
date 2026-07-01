@@ -30,6 +30,7 @@ _MIGRATED_TENANT_DBS: set[str] = set()
 _SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])$")
 _DOMAIN_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+_ATTRIBUTION_RE = re.compile(r"[^a-zA-Z0-9_.:/@?=& -]")
 _DEFAULT_BRAND_ACCENT = "#2f5c45"
 _RESERVED_SLUGS = {
     "admin",
@@ -202,6 +203,9 @@ def migrate_control() -> None:
             "brand_accent",
             "brand_accent TEXT NOT NULL DEFAULT '#2f5c45'",
         )
+        _ensure_column(con, "tenants", "signup_source", "signup_source TEXT")
+        _ensure_column(con, "tenants", "signup_campaign", "signup_campaign TEXT")
+        _ensure_column(con, "tenants", "signup_referrer", "signup_referrer TEXT")
         con.execute(
             """CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_custom_domain
                ON tenants(custom_domain) WHERE custom_domain IS NOT NULL"""
@@ -256,8 +260,66 @@ def list_tenants(*, billable_only: bool = False) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def tenant_launch_status(tenant: dict) -> dict:
+    if not tenant_db_path(tenant["slug"]).exists():
+        return {
+            "score": 0,
+            "complete": False,
+            "headline": "Tenant database missing",
+            "detail": "Create or repair the tenant database before judging launch readiness.",
+            "tone": "block",
+        }
+    try:
+        with tenant_runtime(tenant):
+            from . import onboarding as onboarding_state
+
+            setup = onboarding_state.setup_status()
+            launch = onboarding_state.launch_plan(setup)
+    except sqlite3.Error as exc:
+        log.warning("tenant %s launch status unavailable: %s", tenant["slug"], exc)
+        return {
+            "score": 0,
+            "complete": False,
+            "headline": "Launch status unavailable",
+            "detail": "Open the tenant database before relying on this studio's launch score.",
+            "tone": "block",
+        }
+    score = int(launch["score"])
+    complete = bool(setup["complete"])
+    if complete:
+        tone = "ok"
+    elif score >= 50:
+        tone = "warn"
+    else:
+        tone = "needs_work"
+    return {
+        "score": score,
+        "complete": complete,
+        "headline": launch["headline"],
+        "detail": launch["detail"],
+        "tone": tone,
+    }
+
+
+def operator_growth_metrics(counts: dict, source_counts: dict[str, int]) -> dict:
+    total = counts["total"]
+    source_rows = [
+        {"source": source, "count": count}
+        for source, count in sorted(source_counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+    top_source = source_rows[0]["source"] if source_rows else "none"
+    return {
+        "activation_rate": round(counts["launch_ready"] * 100 / total) if total else 0,
+        "active_rate": round(counts["active"] * 100 / total) if total else 0,
+        "average_launch_score": counts["average_launch_score"],
+        "top_source": top_source,
+        "source_rows": source_rows,
+    }
+
+
 def operator_tenant_overview() -> dict:
     rows = []
+    source_counts: dict[str, int] = {}
     counts = {
         "total": 0,
         "trialing": 0,
@@ -268,6 +330,10 @@ def operator_tenant_overview() -> dict:
         "active_mrr_cents": 0,
         "trial_pipeline_cents": 0,
         "support_queue": 0,
+        "launch_ready": 0,
+        "trials_at_risk": 0,
+        "launch_score_total": 0,
+        "average_launch_score": 0,
     }
     attention_statuses = {
         "past_due",
@@ -279,13 +345,25 @@ def operator_tenant_overview() -> dict:
     }
     for tenant in list_tenants():
         billing = tenant_billing_context(tenant)
+        launch = tenant_launch_status(tenant)
         domain_state = "none"
         if tenant.get("custom_domain"):
             domain_state = "verified" if tenant.get("custom_domain_verified_at") else "pending"
         counts["total"] += 1
+        counts["launch_score_total"] += launch["score"]
+        source = tenant.get("signup_source") or "direct"
+        source_counts[source] = source_counts.get(source, 0) + 1
+        if launch["complete"]:
+            counts["launch_ready"] += 1
         if tenant["plan_status"] == "trialing":
             counts["trialing"] += 1
             counts["trial_pipeline_cents"] += config.SAAS_PRICE_CENTS
+            if not launch["complete"] and (
+                billing["tone"] == "block"
+                or billing["trial_days_left"] is None
+                or billing["trial_days_left"] <= 3
+            ):
+                counts["trials_at_risk"] += 1
         if tenant["plan_status"] == "active":
             counts["active"] += 1
             counts["active_mrr_cents"] += config.SAAS_PRICE_CENTS
@@ -299,6 +377,7 @@ def operator_tenant_overview() -> dict:
             {
                 "tenant": tenant,
                 "billing": billing,
+                "launch": launch,
                 "domain_state": domain_state,
                 "tenant_url": tenant_url(tenant["slug"], "/admin/login"),
                 "account_url": tenant_url(tenant["slug"], "/admin/account"),
@@ -307,7 +386,13 @@ def operator_tenant_overview() -> dict:
             }
         )
     counts["support_queue"] = counts["attention"] + counts["custom_domains_pending"]
-    return {"counts": counts, "rows": rows}
+    if counts["total"]:
+        counts["average_launch_score"] = round(counts["launch_score_total"] / counts["total"])
+    return {
+        "counts": counts,
+        "growth": operator_growth_metrics(counts, source_counts),
+        "rows": rows,
+    }
 
 
 def operator_launch_checklist(overview: dict | None = None, preflight: dict | None = None) -> dict:
@@ -392,6 +477,17 @@ def validate_brand_accent(value: str) -> str:
     return value.lower()
 
 
+def sanitize_attribution(value: str | None, *, max_len: int = 80) -> str | None:
+    if not isinstance(value, str):
+        return None
+    value = (value or "").strip()
+    if not value:
+        return None
+    cleaned = _ATTRIBUTION_RE.sub("", value)
+    cleaned = " ".join(cleaned.split())
+    return cleaned[:max_len] or None
+
+
 def normalize_custom_domain(value: str | None) -> str | None:
     raw = (value or "").strip().lower()
     if not raw:
@@ -416,7 +512,16 @@ def normalize_custom_domain(value: str | None) -> str | None:
     return host
 
 
-def create_tenant(slug: str, studio_name: str, owner_email: str, password: str) -> dict:
+def create_tenant(
+    slug: str,
+    studio_name: str,
+    owner_email: str,
+    password: str,
+    *,
+    signup_source: str | None = None,
+    signup_campaign: str | None = None,
+    signup_referrer: str | None = None,
+) -> dict:
     slug = validate_slug(slug)
     studio_name = (studio_name or "").strip()
     owner_email = (owner_email or "").strip().lower()
@@ -426,6 +531,9 @@ def create_tenant(slug: str, studio_name: str, owner_email: str, password: str) 
         raise ValueError("A valid email is required.")
     if len(password or "") < 8:
         raise ValueError("Use at least 8 characters for the admin password.")
+    signup_source = sanitize_attribution(signup_source)
+    signup_campaign = sanitize_attribution(signup_campaign)
+    signup_referrer = sanitize_attribution(signup_referrer, max_len=160)
     started = _now()
     ends = started + timedelta(days=config.SAAS_TRIAL_DAYS)
     try:
@@ -433,8 +541,9 @@ def create_tenant(slug: str, studio_name: str, owner_email: str, password: str) 
             cur = con.execute(
                 """INSERT INTO tenants
                    (slug, studio_name, owner_email, admin_password_hash,
-                    trial_started_at, trial_ends_at)
-                   VALUES (?,?,?,?,?,?)""",
+                    trial_started_at, trial_ends_at,
+                    signup_source, signup_campaign, signup_referrer)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
                 (
                     slug,
                     studio_name,
@@ -442,6 +551,9 @@ def create_tenant(slug: str, studio_name: str, owner_email: str, password: str) 
                     passwords.hash_password(password),
                     _iso(started),
                     _iso(ends),
+                    signup_source,
+                    signup_campaign,
+                    signup_referrer,
                 ),
             )
             tenant_id = cur.lastrowid
@@ -726,11 +838,32 @@ async def tenant_middleware(request: Request, call_next):
 
 
 def _pricing_context(
-    error: str | None = None, values: dict | None = None, *, path: str = "/pricing"
+    error: str | None = None,
+    values: dict | None = None,
+    *,
+    path: str = "/pricing",
+    request: Request | None = None,
 ) -> dict:
+    values = dict(values or {})
+    if request is not None:
+        values.setdefault(
+            "signup_source",
+            sanitize_attribution(
+                request.query_params.get("utm_source") or request.query_params.get("ref")
+            )
+            or "",
+        )
+        values.setdefault(
+            "signup_campaign",
+            sanitize_attribution(request.query_params.get("utm_campaign")) or "",
+        )
+        values.setdefault(
+            "signup_referrer",
+            sanitize_attribution(request.headers.get("referer"), max_len=160) or "",
+        )
     return {
         "error": error,
-        "values": values or {},
+        "values": values,
         "price_cents": config.SAAS_PRICE_CENTS,
         "trial_days": config.SAAS_TRIAL_DAYS,
         "root_domain": _root_domain(),
@@ -749,7 +882,7 @@ async def saas_home(request: Request):
 @router.get("/pricing", response_class=HTMLResponse)
 async def pricing(request: Request):
     return templates.TemplateResponse(
-        request, "saas/pricing.html", _pricing_context(path="/pricing")
+        request, "saas/pricing.html", _pricing_context(path="/pricing", request=request)
     )
 
 
@@ -765,10 +898,28 @@ async def start_trial(
     owner_email: str = Form(...),
     slug: str = Form(...),
     password: str = Form(...),
+    signup_source: str | None = Form(None),
+    signup_campaign: str | None = Form(None),
+    signup_referrer: str | None = Form(None),
 ):
-    values = {"studio_name": studio_name, "owner_email": owner_email, "slug": slug}
+    values = {
+        "studio_name": studio_name,
+        "owner_email": owner_email,
+        "slug": slug,
+        "signup_source": signup_source,
+        "signup_campaign": signup_campaign,
+        "signup_referrer": signup_referrer,
+    }
     try:
-        tenant = create_tenant(slug, studio_name, owner_email, password)
+        tenant = create_tenant(
+            slug,
+            studio_name,
+            owner_email,
+            password,
+            signup_source=signup_source,
+            signup_campaign=signup_campaign,
+            signup_referrer=signup_referrer,
+        )
     except ValueError as exc:
         return templates.TemplateResponse(
             request,
