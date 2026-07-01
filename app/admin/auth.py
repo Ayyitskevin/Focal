@@ -3,7 +3,7 @@ import logging
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from .. import security
+from .. import onboarding, security
 from ..render import templates
 
 log = logging.getLogger("mise.admin.auth")
@@ -28,7 +28,7 @@ async def login(request: Request, password: str = Form(...)):
             request, "admin/login.html", {"error": "Wrong password."}, status_code=401
         )
     security.pin_clear(ip, 0)
-    resp = RedirectResponse("/admin/home", status_code=303)
+    resp = RedirectResponse(onboarding.first_admin_destination("/admin/home"), status_code=303)
     security.set_signed_session_cookie(resp, security.ADMIN_COOKIE, "admin")
     log.info("admin login from %s", ip)
     return resp
