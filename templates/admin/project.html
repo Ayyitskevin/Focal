@@ -95,6 +95,37 @@
           </form>
         </section>
 
+        <section class="panel" id="crm-fields">
+          <div class="panel-head"><h2>Client tags & fields</h2></div>
+          <div class="tag-strip">
+            {% for tag in client_tags %}
+            <span class="kind-badge" style="background:{{ tag.color }}22;color:{{ tag.color }}">{{ tag.name }}</span>
+            {% else %}
+            <span class="muted">No tags yet.</span>
+            {% endfor %}
+          </div>
+          {% if tags %}
+          <form method="post" action="/admin/studio/projects/{{ p.id }}/tags" class="inline-form">
+            <select name="tag_id">
+              {% for tag in tags %}<option value="{{ tag.id }}">{{ tag.name }}</option>{% endfor %}
+            </select>
+            <button type="submit" class="ghost">Add tag</button>
+          </form>
+          {% endif %}
+          <form method="post" action="/admin/studio/projects/{{ p.id }}/fields" class="inline-form">
+            <input type="text" name="field_key" placeholder="Field, e.g. Venue">
+            <input type="text" name="field_value" placeholder="Value">
+            <button type="submit" class="ghost">Save field</button>
+          </form>
+          {% if custom_fields %}
+          <table class="list">
+            {% for f in custom_fields %}
+            <tr><th>{{ f.field_key }}</th><td>{{ f.field_value }}</td></tr>
+            {% endfor %}
+          </table>
+          {% endif %}
+        </section>
+
         <section class="panel">
           <div class="panel-head">
             <h2>Proposals</h2>
@@ -433,6 +464,22 @@
 
         <section class="panel panel--timeline">
           <div class="panel-head"><h2>Activity</h2></div>
+          <form method="post" action="/admin/studio/projects/{{ p.id }}/events" class="inline-form" style="margin-bottom:0.8rem">
+            <input type="text" name="label" placeholder="Add project note">
+            <button type="submit" class="ghost">Add</button>
+          </form>
+          {% if project_events %}
+          <ul class="timeline">
+            {% for e in project_events %}
+            <li class="timeline-item timeline-{{ e.kind }}">
+              <span class="timeline-dot" aria-hidden="true"></span>
+              <span class="timeline-when">{{ (e.due_date or e.created_at)[:16] }}</span>
+              <span class="timeline-kind"><span class="kind-badge kind-{{ e.kind }}">{{ e.kind }}</span></span>
+              <span class="timeline-text">{{ e.label }}</span>
+            </li>
+            {% endfor %}
+          </ul>
+          {% endif %}
           {% if timeline %}
           <ul class="timeline">
             {% for e in timeline %}

@@ -7,7 +7,7 @@ import logging
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from .. import db, security
+from .. import db, security, workflows
 from ..render import templates
 
 log = logging.getLogger("mise.public.docs")
@@ -48,6 +48,17 @@ async def accept_proposal(request: Request, slug: str):
         raise HTTPException(status_code=400, detail="proposal is not open for acceptance")
     db.run(
         "UPDATE proposals SET status='accepted', accepted_at=datetime('now') WHERE id=?", (d["id"],)
+    )
+    workflows.record_project_event(
+        d["project_id"],
+        "proposal",
+        f"Proposal accepted: {d['title']}",
+        ref_kind="proposal",
+        ref_id=d["id"],
+        dedupe_key=f"proposal_accepted:{d['id']}",
+    )
+    workflows.fire_workflow(
+        "proposal_accepted", d["project_id"], ref_kind="proposal", ref_id=d["id"]
     )
     log.info("proposal %s ACCEPTED from %s", d["id"], security.client_ip(request))
     return RedirectResponse(f"/p/{slug}", status_code=303)
@@ -111,6 +122,18 @@ async def sign_contract(
               stage_changed_at=datetime('now') WHERE id=?
               AND status IN ('inquiry_received','consultation_call','proposal_sent')""",
         (d["project_id"],),
+    )
+    workflows.record_project_event(
+        d["project_id"],
+        "contract",
+        f"Contract signed: {d['title']}",
+        ref_kind="contract",
+        ref_id=d["id"],
+        dedupe_key=f"contract_signed:{d['id']}",
+    )
+    workflows.fire_workflow("contract_signed", d["project_id"], ref_kind="contract", ref_id=d["id"])
+    workflows.fire_workflow(
+        "status:contract_signed", d["project_id"], ref_kind="contract", ref_id=d["id"]
     )
     log.info("contract %s SIGNED from %s", d["id"], security.client_ip(request))
     return RedirectResponse(f"/c/{slug}", status_code=303)

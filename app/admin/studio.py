@@ -12,7 +12,19 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 
-from .. import clients, config, db, jobs, mailer, platekit, pricing, security, usage_vocab
+from .. import (
+    clients,
+    config,
+    crm_fields,
+    db,
+    jobs,
+    mailer,
+    platekit,
+    pricing,
+    security,
+    usage_vocab,
+    workflows,
+)
 from ..render import templates
 from . import common
 
@@ -2413,6 +2425,23 @@ async def project_detail(request: Request, project_id: int):
         (project_id,),
     )
     timeline = _build_timeline(proposals, contracts, invoices, payments, emails)
+    project_events = db.all_(
+        """SELECT pe.* FROM project_events pe
+           WHERE pe.project_id=? ORDER BY pe.created_at DESC LIMIT 30""",
+        (project_id,),
+    )
+    client_tags = db.all_(
+        """SELECT t.* FROM tags t
+           JOIN client_tags ct ON ct.tag_id=t.id
+           WHERE ct.client_id=? ORDER BY t.name""",
+        (p["client_id"],),
+    )
+    tags = db.all_("SELECT * FROM tags ORDER BY name")
+    custom_fields = db.all_(
+        """SELECT * FROM project_custom_fields
+           WHERE project_id=? ORDER BY field_key""",
+        (project_id,),
+    )
     closeout = _project_closeout(project_id, p)
     # Testimonial requests raised for this project, with the published state of
     # any quote the client has submitted (so the admin sees pending vs. live).
@@ -2438,6 +2467,10 @@ async def project_detail(request: Request, project_id: int):
             "deliverables": deliverables,
             "closeout": closeout,
             "timeline": timeline,
+            "project_events": project_events,
+            "client_tags": client_tags,
+            "tags": tags,
+            "custom_fields": custom_fields,
             "testimonial_reqs": testimonial_reqs,
             "shot_categories": usage_vocab.SHOT_CATEGORIES,
             "shot_priorities": usage_vocab.SHOT_PRIORITIES,
@@ -2646,6 +2679,7 @@ async def update_project(
             project_id,
         ),
     )
+    workflows.fire_workflow(f"status:{status}", project_id)
     return RedirectResponse(f"/admin/studio/projects/{project_id}", status_code=303)
 
 
@@ -2664,5 +2698,36 @@ async def move_project_status(project_id: int, status: str = Form(...)):
               WHERE id=?""",
         (status, status, project_id),
     )
+    workflows.fire_workflow(f"status:{status}", project_id)
     log.info("project %s moved to status %s", project_id, status)
     return RedirectResponse("/admin/studio#projects", status_code=303)
+
+
+@router.post("/projects/{project_id}/fields")
+async def upsert_project_field(
+    project_id: int, field_key: str = Form(...), field_value: str = Form(...)
+):
+    get_project(project_id)
+    try:
+        crm_fields.upsert_project_field(project_id, field_key, field_value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return RedirectResponse(f"/admin/studio/projects/{project_id}", status_code=303)
+
+
+@router.post("/projects/{project_id}/tags")
+async def assign_project_client_tag(project_id: int, tag_id: int = Form(...)):
+    p = get_project(project_id)
+    if not db.one("SELECT 1 FROM tags WHERE id=?", (tag_id,)):
+        raise HTTPException(status_code=400, detail="bad tag")
+    crm_fields.assign_client_tag(p["client_id"], tag_id)
+    return RedirectResponse(f"/admin/studio/projects/{project_id}", status_code=303)
+
+
+@router.post("/projects/{project_id}/events")
+async def add_project_note(project_id: int, label: str = Form(...)):
+    get_project(project_id)
+    if not label.strip():
+        raise HTTPException(status_code=400, detail="note required")
+    workflows.record_project_event(project_id, "note", label.strip())
+    return RedirectResponse(f"/admin/studio/projects/{project_id}", status_code=303)

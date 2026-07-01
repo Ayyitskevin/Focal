@@ -1,0 +1,39 @@
+{% extends "site/base_site.html" %}
+{% block title %}{{ package.name }} · {{ site_name }}{% endblock %}
+{% block site_content %}
+<main class="site-main site-narrow">
+  <section class="site-hero service-hero">
+    <p class="eyebrow">Package request</p>
+    <h1>{{ package.name }}</h1>
+    <p class="lede">{{ package.description or "Request this package and I will follow up with next steps." }}</p>
+    <p class="price">${{ package.price_cents|usd }}</p>
+  </section>
+
+  <section class="site-section">
+    {% if sent %}
+      <div class="stack-form">
+        <h2>Request received.</h2>
+        <p>I will review the details and follow up with next steps.</p>
+      </div>
+    {% else %}
+      <form method="post" class="stack-form">
+        {% if error %}<p class="error">{{ error }}</p>{% endif %}
+        <input type="text" name="website" value="" autocomplete="off" tabindex="-1" aria-hidden="true" class="hp-field">
+        <label>Your name
+          <input type="text" name="name" value="{{ values.name or '' }}" required>
+        </label>
+        <label>Email
+          <input type="email" name="email" value="{{ values.email or '' }}" required>
+        </label>
+        <label>Target date
+          <input type="date" name="event_date" value="{{ values.event_date or '' }}">
+        </label>
+        <label>What should I know?
+          <textarea name="message" rows="5">{{ values.message or '' }}</textarea>
+        </label>
+        <button type="submit">Request this package</button>
+      </form>
+    {% endif %}
+  </section>
+</main>
+{% endblock %}

@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
-from .. import argus_analyze, audit, config, db, jobs, mailer, platekit, security
+from .. import argus_analyze, audit, config, db, jobs, mailer, platekit, security, workflows
 from ..public.gallery import _cascade_status, resolve_comment_parent
 from ..render import templates
 from . import common
@@ -414,6 +414,17 @@ async def update_gallery(
     )
     if published and project_id and (not old["published"] or old["project_id"] != project_id):
         jobs.enqueue("notion_sync_gallery", {"gallery_id": gallery_id})
+        workflows.record_project_event(
+            project_id,
+            "gallery",
+            f"Gallery published: {title.strip()}",
+            ref_kind="gallery",
+            ref_id=gallery_id,
+            dedupe_key=f"gallery_published:{gallery_id}:{project_id}",
+        )
+        workflows.fire_workflow(
+            "gallery_published", project_id, ref_kind="gallery", ref_id=gallery_id
+        )
     argus_reanalyze = (
         argus_analyze.is_enabled()
         and published

@@ -14,6 +14,20 @@ The hosted product is intentionally simple:
 - **Target customer:** solo F&B, wedding, portrait, and video creatives who want
   a professional hosted client studio without maintaining software
 
+The competitive promise is "Pixieset delivery + HoneyBook paperwork + Dubsado
+follow-up, without the $50-$129/month software bill." Hosted studios now get:
+
+- **Studio OS:** `/admin/studio/automation` for niche preset packs, packages,
+  workflow rules, package leads, and open reminders
+- **Project cockpit:** project pages show timeline events, workflow-created
+  tasks, client tags, and custom fields next to proposals/contracts/invoices
+- **Package intake:** public `/packages/{slug}` pages create package leads and
+  inquiries from simple bookable offers
+- **Niche presets:** Food & Beverage, Wedding, and Portrait starter packs seed
+  packages, workflow reminders, forms, and CRM tags
+- **Visible automation:** business events such as proposal sent, contract signed,
+  invoice paid, and gallery published create ordinary tasks the owner can edit
+
 Hosted mode is off by default. To run the SaaS version locally:
 
 ```bash

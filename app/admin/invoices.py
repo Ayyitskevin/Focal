@@ -7,7 +7,7 @@ from datetime import date, timedelta
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from .. import audit, config, db, jobs, security
+from .. import audit, config, db, jobs, security, workflows
 from ..render import templates
 from . import common
 from .proposals import MAX_ITEM_ROWS, parse_items
@@ -239,6 +239,15 @@ async def mark_invoice_sent(invoice_id: int):
         db.run(
             "UPDATE invoices SET status='sent', sent_at=datetime('now') WHERE id=?", (invoice_id,)
         )
+    workflows.record_project_event(
+        d["project_id"],
+        "invoice",
+        f"Invoice sent: {d['title']}",
+        ref_kind="invoice",
+        ref_id=invoice_id,
+        dedupe_key=f"invoice_sent:{invoice_id}",
+    )
+    workflows.fire_workflow("invoice_sent", d["project_id"], ref_kind="invoice", ref_id=invoice_id)
     jobs.enqueue("notion_sync_invoice", {"invoice_id": invoice_id})
     log.info("invoice %s marked sent (net_days=%s, due=%s)", invoice_id, d["net_days"], net_due)
     return RedirectResponse(f"/admin/studio/invoices/{invoice_id}", status_code=303)

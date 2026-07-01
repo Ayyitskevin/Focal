@@ -1,0 +1,133 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Automation · Studio · Mise{% endblock %}
+{% block topbar %}
+<header class="admin-topbar pgtop">
+  <div class="pgtop-lead">
+    <h1>Studio OS</h1>
+    <p class="pgtop-sub">Packages, preset packs, and workflow reminders for the $20 hosted studio.</p>
+  </div>
+  <div class="pgtop-actions">
+    <a class="pgtop-link" href="/admin/tasks">Tasks <span aria-hidden="true">&rarr;</span></a>
+    <a class="pgtop-link" href="/admin/forms">Forms <span aria-hidden="true">&rarr;</span></a>
+  </div>
+</header>
+{% endblock %}
+{% block admin_body %}
+<main class="admin-main">
+  <div class="project-grid">
+    <div class="project-main lead-stack">
+      <section class="panel">
+        <div class="panel-head"><h2>Niche preset packs</h2></div>
+        <div class="grid-3">
+          {% for key, pack in packs.items() %}
+          <form method="post" action="/admin/studio/automation/presets/{{ key }}/install" class="mini-card">
+            <h3>{{ pack.name }}</h3>
+            <p class="muted">{{ pack.description }}</p>
+            <button type="submit" class="primary">Install pack</button>
+          </form>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Workflow rules</h2></div>
+        <form method="post" action="/admin/studio/automation/workflow-rules" class="inline-form">
+          <input type="text" name="name" placeholder="Rule name" required>
+          <select name="trigger_key">
+            {% for key, label in triggers.items() %}
+            <option value="{{ key }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+          <input type="text" name="task_title" placeholder="Task to create" required>
+          <input type="number" name="delay_days" value="2" min="0" max="365" style="width:5rem">
+          <button type="submit" class="ghost">Add rule</button>
+        </form>
+        {% if rules %}
+        <table class="list">
+          <tr><th>Rule</th><th>Trigger</th><th>Task</th><th class="num">Delay</th><th>State</th><th></th></tr>
+          {% for r in rules %}
+          <tr>
+            <td>{{ r.name }}</td>
+            <td>{{ triggers.get(r.trigger_key, r.trigger_key) }}</td>
+            <td>{{ r.task_title }}</td>
+            <td class="num">{{ r.delay_days }}d</td>
+            <td>{% if r.active %}<span class="badge is-active">active</span>{% else %}<span class="badge is-draft">paused</span>{% endif %}</td>
+            <td>
+              <form method="post" action="/admin/studio/automation/workflow-rules/{{ r.id }}/toggle">
+                <button type="submit" class="tiny">{{ "Pause" if r.active else "Resume" }}</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </table>
+        {% else %}<p class="muted">No rules yet. Install a preset pack or add one above.</p>{% endif %}
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Public packages</h2></div>
+        <form method="post" action="/admin/studio/automation/packages" class="inline-form">
+          <input type="text" name="slug" placeholder="slug" required>
+          <input type="text" name="name" placeholder="Package name" required>
+          <input type="number" name="price_dollars" placeholder="Price" min="0" step="0.01">
+          <input type="text" name="description" placeholder="Short description">
+          <button type="submit" class="ghost">Save package</button>
+        </form>
+        {% if packages %}
+        <table class="list">
+          <tr><th>Package</th><th class="num">Price</th><th>Public link</th><th>State</th><th></th></tr>
+          {% for p in packages %}
+          <tr>
+            <td>{{ p.name }}</td>
+            <td class="num">${{ p.price_cents|usd }}</td>
+            <td><code class="slug">/packages/{{ p.slug }}</code></td>
+            <td>{% if p.active %}<span class="badge is-active">active</span>{% else %}<span class="badge is-draft">hidden</span>{% endif %}</td>
+            <td>
+              <form method="post" action="/admin/studio/automation/packages/{{ p.id }}/toggle">
+                <button type="submit" class="tiny">{{ "Hide" if p.active else "Show" }}</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </table>
+        {% else %}<p class="muted">No packages yet.</p>{% endif %}
+      </section>
+    </div>
+
+    <aside class="project-rail">
+      <section class="panel">
+        <div class="panel-head"><h2>Open reminders</h2></div>
+        {% if reminders %}
+        <ul class="timeline">
+          {% for r in reminders %}
+          <li class="timeline-item timeline-task">
+            <span class="timeline-dot" aria-hidden="true"></span>
+            <span class="timeline-when">{{ r.due_date or "No date" }}</span>
+            <span class="timeline-text">
+              {% if r.project_id %}<a href="/admin/studio/projects/{{ r.project_id }}">{{ r.title }}</a>
+              {% else %}{{ r.title }}{% endif %}
+              <span class="muted">{{ r.project_title or "General" }}</span>
+            </span>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}<p class="muted">No open reminders.</p>{% endif %}
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Package leads</h2></div>
+        {% if package_leads %}
+        <table class="list">
+          <tr><th>Lead</th><th>Package</th></tr>
+          {% for lead in package_leads %}
+          <tr>
+            <td>{{ lead.name }}<br><span class="muted">{{ lead.email }}</span></td>
+            <td>{{ lead.package_name }}<br><span class="muted">{{ lead.created_at[:10] }}</span></td>
+          </tr>
+          {% endfor %}
+        </table>
+        {% else %}<p class="muted">Package requests will show up here and in Inbox.</p>{% endif %}
+      </section>
+    </aside>
+  </div>
+</main>
+{% endblock %}

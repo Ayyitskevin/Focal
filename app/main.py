@@ -47,12 +47,24 @@ from .admin import (
     share,
     shotlist,
     studio,
+    studio_os,
     uploads,
     validation,
     vision_cutover,
 )
 from .admin import scheduling as admin_scheduling
-from .public import docs, downloads, gallery, media, pay, portal, site, sms_webhook, workspace
+from .public import (
+    docs,
+    downloads,
+    gallery,
+    media,
+    packages,
+    pay,
+    portal,
+    site,
+    sms_webhook,
+    workspace,
+)
 from .public import forms as public_forms
 from .public import scheduling as public_scheduling
 from .render import ROOT, templates
@@ -203,6 +215,7 @@ routers = (
     uploads.router,
     activity.router,
     studio.router,
+    studio_os.router,
     proposals.router,
     contracts.router,
     invoices.router,
@@ -243,6 +256,7 @@ routers = (
     workspace.router,
     public_forms.router,
     public_scheduling.router,
+    packages.router,
     site.router,
     sms_webhook.router,
     service_api.router,
