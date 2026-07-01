@@ -264,6 +264,10 @@ def operator_tenant_overview() -> dict:
         "active": 0,
         "attention": 0,
         "custom_domains_pending": 0,
+        "custom_domains_verified": 0,
+        "active_mrr_cents": 0,
+        "trial_pipeline_cents": 0,
+        "support_queue": 0,
     }
     attention_statuses = {
         "past_due",
@@ -281,12 +285,16 @@ def operator_tenant_overview() -> dict:
         counts["total"] += 1
         if tenant["plan_status"] == "trialing":
             counts["trialing"] += 1
+            counts["trial_pipeline_cents"] += config.SAAS_PRICE_CENTS
         if tenant["plan_status"] == "active":
             counts["active"] += 1
+            counts["active_mrr_cents"] += config.SAAS_PRICE_CENTS
         if tenant["plan_status"] in attention_statuses or (billing and billing["tone"] == "block"):
             counts["attention"] += 1
         if domain_state == "pending":
             counts["custom_domains_pending"] += 1
+        if domain_state == "verified":
+            counts["custom_domains_verified"] += 1
         rows.append(
             {
                 "tenant": tenant,
@@ -298,6 +306,7 @@ def operator_tenant_overview() -> dict:
                 "db_exists": tenant_db_path(tenant["slug"]).exists(),
             }
         )
+    counts["support_queue"] = counts["attention"] + counts["custom_domains_pending"]
     return {"counts": counts, "rows": rows}
 
 

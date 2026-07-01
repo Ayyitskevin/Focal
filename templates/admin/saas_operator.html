@@ -15,20 +15,22 @@
 
 <section class="grid four">
   <div class="panel">
-    <p class="muted">Tenants</p>
+    <p class="muted">Active MRR</p>
+    <h2>${{ '%.0f'|format(overview.counts.active_mrr_cents / 100) }}</h2>
+  </div>
+  <div class="panel">
+    <p class="muted">Trial pipeline</p>
+    <h2>${{ '%.0f'|format(overview.counts.trial_pipeline_cents / 100) }}</h2>
+  </div>
+  <div class="panel">
+    <p class="muted">Studios</p>
     <h2>{{ overview.counts.total }}</h2>
+    <span class="muted">{{ overview.counts.active }} active · {{ overview.counts.trialing }} trialing</span>
   </div>
   <div class="panel">
-    <p class="muted">Active</p>
-    <h2>{{ overview.counts.active }}</h2>
-  </div>
-  <div class="panel">
-    <p class="muted">Trialing</p>
-    <h2>{{ overview.counts.trialing }}</h2>
-  </div>
-  <div class="panel">
-    <p class="muted">Needs support</p>
-    <h2>{{ overview.counts.attention + overview.counts.custom_domains_pending }}</h2>
+    <p class="muted">Support queue</p>
+    <h2>{{ overview.counts.support_queue }}</h2>
+    <span class="muted">{{ overview.counts.attention }} billing · {{ overview.counts.custom_domains_pending }} domains</span>
   </div>
 </section>
 
@@ -53,7 +55,7 @@
 <section class="panel">
   <div class="panel-head">
     <h2>Tenants</h2>
-    <span class="muted">{{ root_domain }} · ${{ '%.2f'|format(price_cents / 100) }}/month</span>
+    <span class="muted">{{ root_domain }} · ${{ '%.2f'|format(price_cents / 100) }}/month · {{ overview.counts.custom_domains_verified }} verified domains</span>
   </div>
   <table class="list">
     <tr>
