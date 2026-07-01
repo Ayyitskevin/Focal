@@ -9,6 +9,7 @@
     <p class="muted">Root-host support view for tenants, billing state, domains, and launch readiness.</p>
   </div>
   <div class="pgtop-actions">
+    <a class="pgtop-link" href="/admin/saas/export.csv">Export CSV</a>
     <a class="pgtop-link" href="{{ platform_url }}">Pricing</a>
   </div>
 </section>
@@ -73,6 +74,37 @@
       <td><strong>{{ item.label }}</strong><br><span class="muted">{{ item.detail }}</span></td>
       <td><a href="{{ item.href }}">Open</a></td>
     </tr>
+    {% endfor %}
+  </table>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="pgtop-eyebrow">Retention</p>
+      <h2>Trial nudges</h2>
+    </div>
+    <span class="badge {{ 'is-active' if not trial_nudges else 'is-sent' }}">{{ trial_nudges|length }}</span>
+  </div>
+  <p class="muted">Manual mail drafts for the studios most likely to need help before converting.</p>
+  <table class="list">
+    <tr><th>Studio</th><th>Prompt</th><th>Reason</th><th>Action</th></tr>
+    {% for nudge in trial_nudges %}
+    {% set tenant = nudge.tenant %}
+    <tr>
+      <td><strong>{{ tenant.studio_name }}</strong><br><span class="muted">{{ tenant.owner_email }}</span></td>
+      <td><span class="badge {{ nudge.tone }}">{{ nudge.label }}</span></td>
+      <td>
+        {{ nudge.reason }}
+        {% if nudge.days_left is not none %}<br><span class="muted">{{ nudge.days_left }} trial day{{ 's' if nudge.days_left != 1 else '' }} left</span>{% endif %}
+      </td>
+      <td>
+        <a href="{{ nudge.mailto }}">Draft email</a><br>
+        <a href="{{ nudge.account_url }}">Open account</a>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4" class="muted">No lifecycle nudges right now.</td></tr>
     {% endfor %}
   </table>
 </section>

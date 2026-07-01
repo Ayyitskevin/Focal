@@ -27,6 +27,8 @@ def _context(request) -> dict:
         "saas_mode": config.SAAS_MODE,
         "saas_tenant": getattr(request.state, "tenant", None),
         "saas_billing": getattr(request.state, "saas_billing", None),
+        "saas_announcement": config.SAAS_ANNOUNCEMENT if config.SAAS_MODE else "",
+        "saas_announcement_url": _safe_announcement_url(),
     }
 
 
@@ -48,6 +50,13 @@ templates.env.globals["og_image_id"] = _og_image_id
 templates.env.globals["instagram_url"] = config.INSTAGRAM_URL
 templates.env.globals["contact_email"] = config.CONTACT_EMAIL
 templates.env.globals["plausible_domain"] = config.PLAUSIBLE_DOMAIN
+
+
+def _safe_announcement_url() -> str:
+    url = config.SAAS_ANNOUNCEMENT_URL
+    if url.startswith("/") or url.startswith("https://") or url.startswith("http://"):
+        return url
+    return ""
 
 
 def _portfolio_alt(asset, site_name: str | None = None) -> str:

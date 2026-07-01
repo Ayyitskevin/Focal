@@ -49,6 +49,10 @@ Hosted mode adds:
   `/pricing?utm_source=newsletter&utm_campaign=beta`
 - operator growth analytics for activation, active rate, launch score, trial
   risk, and acquisition sources
+- manual trial nudge drafts for setup help, trial rescue, conversion, and
+  billing recovery follow-up
+- tenant CSV export from `/admin/saas/export.csv`
+- optional tenant-admin announcement banner with `MISE_SAAS_ANNOUNCEMENT`
 
 Production billing uses:
 
@@ -109,12 +113,19 @@ The operator console shows:
 - acquisition source breakdown from `utm_source`, `utm_campaign`, and referrer
 - launch score and at-risk trial counts for retention follow-up
 - activation rate, active rate, average launch score, and top source
+- trial nudge mail drafts for high-leverage retention follow-up
+- CSV export for beta cohorts, revenue, launch health, and acquisition source
 - per-tenant billing status and Stripe IDs
 - custom-domain pending/verified state
 - isolated data path and tenant DB presence
 - manual support actions for billing status and domain verification
 
 This keeps support simple enough for one founder.
+
+Tenant admins can also see a lightweight hosted announcement banner when
+`MISE_SAAS_ANNOUNCEMENT` is set. Use it for launch notes, new presets, or beta
+office hours. It only appears inside tenant admin, never as a public gallery or
+package-page footer.
 
 ## Self-Hosted Mode
 

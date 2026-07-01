@@ -1,4 +1,6 @@
 import asyncio
+import csv
+import io
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -302,6 +304,59 @@ def test_operator_growth_metrics_track_sources_and_activation(tmp_path, monkeypa
     ]
 
 
+def test_operator_trial_nudges_draft_high_leverage_followups(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    started = datetime(2026, 7, 1, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(saas, "_now", lambda: started)
+    risk = saas.create_tenant("risk", "Risk Studio", "risk@example.com", "secret123")
+    saas.create_tenant("early", "Early Studio", "early@example.com", "secret123")
+    past_due = saas.create_tenant("due", "Due Studio", "due@example.com", "secret123")
+    saas.update_tenant_billing(past_due["id"], plan_status="past_due")
+    with saas.control_connect() as con:
+        con.execute(
+            "UPDATE tenants SET trial_ends_at=? WHERE id=?",
+            (saas._iso(started + timedelta(days=2)), risk["id"]),
+        )
+
+    nudges = saas.operator_trial_nudges()
+
+    labels = [n["label"] for n in nudges]
+    assert labels[:2] == ["Trial rescue", "Billing recovery"]
+    assert "Setup nudge" in labels
+    rescue = next(n for n in nudges if n["tenant"]["slug"] == "risk")
+    assert rescue["days_left"] == 2
+    assert rescue["mailto"].startswith("mailto:risk@example.com?subject=")
+    assert "Studio%20login" in rescue["mailto"]
+    assert next(n for n in nudges if n["tenant"]["slug"] == "early")["reason"] == (
+        "setup is still early in the trial"
+    )
+
+
+def test_operator_tenant_export_csv_tracks_growth_and_revenue(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant(
+        "source-test",
+        "Source Studio",
+        "source@example.com",
+        "secret123",
+        signup_source="x",
+        signup_campaign="launch-thread",
+        signup_referrer="https://x.test/post",
+    )
+    saas.update_tenant_billing(tenant["id"], plan_status="active")
+    csv_text = saas.operator_tenant_export_csv()
+
+    rows = list(csv.DictReader(io.StringIO(csv_text)))
+
+    assert rows[0]["slug"] == "source-test"
+    assert rows[0]["plan_status"] == "active"
+    assert rows[0]["signup_source"] == "x"
+    assert rows[0]["signup_campaign"] == "launch-thread"
+    assert rows[0]["active_mrr_cents"] == "2000"
+    assert rows[0]["trial_pipeline_cents"] == "0"
+    assert rows[0]["tenant_url"] == "https://source-test.mise.test/admin/login"
+
+
 def test_operator_support_actions_update_billing_and_domain(tmp_path, monkeypatch):
     _configure_saas(tmp_path, monkeypatch)
     tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
@@ -343,6 +398,47 @@ def test_operator_console_renders_for_platform_admin(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert response.context["overview"]["counts"]["total"] == 1
     assert response.context["price_cents"] == 2000
+    assert response.context["trial_nudges"][0]["label"] == "Setup nudge"
+
+
+def test_operator_csv_export_route_is_platform_admin_only(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
+    monkeypatch.setattr(config, "ADMIN_PASSWORD", "operator-secret")
+    monkeypatch.setattr(config, "COOKIE_SECURE", True)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    saas.update_tenant_billing(tenant["id"], plan_status="active")
+    cookie = f"{security.ADMIN_COOKIE}={security.sign('admin')}"
+
+    response = asyncio.run(
+        saas.operator_tenants_export(_request("/admin/saas/export.csv", "mise.test", cookie=cookie))
+    )
+
+    assert response.status_code == 200
+    assert response.media_type == "text/csv; charset=utf-8"
+    assert (
+        response.headers["content-disposition"] == 'attachment; filename="mise_hosted_tenants.csv"'
+    )
+    assert "alpha,Alpha Studio,alpha@example.com,active" in response.body.decode()
+
+
+def test_tenant_admin_shows_env_announcement_banner(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
+    monkeypatch.setattr(config, "SAAS_ANNOUNCEMENT", "New wedding starter pack is live.")
+    monkeypatch.setattr(config, "SAAS_ANNOUNCEMENT_URL", "/admin/onboarding")
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    cookie = f"{security.ADMIN_COOKIE}={security.sign('admin')}"
+
+    with saas.tenant_runtime(tenant):
+        request = _request("/admin/billing", "alpha.mise.test", cookie=cookie)
+        request.state.tenant = tenant
+        request.state.saas_billing = saas.tenant_billing_context(tenant)
+        response = asyncio.run(saas.billing(request))
+
+    body = response.body.decode()
+    assert "New wedding starter pack is live." in body
+    assert 'href="/admin/onboarding"' in body
 
 
 def test_billing_portal_uses_customer_and_return_url(tmp_path, monkeypatch):
