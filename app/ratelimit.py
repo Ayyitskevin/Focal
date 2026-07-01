@@ -27,6 +27,8 @@ def _bucket_for(path: str) -> str | None:
     """Bucket name to charge, or None to skip (exempt)."""
     if path == "/healthz" or path.startswith(("/static/", "/media/", "/site/img/", "/work/")):
         return None  # static + media grid: legit bursts, never limited
+    if path == "/start-trial":
+        return "signup"  # hosted tenant provisioning: tight hourly bucket (ADR 0050)
     if "/download" in path:
         return "download"
     if path.startswith("/admin"):

@@ -105,6 +105,9 @@ SAAS_TRIAL_DAYS = int(os.environ.get("MISE_SAAS_TRIAL_DAYS", "14"))
 SAAS_PRICE_CENTS = 2000
 SAAS_STRIPE_PRICE_ID = os.environ.get("MISE_SAAS_STRIPE_PRICE_ID", "")
 SAAS_STRIPE_WEBHOOK_SECRET = os.environ.get("MISE_SAAS_STRIPE_WEBHOOK_SECRET", "")
+# Dunning grace: how long a past_due tenant keeps access while Stripe retries the
+# card (ADR 0050). Terminal states (unpaid/canceled) always block immediately.
+SAAS_PAST_DUE_GRACE_DAYS = int(os.environ.get("MISE_SAAS_PAST_DUE_GRACE_DAYS", "10"))
 SAAS_ANNOUNCEMENT = os.environ.get("MISE_SAAS_ANNOUNCEMENT", "").strip()
 SAAS_ANNOUNCEMENT_URL = os.environ.get("MISE_SAAS_ANNOUNCEMENT_URL", "").strip()
 
@@ -372,6 +375,10 @@ RATE_LIMITS = {
     "download": (int(os.environ.get("MISE_RL_DOWNLOAD", "30")), RATE_LIMIT_WINDOW),
     "public": (int(os.environ.get("MISE_RL_PUBLIC", "120")), RATE_LIMIT_WINDOW),
     "admin": (int(os.environ.get("MISE_RL_ADMIN", "120")), RATE_LIMIT_WINDOW),
+    # Hosted signup provisions a whole tenant instance (DB file + media root), so it
+    # gets its own tight hourly bucket (ADR 0050) — 5/hour/IP, not the generous
+    # per-minute public bucket.
+    "signup": (int(os.environ.get("MISE_RL_SIGNUP", "5")), 3600),
 }
 
 # Telegram security alerts (anomaly-only). Both unset -> dormant, no outbound call.
