@@ -24,6 +24,8 @@ MISE_SAAS_MARKETING_HOST=mise.example.com
 MISE_SAAS_CONTROL_DB_PATH=/data/saas-control.db
 MISE_SAAS_TENANT_DATA_DIR=/data/tenants
 MISE_SAAS_TRIAL_DAYS=14
+MISE_SAAS_ANNOUNCEMENT=
+MISE_SAAS_ANNOUNCEMENT_URL=
 MISE_STRIPE_SECRET_KEY=sk_live_xxx
 MISE_SAAS_STRIPE_PRICE_ID=price_xxx
 MISE_SAAS_STRIPE_WEBHOOK_SECRET=whsec_xxx
@@ -103,6 +105,17 @@ On the root hosted domain, `/admin/login` accepts the operator
 view, separate from tenant admin accounts. Use it to review tenant billing
 states, custom-domain verification, launch readiness, and isolated tenant data
 paths without opening a tenant database manually.
+
+The console includes:
+
+- manual trial nudge drafts for setup help, trial rescue, conversion prompts,
+  and billing recovery
+- `/admin/saas/export.csv` for beta cohorts, MRR, launch scores, and tagged
+  acquisition sources
+
+Set `MISE_SAAS_ANNOUNCEMENT` to show a short banner inside tenant admin areas.
+`MISE_SAAS_ANNOUNCEMENT_URL` may be a relative path or `http(s)` URL. The banner
+is not shown on public tenant gallery, demo, package, or marketing pages.
 
 ## Do Not Touch KLP
 

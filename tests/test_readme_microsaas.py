@@ -16,6 +16,9 @@ def test_readme_keeps_flat_hosted_positioning():
         "scripts/launch-hosted-production.sh",
         "utm_source",
         "operator growth analytics",
+        "trial nudge",
+        "/admin/saas/export.csv",
+        "MISE_SAAS_ANNOUNCEMENT",
         "MISE_SAAS_MODE=true",
         "2000",
     ]

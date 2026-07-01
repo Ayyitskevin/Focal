@@ -47,6 +47,12 @@
       <a href="/admin/billing">Billing</a>
     </section>
     {% endif %}
+    {% if saas_tenant and saas_announcement %}
+    <section class="saas-announcement-banner">
+      <span>{{ saas_announcement }}</span>
+      {% if saas_announcement_url %}<a href="{{ saas_announcement_url }}">Open</a>{% endif %}
+    </section>
+    {% endif %}
     {% block admin_body %}{% endblock %}
   </div>
 </div>

@@ -7,6 +7,8 @@ SQLite database and file-storage root.
 
 from __future__ import annotations
 
+import csv
+import io
 import logging
 import re
 import sqlite3
@@ -14,10 +16,10 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from fastapi import APIRouter, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 
 from . import config, db, passwords, security, urls
 from .render import templates
@@ -450,6 +452,149 @@ def operator_launch_checklist(overview: dict | None = None, preflight: dict | No
         "headline": headline,
         "detail": detail,
     }
+
+
+def _mailto(owner_email: str, subject: str, body: str) -> str:
+    return f"mailto:{quote(owner_email, safe='@.+_-')}?subject={quote(subject)}&body={quote(body)}"
+
+
+def operator_trial_nudges(overview: dict | None = None) -> list[dict]:
+    """Manual lifecycle prompts for the operator.
+
+    This intentionally drafts mailto links instead of sending automation. It
+    gives one founder the highest-leverage trial follow-ups while keeping the
+    beta product honest and observable.
+    """
+    overview = overview or operator_tenant_overview()
+    nudges: list[dict] = []
+    for row in overview["rows"]:
+        tenant = row["tenant"]
+        billing = row["billing"]
+        launch = row["launch"]
+        status = tenant["plan_status"]
+        days_left = billing["trial_days_left"]
+        label = ""
+        reason = ""
+        priority = 9
+        tone = "is-draft"
+        if status == "trialing":
+            if days_left is None or days_left <= 3:
+                if launch["complete"]:
+                    label = "Conversion nudge"
+                    reason = "trial ends soon and the studio is launch-ready"
+                    tone = "is-active"
+                else:
+                    label = "Trial rescue"
+                    reason = "trial ends soon and setup is not launch-ready"
+                    tone = "is-declined"
+                priority = 0
+            elif not launch["complete"] and launch["score"] < 50:
+                label = "Setup nudge"
+                reason = "setup is still early in the trial"
+                priority = 1
+                tone = "is-draft"
+            elif launch["complete"]:
+                label = "Conversion nudge"
+                reason = "studio is launch-ready during the trial"
+                priority = 2
+                tone = "is-active"
+        elif status in {"past_due", "unpaid", "incomplete", "incomplete_expired"}:
+            label = "Billing recovery"
+            reason = "billing needs attention"
+            priority = 0
+            tone = "is-declined"
+        if not label:
+            continue
+        subject = f"{label}: {tenant['studio_name']} on Mise"
+        body = "\n\n".join(
+            [
+                f"Hi {tenant['studio_name']},",
+                f"I was checking your Mise studio and noticed {reason}.",
+                f"Studio login: {row['tenant_url']}",
+                "Want help getting the last pieces live? Reply here and I can point you to the quickest next step.",
+            ]
+        )
+        nudges.append(
+            {
+                "tenant": tenant,
+                "label": label,
+                "reason": reason,
+                "tone": tone,
+                "priority": priority,
+                "days_left": days_left,
+                "mailto": _mailto(tenant["owner_email"], subject, body),
+                "account_url": row["account_url"],
+            }
+        )
+    return sorted(
+        nudges,
+        key=lambda item: (
+            item["priority"],
+            item["days_left"] if item["days_left"] is not None else 99,
+            item["tenant"]["created_at"],
+        ),
+    )
+
+
+def operator_tenant_export_csv(overview: dict | None = None) -> str:
+    overview = overview or operator_tenant_overview()
+    output = io.StringIO()
+    fieldnames = [
+        "id",
+        "slug",
+        "studio_name",
+        "owner_email",
+        "plan_status",
+        "trial_days_left",
+        "launch_score",
+        "launch_ready",
+        "domain_state",
+        "custom_domain",
+        "signup_source",
+        "signup_campaign",
+        "signup_referrer",
+        "active_mrr_cents",
+        "trial_pipeline_cents",
+        "tenant_url",
+        "data_path",
+        "created_at",
+        "updated_at",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    for row in overview["rows"]:
+        tenant = row["tenant"]
+        billing = row["billing"]
+        writer.writerow(
+            {
+                "id": tenant["id"],
+                "slug": tenant["slug"],
+                "studio_name": tenant["studio_name"],
+                "owner_email": tenant["owner_email"],
+                "plan_status": tenant["plan_status"],
+                "trial_days_left": billing["trial_days_left"]
+                if billing["trial_days_left"] is not None
+                else "",
+                "launch_score": row["launch"]["score"],
+                "launch_ready": "yes" if row["launch"]["complete"] else "no",
+                "domain_state": row["domain_state"],
+                "custom_domain": tenant.get("custom_domain") or "",
+                "signup_source": tenant.get("signup_source") or "direct",
+                "signup_campaign": tenant.get("signup_campaign") or "",
+                "signup_referrer": tenant.get("signup_referrer") or "",
+                "active_mrr_cents": config.SAAS_PRICE_CENTS
+                if tenant["plan_status"] == "active"
+                else 0,
+                "trial_pipeline_cents": config.SAAS_PRICE_CENTS
+                if tenant["plan_status"] == "trialing"
+                else 0,
+                "tenant_url": row["tenant_url"],
+                "data_path": row["data_path"],
+                "created_at": tenant["created_at"],
+                "updated_at": tenant.get("updated_at") or "",
+            }
+        )
+    return output.getvalue()
 
 
 def current_tenant() -> dict | None:
@@ -1071,10 +1216,21 @@ async def operator_console(request: Request):
             "overview": overview,
             "preflight": preflight,
             "launch": operator_launch_checklist(overview, preflight),
+            "trial_nudges": operator_trial_nudges(overview),
             "root_domain": _root_domain(),
             "platform_url": platform_url("/pricing"),
             "price_cents": config.SAAS_PRICE_CENTS,
         },
+    )
+
+
+@router.get("/admin/saas/export.csv")
+async def operator_tenants_export(request: Request):
+    require_platform_admin(request)
+    return PlainTextResponse(
+        operator_tenant_export_csv(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="mise_hosted_tenants.csv"'},
     )
 
 

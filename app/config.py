@@ -105,6 +105,8 @@ SAAS_TRIAL_DAYS = int(os.environ.get("MISE_SAAS_TRIAL_DAYS", "14"))
 SAAS_PRICE_CENTS = 2000
 SAAS_STRIPE_PRICE_ID = os.environ.get("MISE_SAAS_STRIPE_PRICE_ID", "")
 SAAS_STRIPE_WEBHOOK_SECRET = os.environ.get("MISE_SAAS_STRIPE_WEBHOOK_SECRET", "")
+SAAS_ANNOUNCEMENT = os.environ.get("MISE_SAAS_ANNOUNCEMENT", "").strip()
+SAAS_ANNOUNCEMENT_URL = os.environ.get("MISE_SAAS_ANNOUNCEMENT_URL", "").strip()
 
 SECRET_KEY = os.environ.get("MISE_SECRET_KEY", "")  # required in prod
 ADMIN_PASSWORD = os.environ.get("MISE_ADMIN_PASSWORD", "")  # required in prod
