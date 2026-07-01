@@ -256,6 +256,51 @@ def list_tenants(*, billable_only: bool = False) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def operator_tenant_overview() -> dict:
+    rows = []
+    counts = {
+        "total": 0,
+        "trialing": 0,
+        "active": 0,
+        "attention": 0,
+        "custom_domains_pending": 0,
+    }
+    attention_statuses = {
+        "past_due",
+        "unpaid",
+        "canceled",
+        "paused",
+        "incomplete",
+        "incomplete_expired",
+    }
+    for tenant in list_tenants():
+        billing = tenant_billing_context(tenant)
+        domain_state = "none"
+        if tenant.get("custom_domain"):
+            domain_state = "verified" if tenant.get("custom_domain_verified_at") else "pending"
+        counts["total"] += 1
+        if tenant["plan_status"] == "trialing":
+            counts["trialing"] += 1
+        if tenant["plan_status"] == "active":
+            counts["active"] += 1
+        if tenant["plan_status"] in attention_statuses or (billing and billing["tone"] == "block"):
+            counts["attention"] += 1
+        if domain_state == "pending":
+            counts["custom_domains_pending"] += 1
+        rows.append(
+            {
+                "tenant": tenant,
+                "billing": billing,
+                "domain_state": domain_state,
+                "tenant_url": tenant_url(tenant["slug"], "/admin/login"),
+                "account_url": tenant_url(tenant["slug"], "/admin/account"),
+                "data_path": str(tenant_data_path(tenant["slug"])),
+                "db_exists": tenant_db_path(tenant["slug"]).exists(),
+            }
+        )
+    return {"counts": counts, "rows": rows}
+
+
 def current_tenant() -> dict | None:
     return _TENANT_CTX.get()
 
@@ -409,6 +454,41 @@ def update_tenant_billing(
         con.execute(f"UPDATE tenants SET {', '.join(updates)} WHERE id=?", params)
 
 
+def operator_update_tenant_status(tenant_id: int, plan_status: str) -> dict:
+    allowed = {
+        "trialing",
+        "active",
+        "past_due",
+        "canceled",
+        "unpaid",
+        "paused",
+        "incomplete",
+        "incomplete_expired",
+    }
+    if plan_status not in allowed:
+        raise ValueError("Unsupported billing status.")
+    update_tenant_billing(tenant_id, plan_status=plan_status)
+    tenant = tenant_by_id(tenant_id)
+    if not tenant:
+        raise ValueError("Tenant not found.")
+    return tenant
+
+
+def operator_set_domain_verified(tenant_id: int, *, verified: bool) -> dict:
+    tenant = tenant_by_id(tenant_id)
+    if not tenant:
+        raise ValueError("Tenant not found.")
+    if not tenant.get("custom_domain"):
+        raise ValueError("Tenant has no custom domain.")
+    verified_at = _iso(_now()) if verified else None
+    with control_connect() as con:
+        con.execute(
+            "UPDATE tenants SET custom_domain_verified_at=?, updated_at=? WHERE id=?",
+            (verified_at, _iso(_now()), tenant_id),
+        )
+    return tenant_by_id(tenant_id)
+
+
 def mark_custom_domain_verified(tenant: dict, host: str) -> dict:
     host = _host_only(host)
     if not tenant.get("custom_domain") or tenant["custom_domain"] != host:
@@ -531,6 +611,8 @@ def _platform_path(path: str) -> bool:
     return (
         path in {"/", "/pricing", "/start-trial", "/healthz", "/favicon.ico"}
         or path.startswith("/static/")
+        or path in {"/admin/login", "/admin/logout", "/admin/saas"}
+        or path.startswith("/admin/saas/")
         or path in {"/webhooks/stripe", "/webhooks/stripe/saas"}
     )
 
@@ -734,6 +816,60 @@ def create_billing_portal_url(tenant: dict | None, return_url: str) -> str:
         return_url=return_url,
     )
     return session.url
+
+
+def require_platform_admin(request: Request) -> None:
+    security.require_admin(request)
+    if current_tenant():
+        raise HTTPException(status_code=404)
+
+
+@router.get("/admin/saas", response_class=HTMLResponse)
+async def operator_console(request: Request):
+    require_platform_admin(request)
+    from . import saas_preflight
+
+    return templates.TemplateResponse(
+        request,
+        "admin/saas_operator.html",
+        {
+            "overview": operator_tenant_overview(),
+            "preflight": saas_preflight.check_readiness(write_probes=False),
+            "root_domain": _root_domain(),
+            "platform_url": platform_url("/pricing"),
+            "price_cents": config.SAAS_PRICE_CENTS,
+        },
+    )
+
+
+@router.post("/admin/saas/{tenant_id}/billing")
+async def operator_billing_status(request: Request, tenant_id: int, plan_status: str = Form(...)):
+    require_platform_admin(request)
+    try:
+        operator_update_tenant_status(tenant_id, plan_status)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RedirectResponse("/admin/saas?billing=1", status_code=303)
+
+
+@router.post("/admin/saas/{tenant_id}/domain/verify")
+async def operator_verify_domain(request: Request, tenant_id: int):
+    require_platform_admin(request)
+    try:
+        operator_set_domain_verified(tenant_id, verified=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RedirectResponse("/admin/saas?domain=verified", status_code=303)
+
+
+@router.post("/admin/saas/{tenant_id}/domain/reset")
+async def operator_reset_domain(request: Request, tenant_id: int):
+    require_platform_admin(request)
+    try:
+        operator_set_domain_verified(tenant_id, verified=False)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RedirectResponse("/admin/saas?domain=reset", status_code=303)
 
 
 @router.get("/admin/account", response_class=HTMLResponse)

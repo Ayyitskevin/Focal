@@ -1,6 +1,8 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from starlette.requests import Request
 
 from app import config, db, passwords, saas, saas_demo, security
 
@@ -15,6 +17,24 @@ def _configure_saas(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "SAAS_TRIAL_DAYS", 14)
     saas._MIGRATED_TENANT_DBS.clear()
     saas.migrate_control()
+
+
+def _request(path: str, host: str, *, cookie: str | None = None) -> Request:
+    headers = [(b"host", host.encode()), (b"accept", b"text/html")]
+    if cookie:
+        headers.append((b"cookie", cookie.encode()))
+    return Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": path,
+            "query_string": b"",
+            "headers": headers,
+            "scheme": "https",
+            "server": (host, 443),
+            "client": ("127.0.0.1", 50000),
+        }
+    )
 
 
 def test_hosted_price_is_locked_to_twenty_dollars():
@@ -38,6 +58,8 @@ def test_tenant_slug_from_host(monkeypatch):
     assert saas.tenant_slug_from_host("too.deep.mise.test") is None
     assert saas._platform_path("/webhooks/stripe")
     assert saas._platform_path("/webhooks/stripe/saas")
+    assert saas._platform_path("/admin/login")
+    assert saas._platform_path("/admin/saas")
 
 
 def test_tenant_databases_are_isolated(tmp_path, monkeypatch):
@@ -64,6 +86,19 @@ def test_tenant_databases_are_isolated(tmp_path, monkeypatch):
 
     with saas.tenant_runtime(alpha):
         assert db.one("SELECT name FROM clients")["name"] == "Alpha Client"
+
+
+def test_platform_admin_password_is_separate_from_tenant_password(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "ADMIN_PASSWORD", "operator-secret")
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+
+    assert security.check_admin_password("operator-secret")
+    assert not security.check_admin_password("secret123")
+
+    with saas.tenant_runtime(tenant):
+        assert security.check_admin_password("secret123")
+        assert not security.check_admin_password("operator-secret")
 
 
 def test_account_settings_update_custom_domain_and_branding(tmp_path, monkeypatch):
@@ -123,6 +158,74 @@ def test_custom_domain_verification_marks_seen_host(tmp_path, monkeypatch):
     verified = saas.mark_custom_domain_verified(tenant, "clients.alpha.test")
 
     assert verified["custom_domain_verified_at"]
+
+
+def test_operator_overview_summarizes_tenants(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    alpha = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    beta = saas.create_tenant("beta", "Beta Studio", "beta@example.com", "secret123")
+    saas.update_tenant_billing(alpha["id"], plan_status="active")
+    saas.update_tenant_billing(beta["id"], plan_status="past_due")
+    saas.update_tenant_account(
+        beta["id"],
+        studio_name="Beta Studio",
+        owner_email="beta@example.com",
+        custom_domain="clients.beta.test",
+        brand_accent="#2f5c45",
+    )
+
+    overview = saas.operator_tenant_overview()
+
+    assert overview["counts"]["total"] == 2
+    assert overview["counts"]["active"] == 1
+    assert overview["counts"]["attention"] == 1
+    assert overview["counts"]["custom_domains_pending"] == 1
+    beta_row = next(r for r in overview["rows"] if r["tenant"]["slug"] == "beta")
+    assert beta_row["domain_state"] == "pending"
+    assert beta_row["tenant_url"] == "https://beta.mise.test/admin/login"
+
+
+def test_operator_support_actions_update_billing_and_domain(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    tenant = saas.update_tenant_account(
+        tenant["id"],
+        studio_name="Alpha Studio",
+        owner_email="alpha@example.com",
+        custom_domain="clients.alpha.test",
+        brand_accent="#2f5c45",
+    )
+
+    updated = saas.operator_update_tenant_status(tenant["id"], "active")
+    assert updated["plan_status"] == "active"
+
+    verified = saas.operator_set_domain_verified(tenant["id"], verified=True)
+    assert verified["custom_domain_verified_at"]
+    reset = saas.operator_set_domain_verified(tenant["id"], verified=False)
+    assert reset["custom_domain_verified_at"] is None
+
+    with pytest.raises(ValueError, match="Unsupported"):
+        saas.operator_update_tenant_status(tenant["id"], "enterprise")
+
+
+def test_operator_console_renders_for_platform_admin(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
+    monkeypatch.setattr(config, "ADMIN_PASSWORD", "operator-secret")
+    monkeypatch.setattr(config, "COOKIE_SECURE", True)
+    monkeypatch.setattr(config, "STRIPE_SECRET_KEY", "sk_test")
+    monkeypatch.setattr(config, "SAAS_STRIPE_PRICE_ID", "price_20")
+    monkeypatch.setattr(config, "SAAS_STRIPE_WEBHOOK_SECRET", "whsec_test")
+    saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    cookie = f"{security.ADMIN_COOKIE}={security.sign('admin')}"
+
+    response = asyncio.run(
+        saas.operator_console(_request("/admin/saas", "mise.test", cookie=cookie))
+    )
+
+    assert response.status_code == 200
+    assert response.context["overview"]["counts"]["total"] == 1
+    assert response.context["price_cents"] == 2000
 
 
 def test_billing_portal_uses_customer_and_return_url(tmp_path, monkeypatch):
