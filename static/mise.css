@@ -964,8 +964,36 @@ progress { width: 100%; }
   flex: 1;
 }
 
+.admin-shell .saas-billing-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 14px 22px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(154,122,44,0.12);
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.admin-shell .saas-billing-banner a {
+  color: inherit;
+  text-decoration: underline;
+  white-space: nowrap;
+}
+
+.admin-shell .saas-billing-block {
+  background: rgba(124,47,56,0.13);
+}
+
 @media (max-width: 900px) {
   .admin-shell .grid-3 { grid-template-columns: 1fr; }
+  .admin-shell .saas-billing-banner {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 .sent-note { background: var(--card); border: 1px solid var(--accent);
   border-radius: 10px; padding: 1rem 1.2rem; }

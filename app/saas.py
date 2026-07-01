@@ -471,6 +471,62 @@ def tenant_has_access(tenant: dict) -> bool:
     return False
 
 
+def tenant_billing_context(tenant: dict | None) -> dict | None:
+    """Small presentation model for hosted billing status banners.
+
+    The middleware remains the enforcement point. This helper only makes the
+    same state visible in templates so trial/payment problems are not silent.
+    """
+    if not tenant:
+        return None
+    status = tenant["plan_status"]
+    access_ok = tenant_has_access(tenant)
+    trial_ends_at = _parse_iso(tenant.get("trial_ends_at"))
+    days_left = None
+    if trial_ends_at:
+        seconds_left = (trial_ends_at - _now()).total_seconds()
+        days_left = max(0, int(seconds_left // 86400))
+    if status == "active":
+        tone = "ok"
+        message = "Hosted plan active at $20/month."
+    elif status == "trialing" and access_ok:
+        if days_left == 0:
+            message = "Trial ends today. Add billing to keep the studio live."
+            tone = "warn"
+        elif days_left is not None and days_left <= 3:
+            message = (
+                f"Trial ends in {days_left} day{'s' if days_left != 1 else ''}. Add billing soon."
+            )
+            tone = "warn"
+        else:
+            message = (
+                f"Free trial active. {days_left} days left."
+                if days_left is not None
+                else "Free trial active."
+            )
+            tone = "ok"
+    elif status == "trialing":
+        tone = "block"
+        message = "Trial ended. Open billing to continue using the hosted studio."
+    elif status in {"past_due", "unpaid", "incomplete", "incomplete_expired"}:
+        tone = "block"
+        message = "Billing needs attention. Open billing to restore studio access."
+    elif status == "canceled":
+        tone = "block"
+        message = "Subscription canceled. Open billing to restart the hosted studio."
+    else:
+        tone = "block"
+        message = "Subscription status needs attention. Open billing to continue."
+    return {
+        "status": status,
+        "access_ok": access_ok,
+        "trial_ends_at": tenant.get("trial_ends_at"),
+        "trial_days_left": days_left,
+        "tone": tone,
+        "message": message,
+    }
+
+
 def _platform_path(path: str) -> bool:
     return (
         path in {"/", "/pricing", "/start-trial", "/healthz", "/favicon.ico"}
@@ -513,6 +569,7 @@ async def tenant_middleware(request: Request, call_next):
     tenant = mark_custom_domain_verified(tenant, request.headers.get("host", ""))
     with tenant_runtime(tenant):
         request.state.tenant = dict(tenant)
+        request.state.saas_billing = tenant_billing_context(tenant)
         if not tenant_has_access(tenant) and not _billing_allowed_path(path):
             if path.startswith("/admin"):
                 return RedirectResponse("/admin/billing?expired=1", status_code=303)
@@ -652,6 +709,7 @@ async def billing(request: Request):
             "tenant": tenant,
             "price_cents": config.SAAS_PRICE_CENTS,
             "access_ok": tenant_has_access(tenant),
+            "billing_status": tenant_billing_context(tenant),
         },
     )
 

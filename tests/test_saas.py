@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from app import config, db, passwords, saas, saas_demo, security
@@ -153,6 +155,44 @@ def test_billing_portal_uses_customer_and_return_url(tmp_path, monkeypatch):
         "customer": "cus_123",
         "return_url": "https://alpha.mise.test/admin/billing",
     }
+
+
+def test_trial_access_expires_and_billing_context_blocks(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    started = datetime(2026, 7, 1, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(saas, "_now", lambda: started)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+
+    assert saas.tenant_has_access(tenant)
+    active_trial = saas.tenant_billing_context(tenant)
+    assert active_trial["tone"] == "ok"
+    assert active_trial["access_ok"] is True
+
+    monkeypatch.setattr(saas, "_now", lambda: started + timedelta(days=15))
+    expired = saas.tenant_by_slug("alpha")
+    assert not saas.tenant_has_access(expired)
+    blocked = saas.tenant_billing_context(expired)
+    assert blocked["tone"] == "block"
+    assert blocked["access_ok"] is False
+    assert "Trial ended" in blocked["message"]
+
+
+def test_billing_context_warns_near_trial_end_and_ok_for_active(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    started = datetime(2026, 7, 1, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(saas, "_now", lambda: started)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+
+    monkeypatch.setattr(saas, "_now", lambda: started + timedelta(days=12))
+    warning = saas.tenant_billing_context(saas.tenant_by_slug("alpha"))
+    assert warning["tone"] == "warn"
+    assert warning["access_ok"] is True
+    assert "Trial ends" in warning["message"]
+
+    saas.update_tenant_billing(tenant["id"], plan_status="active")
+    active = saas.tenant_billing_context(saas.tenant_by_slug("alpha"))
+    assert active["tone"] == "ok"
+    assert active["message"] == "Hosted plan active at $20/month."
 
 
 def test_onboarding_demo_seeds_project_flow(tmp_path, monkeypatch):

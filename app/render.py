@@ -26,6 +26,7 @@ def _context(request) -> dict:
         "base_url": urls.public_base_url(request),
         "saas_mode": config.SAAS_MODE,
         "saas_tenant": getattr(request.state, "tenant", None),
+        "saas_billing": getattr(request.state, "saas_billing", None),
     }
 
 
