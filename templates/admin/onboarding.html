@@ -23,6 +23,21 @@
 
 <section class="panel">
   <div class="panel-head">
+    <div>
+      <p class="pgtop-eyebrow">Trial launch score</p>
+      <h2>{{ launch.headline }}</h2>
+    </div>
+    <a class="pgtop-link" href="{{ launch.cta_href }}">{{ launch.cta_label }}</a>
+  </div>
+  <div class="onb-progress" aria-label="Launch readiness">
+    <span style="width: {{ launch.score }}%"></span>
+  </div>
+  <p class="muted">{{ launch.detail }}</p>
+  <p class="muted">The goal is a working client loop before the trial ends: offer, project, paperwork, payment, and delivery.</p>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
     <h2>Setup checklist <span class="muted">{{ setup.done }}/{{ setup.total }} complete</span></h2>
   </div>
   <div class="onb-progress" aria-label="Onboarding progress">
