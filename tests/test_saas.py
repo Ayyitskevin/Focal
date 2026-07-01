@@ -7,7 +7,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from app import config, db, passwords, saas, saas_demo, security
+from app import config, db, features, passwords, saas, saas_demo, saas_preflight, security
 
 
 def _configure_saas(tmp_path, monkeypatch):
@@ -531,7 +531,7 @@ def test_onboarding_demo_seeds_project_flow(tmp_path, monkeypatch):
         assert db.one("SELECT COUNT(*) AS n FROM clients")["n"] == 1
 
 
-# ── Tenant-bound admin sessions (ADR 0040) — cross-tenant isolation ──────────
+# ── Tenant-bound admin sessions (ADR 0048) — cross-tenant isolation ──────────
 
 
 def test_admin_principal_is_context_bound(tmp_path, monkeypatch):
@@ -599,3 +599,81 @@ def test_matching_cookies_still_authenticate(tmp_path, monkeypatch):
         "/admin/saas", "mise.test", cookie=f"{security.ADMIN_COOKIE}={security.sign('operator')}"
     )
     assert security.is_admin(op) is True
+
+
+# ── Hosted client-payment isolation (ADR 0049) — fail-closed, per-tenant Stripe ──
+
+
+def _set_tenant_stripe(slug: str, *, secret: str = "", webhook: str = "") -> None:
+    with saas.control_connect() as con:
+        con.execute(
+            "UPDATE tenants SET client_stripe_secret_key=?, client_stripe_webhook_secret=? "
+            "WHERE slug=?",
+            (secret, webhook, slug),
+        )
+
+
+def test_client_stripe_key_is_operator_key_in_single_tenant(monkeypatch):
+    # Single-tenant: unchanged — the operator's own key charges the operator's own clients.
+    monkeypatch.setattr(config, "SAAS_MODE", False)
+    monkeypatch.setattr(config, "STRIPE_SECRET_KEY", "sk_live_operator")
+    monkeypatch.setattr(config, "STRIPE_WEBHOOK_SECRET", "whsec_operator")
+    assert features.client_stripe_secret_key() == "sk_live_operator"
+    assert features.client_stripe_webhook_secret() == "whsec_operator"
+    assert features.stripe_enabled() is True
+    assert features.stripe_webhook_enabled() is True
+
+
+def test_hosted_client_payments_fail_closed_without_tenant_key(tmp_path, monkeypatch):
+    # The money-boundary invariant: even with the operator key present, a tenant with no
+    # Stripe of its own can charge NOTHING — the operator key is never used for a client.
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "STRIPE_SECRET_KEY", "sk_live_operator")
+    monkeypatch.setattr(config, "STRIPE_WEBHOOK_SECRET", "whsec_operator")
+    saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    with saas.tenant_runtime("alpha"):
+        assert features.client_stripe_secret_key() == ""
+        assert features.client_stripe_webhook_secret() == ""
+        assert features.stripe_enabled() is False
+        assert features.stripe_webhook_enabled() is False
+
+
+def test_hosted_client_payments_use_tenant_own_key(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "STRIPE_SECRET_KEY", "sk_live_operator")
+    saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    _set_tenant_stripe("alpha", secret="sk_live_alpha", webhook="whsec_alpha")
+    with saas.tenant_runtime("alpha"):
+        # The tenant's OWN key, never the operator's.
+        assert features.client_stripe_secret_key() == "sk_live_alpha"
+        assert features.client_stripe_webhook_secret() == "whsec_alpha"
+        assert features.stripe_enabled() is True
+
+
+def test_hosted_no_tenant_context_never_leaks_operator_key(tmp_path, monkeypatch):
+    # At the platform/root host (no tenant) the client-charge path resolves to nothing,
+    # so the operator key can never charge a "client" of the platform itself.
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "STRIPE_SECRET_KEY", "sk_live_operator")
+    assert saas.current_tenant() is None
+    assert features.client_stripe_secret_key() == ""
+    assert features.stripe_enabled() is False
+
+
+def test_preflight_passes_client_payment_isolation_when_failclosed(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "STRIPE_SECRET_KEY", "sk_live_operator")
+    report = saas_preflight.check_readiness(project_root=tmp_path, write_probes=False)
+    check = next(c for c in report["checks"] if c["key"] == "client_payment_isolation")
+    assert check["status"] == "pass"
+
+
+def test_preflight_fails_when_client_charge_would_use_operator_key(tmp_path, monkeypatch):
+    # Regression tripwire: if a refactor makes the client-charge path resolve a key with no
+    # tenant in context (i.e. the operator key), preflight must fail the launch.
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(features, "client_stripe_secret_key", lambda: "sk_live_operator")
+    report = saas_preflight.check_readiness(project_root=tmp_path, write_probes=False)
+    check = next(c for c in report["checks"] if c["key"] == "client_payment_isolation")
+    assert check["status"] == "fail"
+    assert report["ready"] is False

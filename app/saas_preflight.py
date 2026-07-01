@@ -192,6 +192,31 @@ def check_readiness(*, project_root: Path | None = None, write_probes: bool = Fa
         )
     )
 
+    if config.SAAS_MODE:
+        from . import features
+
+        # Client-invoice charges must resolve the *tenant's* Stripe key, never the
+        # operator's platform key. At preflight time no tenant is in context, so a
+        # correct build resolves to "" (fail-closed). A non-empty result means the
+        # operator key would be used to charge a studio's client — the money-boundary
+        # leak that ADR 0041 closes.
+        leaks_operator_key = bool(features.client_stripe_secret_key())
+        checks.append(
+            _check(
+                "client_payment_isolation",
+                "Client payment isolation",
+                "fail" if leaks_operator_key else "pass",
+                "operator Stripe key would charge a studio's client (money-boundary leak)"
+                if leaks_operator_key
+                else (
+                    "client-invoice charges resolve the tenant's own Stripe; "
+                    "the operator key never charges a studio's client"
+                ),
+                "Keep client-invoice charges on features.client_stripe_secret_key() "
+                "(fail-closed per tenant) in hosted mode.",
+            )
+        )
+
     control_ok, control_detail = _writable_dir(
         Path(config.SAAS_CONTROL_DB_PATH).parent, create=write_probes, probe=write_probes
     )

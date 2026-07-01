@@ -12,7 +12,10 @@ from app import features
 
 @pytest.mark.unit
 def test_stripe_enabled_true_when_secret_set():
+    # Single-tenant contract (unchanged): the operator's own key enables payments.
+    # Hosted, per-tenant, fail-closed behavior is covered in tests/test_saas.py (ADR 0049).
     with patch("app.features.config") as mock_cfg:
+        mock_cfg.SAAS_MODE = False
         mock_cfg.STRIPE_SECRET_KEY = "sk_live_xxx"
         assert features.stripe_enabled() is True
 
@@ -20,6 +23,7 @@ def test_stripe_enabled_true_when_secret_set():
 @pytest.mark.unit
 def test_stripe_enabled_false_when_empty():
     with patch("app.features.config") as mock_cfg:
+        mock_cfg.SAAS_MODE = False
         mock_cfg.STRIPE_SECRET_KEY = ""
         assert features.stripe_enabled() is False
 

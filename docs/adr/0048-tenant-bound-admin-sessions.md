@@ -1,4 +1,4 @@
-# ADR 0040 — Tenant-bound admin sessions (hosted auth isolation)
+# ADR 0048 — Tenant-bound admin sessions (hosted auth isolation)
 
 **Status:** Accepted (critical security fix — hosted mode; gates the managed launch)
 **Date:** 2026-06-29
@@ -8,7 +8,7 @@
 
 The admin session cookie was a single constant payload — `sign("admin")` — signed with the one
 global `SECRET_KEY`, and `is_admin()` authenticated on `unsign(cookie) == "admin"` with **no tenant
-or role binding**. In single-tenant mode that is fine. In hosted mode (ADR 0039) it is a
+or role binding**. In single-tenant mode that is fine. In hosted mode (ADR 0047) it is a
 **critical cross-tenant privilege-escalation defect**:
 
 - A logged-in tenant's own cookie, copied to another tenant's subdomain, authenticated as that

@@ -1,4 +1,4 @@
-# ADR 0039 — MicroSaaS positioning: instance-per-customer, one flat price
+# ADR 0047 — MicroSaaS positioning: instance-per-customer, one flat price
 
 **Status:** Accepted (strategic frame for the $20/mo transformation)
 **Date:** 2026-06-29
@@ -44,7 +44,7 @@ gated behind tiers.
   product; there is no SaaS/OSS fork to maintain. `SAAS_MODE` gates only the control plane +
   routing, never the studio features.
 - **Hard gates before charging (this transformation's job):** instance isolation must be *correct*
-  — tenant-bound sessions (ADR 0040), no shared money/integration credentials leaking across
+  — tenant-bound sessions (ADR 0048), no shared money/integration credentials leaking across
   studios, provisioning after payment, recovery + offboarding. These are tracked as sequenced
   red-light PRs; the managed plan does not open to the public until they land.
 - **Per-instance cost scales with customers** (disk, a DB file, media). Acceptable at $20/mo for a
