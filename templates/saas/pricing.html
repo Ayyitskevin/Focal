@@ -30,6 +30,9 @@
   .pr-error { color:var(--danger); background:#fff3ef; border:1px solid #efc6bd; border-radius:8px; padding:10px 12px; }
   .pr-note { font-size:.86rem; color:var(--muted); text-align:center; margin-top:12px; }
   .pr-back { color:var(--ink); font-weight:800; text-decoration:none; width:max-content; }
+  .pr-proof { display:grid; gap:10px; margin-top:24px; max-width:560px; }
+  .pr-proof div { border-top:1px solid var(--line); padding-top:11px; color:var(--muted); line-height:1.45; }
+  .pr-proof b { color:var(--ink); }
   @media (max-width: 860px) {
     .pr-wrap { grid-template-columns:1fr; }
     .pr-copy { border-right:0; border-bottom:1px solid var(--line); }
@@ -53,6 +56,11 @@
       <li><span class="pr-check">+</span><span><b>Hosted and maintained</b> with tenant-isolated SQLite and media storage.</span></li>
       <li><span class="pr-check">+</span><span><b>F&B and wedding presets</b> so the first login is not blank.</span></li>
     </ul>
+    <div class="pr-proof" aria-label="Pricing details">
+      <div><b>No paid tiers.</b> Every hosted customer gets the same product surface for the same $20/month price.</div>
+      <div><b>Trial-first setup.</b> Build the studio, load demo data, and test the workflow before the subscription starts.</div>
+      <div><b>Solo-founder supportable.</b> The stack stays FastAPI, HTMX, SQLite, Docker, Caddy, and Stripe.</div>
+    </div>
     <p class="pr-note" style="text-align:left"><a href="/demo">Preview the F&B and wedding demo tour</a></p>
   </section>
   <section class="pr-form-wrap">

@@ -189,6 +189,28 @@ def test_operator_overview_summarizes_tenants(tmp_path, monkeypatch):
     assert beta_row["tenant_url"] == "https://beta.mise.test/admin/login"
 
 
+def test_operator_launch_checklist_tracks_launch_blockers(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "STRIPE_SECRET_KEY", "sk_test")
+    monkeypatch.setattr(config, "SAAS_STRIPE_PRICE_ID", "price_20")
+    monkeypatch.setattr(config, "SAAS_STRIPE_WEBHOOK_SECRET", "whsec_test")
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    saas.update_tenant_billing(tenant["id"], plan_status="active")
+    overview = saas.operator_tenant_overview()
+
+    checklist = saas.operator_launch_checklist(overview, {"ready": True})
+
+    assert checklist["headline"] == "Launch room is clear"
+    assert checklist["done"] == checklist["total"]
+    assert [item["label"] for item in checklist["items"]] == [
+        "Hosted preflight is ready",
+        "Stripe billing is configured",
+        "Public demo and pricing are linked",
+        "At least one test studio exists",
+        "Support queue is clear",
+    ]
+
+
 def test_operator_support_actions_update_billing_and_domain(tmp_path, monkeypatch):
     _configure_saas(tmp_path, monkeypatch)
     tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")

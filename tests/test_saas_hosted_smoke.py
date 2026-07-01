@@ -99,3 +99,17 @@ def test_platform_demo_tour_renders(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert "Restaurant content day" in response.body.decode()
     assert "Wedding story collection" in response.body.decode()
+
+
+def test_platform_home_and_pricing_answer_buyer_objections(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+
+    home = asyncio.run(saas.saas_home(_request("/", "mise.test")))
+    pricing = asyncio.run(saas.pricing(_request("/pricing", "mise.test")))
+
+    home_body = home.body.decode()
+    pricing_body = pricing.body.decode()
+    assert "Does Mise replace Pixieset and HoneyBook" in home_body
+    assert "No paid tiers" in home_body
+    assert "Trial-first setup" in pricing_body
+    assert "Solo-founder supportable" in pricing_body

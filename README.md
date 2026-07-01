@@ -89,6 +89,8 @@ python scripts/smoke-saas-hosted.py
 ```
 
 Detailed deployment notes live in [docs/SAAS-DEPLOYMENT.md](docs/SAAS-DEPLOYMENT.md).
+Launch copy, the 5-post X thread, and the 7-day launch checklist live in
+[docs/LAUNCH-KIT.md](docs/LAUNCH-KIT.md).
 
 ## Operator Workflow
 
@@ -139,3 +141,10 @@ professional galleries, booking paperwork, payments, portals, and workflow
 reminders for exactly $20/month.
 
 No tiers. No setup. Hosted and maintained for you.
+
+Public launch assets:
+
+- landing-page offer and value proof in this README
+- one-command hosted deployment shape in `docs/SAAS-DEPLOYMENT.md`
+- 5-post X launch thread in `docs/LAUNCH-KIT.md`
+- prioritized 7-day launch checklist in `docs/LAUNCH-KIT.md`
