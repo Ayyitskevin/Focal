@@ -113,3 +113,19 @@ def test_platform_home_and_pricing_answer_buyer_objections(tmp_path, monkeypatch
     assert "No paid tiers" in home_body
     assert "Trial-first setup" in pricing_body
     assert "Solo-founder supportable" in pricing_body
+
+
+def test_platform_marketing_pages_render_share_metadata(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+
+    home = asyncio.run(saas.saas_home(_request("/", "mise.test"))).body.decode()
+    pricing = asyncio.run(saas.pricing(_request("/pricing", "mise.test"))).body.decode()
+    demo = asyncio.run(saas.demo(_request("/demo", "mise.test"))).body.decode()
+
+    assert '<link rel="canonical" href="https://mise.test/">' in home
+    assert '"@type": "SoftwareApplication"' in home
+    assert '"price": "20"' in home
+    assert 'property="og:title" content="Mise Pricing - $20/month"' in pricing
+    assert '<link rel="canonical" href="https://mise.test/pricing">' in pricing
+    assert 'property="og:title" content="Mise Demo - F&B and Wedding Client Studio"' in demo
+    assert '<link rel="canonical" href="https://mise.test/demo">' in demo

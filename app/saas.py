@@ -725,29 +725,37 @@ async def tenant_middleware(request: Request, call_next):
         return await call_next(request)
 
 
-def _pricing_context(error: str | None = None, values: dict | None = None) -> dict:
+def _pricing_context(
+    error: str | None = None, values: dict | None = None, *, path: str = "/pricing"
+) -> dict:
     return {
         "error": error,
         "values": values or {},
         "price_cents": config.SAAS_PRICE_CENTS,
         "trial_days": config.SAAS_TRIAL_DAYS,
         "root_domain": _root_domain(),
+        "canonical_url": platform_url(path),
+        "home_url": platform_url("/"),
+        "pricing_url": platform_url("/pricing"),
+        "demo_url": platform_url("/demo"),
     }
 
 
 @router.get("/", response_class=HTMLResponse)
 async def saas_home(request: Request):
-    return templates.TemplateResponse(request, "saas/home.html", _pricing_context())
+    return templates.TemplateResponse(request, "saas/home.html", _pricing_context(path="/"))
 
 
 @router.get("/pricing", response_class=HTMLResponse)
 async def pricing(request: Request):
-    return templates.TemplateResponse(request, "saas/pricing.html", _pricing_context())
+    return templates.TemplateResponse(
+        request, "saas/pricing.html", _pricing_context(path="/pricing")
+    )
 
 
 @router.get("/demo", response_class=HTMLResponse)
 async def demo(request: Request):
-    return templates.TemplateResponse(request, "saas/demo.html", _pricing_context())
+    return templates.TemplateResponse(request, "saas/demo.html", _pricing_context(path="/demo"))
 
 
 @router.post("/start-trial")
@@ -765,7 +773,7 @@ async def start_trial(
         return templates.TemplateResponse(
             request,
             "saas/pricing.html",
-            _pricing_context(str(exc), values),
+            _pricing_context(str(exc), values, path="/pricing"),
             status_code=400,
         )
 
@@ -776,7 +784,9 @@ async def start_trial(
             return templates.TemplateResponse(
                 request,
                 "saas/pricing.html",
-                _pricing_context("Stripe billing is not fully configured yet.", values),
+                _pricing_context(
+                    "Stripe billing is not fully configured yet.", values, path="/pricing"
+                ),
                 status_code=503,
             )
         stripe_mod = _stripe()
