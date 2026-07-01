@@ -677,3 +677,103 @@ def test_preflight_fails_when_client_charge_would_use_operator_key(tmp_path, mon
     check = next(c for c in report["checks"] if c["key"] == "client_payment_isolation")
     assert check["status"] == "fail"
     assert report["ready"] is False
+
+
+# ── Billing-lifecycle integrity (ADR 0050) — exactly-once webhooks, dunning, throttle ──
+
+
+def _subscription_event(event_id: str, tenant: dict, status: str) -> dict:
+    return {
+        "id": event_id,
+        "type": "customer.subscription.updated",
+        "data": {
+            "object": {
+                "id": "sub_123",
+                "status": status,
+                "customer": "cus_123",
+                "metadata": {"tenant_id": str(tenant["id"]), "slug": tenant["slug"]},
+            }
+        },
+    }
+
+
+def _saas_event_recorded(event_id: str) -> bool:
+    with saas.control_connect() as con:
+        row = con.execute("SELECT 1 FROM saas_events WHERE id=?", (event_id,)).fetchone()
+    return row is not None
+
+
+def test_saas_webhook_event_applies_exactly_once(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    event = _subscription_event("evt_1", tenant, "active")
+    assert saas._process_saas_event(event) == {"ok": True, "type": event["type"]}
+    assert saas.tenant_by_slug("alpha")["plan_status"] == "active"
+    # Stripe retries the same event id → duplicate no-op, state untouched.
+    saas.update_tenant_billing(tenant["id"], plan_status="past_due")
+    assert saas._process_saas_event(event) == {"ok": True, "duplicate": True}
+    assert saas.tenant_by_slug("alpha")["plan_status"] == "past_due"
+
+
+def test_saas_webhook_failed_effect_stays_retryable(tmp_path, monkeypatch):
+    # The exactly-once contract: if the billing effect dies mid-event, the idempotency
+    # marker must roll back WITH it, so Stripe's retry reprocesses instead of deduping
+    # against a marker whose effect never ran (the old ordering swallowed the event).
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    event = _subscription_event("evt_2", tenant, "canceled")
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("crash between marker and effect")
+
+    original = saas.update_tenant_billing
+    monkeypatch.setattr(saas, "update_tenant_billing", boom)
+    with pytest.raises(RuntimeError):
+        saas._process_saas_event(event)
+    assert not _saas_event_recorded("evt_2")  # marker rolled back with the effect
+    assert saas.tenant_by_slug("alpha")["plan_status"] == "trialing"
+    monkeypatch.setattr(saas, "update_tenant_billing", original)
+    # The retry (same event id) now succeeds and applies the cancellation.
+    assert saas._process_saas_event(event) == {"ok": True, "type": event["type"]}
+    assert _saas_event_recorded("evt_2")
+    assert saas.tenant_by_slug("alpha")["plan_status"] == "canceled"
+
+
+def test_past_due_gets_dunning_grace_then_blocks(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    # Fresh past_due (updated_at = now) → access continues during the grace window.
+    saas.update_tenant_billing(tenant["id"], plan_status="past_due")
+    fresh = saas.tenant_by_slug("alpha")
+    assert saas.tenant_has_access(fresh) is True
+    banner = saas.tenant_billing_context(fresh)
+    assert banner["tone"] == "warn"
+    # Grace lapsed → blocked.
+    stale = dict(fresh)
+    stale["updated_at"] = saas._iso(
+        saas._now() - timedelta(days=config.SAAS_PAST_DUE_GRACE_DAYS + 1)
+    )
+    assert saas.tenant_has_access(stale) is False
+    assert saas.tenant_billing_context(stale)["tone"] == "block"
+    # Terminal states never get grace; missing updated_at fails closed.
+    for status in ("unpaid", "canceled"):
+        terminal = dict(fresh)
+        terminal["plan_status"] = status
+        assert saas.tenant_has_access(terminal) is False
+    no_stamp = dict(fresh)
+    no_stamp["updated_at"] = None
+    assert saas.tenant_has_access(no_stamp) is False
+
+
+def test_signup_route_is_rate_limited(monkeypatch):
+    from app import ratelimit
+
+    assert ratelimit._bucket_for("/start-trial") == "signup"
+    monkeypatch.setattr(config, "SAAS_MODE", False)  # keep is_admin on the legacy path
+    monkeypatch.setitem(config.RATE_LIMITS, "signup", (3, 3600))
+    monkeypatch.setattr(ratelimit, "_hits", type(ratelimit._hits)(ratelimit._hits.default_factory))
+    request = _request("/start-trial", "mise.test")
+    for _ in range(3):
+        assert ratelimit.check(request, "/start-trial") is None
+    blocked = ratelimit.check(request, "/start-trial")
+    assert blocked is not None and blocked.status_code == 429

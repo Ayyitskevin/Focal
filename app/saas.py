@@ -768,6 +768,7 @@ def update_tenant_billing(
     plan_status: str | None = None,
     stripe_customer_id: str | None = None,
     stripe_subscription_id: str | None = None,
+    con: sqlite3.Connection | None = None,
 ) -> None:
     updates = ["updated_at=?"]
     params: list = [_iso(_now())]
@@ -781,8 +782,14 @@ def update_tenant_billing(
         updates.append("stripe_subscription_id=?")
         params.append(stripe_subscription_id)
     params.append(tenant_id)
-    with control_connect() as con:
-        con.execute(f"UPDATE tenants SET {', '.join(updates)} WHERE id=?", params)
+    sql = f"UPDATE tenants SET {', '.join(updates)} WHERE id=?"
+    if con is not None:
+        # Join the caller's open transaction (webhook exactly-once: the billing
+        # effect must commit atomically with the idempotency marker).
+        con.execute(sql, params)
+        return
+    with control_connect() as fresh:
+        fresh.execute(sql, params)
 
 
 def operator_update_tenant_status(tenant_id: int, plan_status: str) -> dict:
@@ -879,6 +886,16 @@ def tenant_has_access(tenant: dict) -> bool:
     if status == "trialing":
         trial_ends_at = _parse_iso(tenant["trial_ends_at"])
         return bool(trial_ends_at and trial_ends_at >= _now())
+    if status == "past_due":
+        # Dunning grace (ADR 0050): Stripe retries a failed card for days; an instant
+        # hard-block turns a transient decline into churn. Access continues for the
+        # grace window measured from the status flip (updated_at). Terminal states
+        # (unpaid/canceled) still block immediately; missing updated_at blocks too
+        # (fail-closed, same as before this grace existed).
+        updated_at = _parse_iso(tenant.get("updated_at"))
+        if updated_at:
+            grace = timedelta(days=config.SAAS_PAST_DUE_GRACE_DAYS)
+            return _now() <= updated_at + grace
     return False
 
 
@@ -919,6 +936,12 @@ def tenant_billing_context(tenant: dict | None) -> dict | None:
     elif status == "trialing":
         tone = "block"
         message = "Trial ended. Open billing to continue using the hosted studio."
+    elif status == "past_due" and access_ok:
+        tone = "warn"
+        message = (
+            "Payment problem — your card was declined and Stripe is retrying. "
+            "Open billing to update it and keep the studio live."
+        )
     elif status in {"past_due", "unpaid", "incomplete", "incomplete_expired"}:
         tone = "block"
         message = "Billing needs attention. Open billing to restore studio access."
@@ -1128,6 +1151,21 @@ async def saas_stripe_webhook(request: Request):
     except (ValueError, stripe_mod.SignatureVerificationError):
         raise HTTPException(status_code=400, detail="bad signature")
 
+    return _process_saas_event(event)
+
+
+def _process_saas_event(event) -> dict:
+    """Apply one signature-verified SaaS billing event exactly once.
+
+    The idempotency marker and the billing side-effect commit in the SAME
+    control-DB transaction: a crash or error before commit leaves neither (so
+    Stripe's retry reprocesses the event); after commit both exist (so the retry
+    is a duplicate no-op). Previously the marker committed in its own transaction
+    *before* the effect — a crash between the two swallowed the billing event
+    forever, because the retry deduped against a marker whose effect never ran.
+    """
+    obj = event["data"]["object"]
+    event_type = event["type"]
     with control_connect() as con:
         try:
             con.execute(
@@ -1136,30 +1174,30 @@ async def saas_stripe_webhook(request: Request):
         except sqlite3.IntegrityError:
             return {"ok": True, "duplicate": True}
 
-    obj = event["data"]["object"]
-    event_type = event["type"]
-    if event_type == "checkout.session.completed":
-        metadata = obj.get("metadata") or {}
-        tenant_id = int(metadata.get("tenant_id") or 0)
-        if tenant_id:
-            update_tenant_billing(
-                tenant_id,
-                plan_status="trialing",
-                stripe_customer_id=obj.get("customer"),
-                stripe_subscription_id=obj.get("subscription"),
-            )
-    elif event_type.startswith("customer.subscription."):
-        metadata = obj.get("metadata") or {}
-        tenant_id = int(metadata.get("tenant_id") or 0)
-        tenant = tenant_by_id(tenant_id) if tenant_id else tenant_by_subscription(obj["id"])
-        if tenant:
-            status = obj.get("status") or "incomplete"
-            update_tenant_billing(
-                tenant["id"],
-                plan_status=status,
-                stripe_customer_id=obj.get("customer"),
-                stripe_subscription_id=obj["id"],
-            )
+        if event_type == "checkout.session.completed":
+            metadata = obj.get("metadata") or {}
+            tenant_id = int(metadata.get("tenant_id") or 0)
+            if tenant_id:
+                update_tenant_billing(
+                    tenant_id,
+                    plan_status="trialing",
+                    stripe_customer_id=obj.get("customer"),
+                    stripe_subscription_id=obj.get("subscription"),
+                    con=con,
+                )
+        elif event_type.startswith("customer.subscription."):
+            metadata = obj.get("metadata") or {}
+            tenant_id = int(metadata.get("tenant_id") or 0)
+            tenant = tenant_by_id(tenant_id) if tenant_id else tenant_by_subscription(obj["id"])
+            if tenant:
+                status = obj.get("status") or "incomplete"
+                update_tenant_billing(
+                    tenant["id"],
+                    plan_status=status,
+                    stripe_customer_id=obj.get("customer"),
+                    stripe_subscription_id=obj["id"],
+                    con=con,
+                )
     return {"ok": True, "type": event_type}
 
 
