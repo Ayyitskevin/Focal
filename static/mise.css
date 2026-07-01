@@ -988,6 +988,22 @@ progress { width: 100%; }
   background: rgba(124,47,56,0.13);
 }
 
+.admin-shell .onb-progress {
+  width: 100%;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(138,145,131,0.22);
+  margin: 0 0 16px;
+}
+
+.admin-shell .onb-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #2f7d57;
+}
+
 @media (max-width: 900px) {
   .admin-shell .grid-3 { grid-template-columns: 1fr; }
   .admin-shell .saas-billing-banner {

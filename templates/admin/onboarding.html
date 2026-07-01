@@ -17,10 +17,42 @@
 {% if seeded %}
 <section class="notice">Demo preset loaded: {{ seeded }}. Open Studio to inspect the client, project, proposal, contract, invoice, and gallery.</section>
 {% endif %}
+{% if installed %}
+<section class="notice">Preset pack installed: {{ packs[installed].name if installed in packs else installed }}. Packages, rules, forms, and tags are ready to edit.</section>
+{% endif %}
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Setup checklist <span class="muted">{{ setup.done }}/{{ setup.total }} complete</span></h2>
+  </div>
+  <div class="onb-progress" aria-label="Onboarding progress">
+    <span style="width: {{ (setup.done / setup.total * 100)|round(0, 'floor') }}%"></span>
+  </div>
+  <table class="list">
+    {% for step in setup.steps %}
+    <tr>
+      <td>{% if step.done %}<span class="badge is-active">done</span>{% else %}<span class="badge is-draft">next</span>{% endif %}</td>
+      <td><strong>{{ step.label }}</strong><br><span class="muted">{{ step.detail }}</span></td>
+      <td><a href="{{ step.href }}">Open</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
 
 <section class="grid two">
   <article class="panel">
-    <p class="pgtop-eyebrow">Food and beverage</p>
+    <p class="pgtop-eyebrow">Step 1</p>
+    <h2>Install a niche preset</h2>
+    <p class="muted">Adds starter packages, workflow reminders, lead forms, and CRM tags. This is the fastest path to a sellable hosted studio.</p>
+    {% for key, pack in packs.items() %}
+    <form method="post" action="/admin/onboarding/pack" class="inline-form">
+      <input type="hidden" name="pack" value="{{ key }}">
+      <button type="submit">{{ pack.name }}</button>
+    </form>
+    {% endfor %}
+  </article>
+  <article class="panel">
+    <p class="pgtop-eyebrow">Demo data</p>
     <h2>Restaurant content day</h2>
     <p class="muted">Adds a restaurant client, menu content project, sent proposal, draft contract, draft invoice, and private gallery.</p>
     <form method="post" action="/admin/onboarding/demo">
@@ -29,7 +61,7 @@
     </form>
   </article>
   <article class="panel">
-    <p class="pgtop-eyebrow">Wedding</p>
+    <p class="pgtop-eyebrow">Demo data</p>
     <h2>Wedding story collection</h2>
     <p class="muted">Adds a wedding client, accepted proposal, signed contract, sent retainer invoice, and proofing gallery.</p>
     <form method="post" action="/admin/onboarding/demo">
