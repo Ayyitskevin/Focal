@@ -4,6 +4,7 @@ import io
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from fastapi import HTTPException
 from starlette.requests import Request
 
 from app import config, db, passwords, saas, saas_demo, security
@@ -389,7 +390,7 @@ def test_operator_console_renders_for_platform_admin(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "SAAS_STRIPE_PRICE_ID", "price_20")
     monkeypatch.setattr(config, "SAAS_STRIPE_WEBHOOK_SECRET", "whsec_test")
     saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
-    cookie = f"{security.ADMIN_COOKIE}={security.sign('admin')}"
+    cookie = f"{security.ADMIN_COOKIE}={security.sign('operator')}"
 
     response = asyncio.run(
         saas.operator_console(_request("/admin/saas", "mise.test", cookie=cookie))
@@ -408,7 +409,7 @@ def test_operator_csv_export_route_is_platform_admin_only(tmp_path, monkeypatch)
     monkeypatch.setattr(config, "COOKIE_SECURE", True)
     tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
     saas.update_tenant_billing(tenant["id"], plan_status="active")
-    cookie = f"{security.ADMIN_COOKIE}={security.sign('admin')}"
+    cookie = f"{security.ADMIN_COOKIE}={security.sign('operator')}"
 
     response = asyncio.run(
         saas.operator_tenants_export(_request("/admin/saas/export.csv", "mise.test", cookie=cookie))
@@ -428,7 +429,7 @@ def test_tenant_admin_shows_env_announcement_banner(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "SAAS_ANNOUNCEMENT", "New wedding starter pack is live.")
     monkeypatch.setattr(config, "SAAS_ANNOUNCEMENT_URL", "/admin/onboarding")
     tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
-    cookie = f"{security.ADMIN_COOKIE}={security.sign('admin')}"
+    cookie = f"{security.ADMIN_COOKIE}={security.sign('tenant:alpha')}"
 
     with saas.tenant_runtime(tenant):
         request = _request("/admin/billing", "alpha.mise.test", cookie=cookie)
@@ -528,3 +529,73 @@ def test_onboarding_demo_seeds_project_flow(tmp_path, monkeypatch):
         again = saas_demo.seed_preset("wedding")
         assert again["created"] is False
         assert db.one("SELECT COUNT(*) AS n FROM clients")["n"] == 1
+
+
+# ── Tenant-bound admin sessions (ADR 0040) — cross-tenant isolation ──────────
+
+
+def test_admin_principal_is_context_bound(tmp_path, monkeypatch):
+    # single-tenant: legacy "admin" (unchanged so existing self-hosted sessions survive)
+    monkeypatch.setattr(config, "SAAS_MODE", False)
+    assert security.admin_principal(_request("/admin/home", "studio.example")) == "admin"
+    # hosted: "operator" at the root host, "tenant:<slug>" inside a tenant runtime
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    assert security.admin_principal(_request("/admin/saas", "mise.test")) == "operator"
+    with saas.tenant_runtime(tenant):
+        assert security.admin_principal(_request("/admin", "alpha.mise.test")) == "tenant:alpha"
+
+
+def test_tenant_cookie_rejected_on_another_tenant(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
+    saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    beta = saas.create_tenant("beta", "Beta Studio", "beta@example.com", "secret123")
+    # Alpha's own valid cookie, replayed against Beta's subdomain.
+    cookie = f"{security.ADMIN_COOKIE}={security.sign('tenant:alpha')}"
+    with saas.tenant_runtime(beta):
+        request = _request("/admin/billing", "beta.mise.test", cookie=cookie)
+        assert security.is_admin(request) is False
+        with pytest.raises(HTTPException) as exc:
+            security.require_admin(request)
+        assert exc.value.status_code == 303
+
+
+def test_tenant_cookie_rejected_at_operator_console(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
+    monkeypatch.setattr(config, "ADMIN_PASSWORD", "operator-secret")
+    saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    # A tenant cookie presented at the platform/root host must NOT reach the operator console.
+    cookie = f"{security.ADMIN_COOKIE}={security.sign('tenant:alpha')}"
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(saas.operator_console(_request("/admin/saas", "mise.test", cookie=cookie)))
+    assert exc.value.status_code == 303
+
+
+def test_operator_cookie_rejected_on_tenant(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    cookie = f"{security.ADMIN_COOKIE}={security.sign('operator')}"
+    with saas.tenant_runtime(tenant):
+        request = _request("/admin/billing", "alpha.mise.test", cookie=cookie)
+        assert security.is_admin(request) is False
+
+
+def test_matching_cookies_still_authenticate(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    with saas.tenant_runtime(tenant):
+        req = _request(
+            "/admin",
+            "alpha.mise.test",
+            cookie=f"{security.ADMIN_COOKIE}={security.sign('tenant:alpha')}",
+        )
+        assert security.is_admin(req) is True
+    op = _request(
+        "/admin/saas", "mise.test", cookie=f"{security.ADMIN_COOKIE}={security.sign('operator')}"
+    )
+    assert security.is_admin(op) is True
