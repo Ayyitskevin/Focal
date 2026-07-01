@@ -94,6 +94,7 @@ def pin_clear(ip: str, gallery_id: int) -> None:
 INQUIRY_BUCKET_CONTACT = -2
 INQUIRY_BUCKET_BOOK = -3
 INQUIRY_BUCKET_FORM = -4  # public custom forms (/forms/{slug})
+INQUIRY_BUCKET_PACKAGE = -5  # public package request pages (/packages/{slug})
 INQUIRY_WINDOW_SEC = 3600
 INQUIRY_MAX_PER_WINDOW = 3
 

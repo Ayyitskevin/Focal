@@ -6,7 +6,7 @@ import logging
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from .. import config, db, security
+from .. import config, db, security, workflows
 from ..render import templates
 from . import common
 from .contracts import render_template
@@ -382,5 +382,19 @@ async def mark_proposal_sent(proposal_id: int):
             "AND status IN ('inquiry_received','consultation_call')",
             (d["project_id"],),
         )
+    workflows.record_project_event(
+        d["project_id"],
+        "proposal",
+        f"Proposal sent: {d['title']}",
+        ref_kind="proposal",
+        ref_id=proposal_id,
+        dedupe_key=f"proposal_sent:{proposal_id}",
+    )
+    workflows.fire_workflow(
+        "proposal_sent", d["project_id"], ref_kind="proposal", ref_id=proposal_id
+    )
+    workflows.fire_workflow(
+        "status:proposal_sent", d["project_id"], ref_kind="proposal", ref_id=proposal_id
+    )
     log.info("proposal %s marked sent", proposal_id)
     return RedirectResponse(f"/admin/studio/proposals/{proposal_id}", status_code=303)

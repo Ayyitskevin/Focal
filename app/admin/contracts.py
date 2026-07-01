@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from .. import config, db, security
+from .. import config, db, security, workflows
 from ..render import templates
 from .studio import get_project
 
@@ -194,6 +194,17 @@ async def mark_contract_sent(contract_id: int):
         """UPDATE contracts SET status='sent', body_sha256=?, sent_at=datetime('now')
               WHERE id=?""",
         (sha, contract_id),
+    )
+    workflows.record_project_event(
+        d["project_id"],
+        "contract",
+        f"Contract sent: {d['title']}",
+        ref_kind="contract",
+        ref_id=contract_id,
+        dedupe_key=f"contract_sent:{contract_id}",
+    )
+    workflows.fire_workflow(
+        "contract_sent", d["project_id"], ref_kind="contract", ref_id=contract_id
     )
     log.info("contract %s marked sent (sha256=%s)", contract_id, sha[:12])
     return RedirectResponse(f"/admin/studio/contracts/{contract_id}", status_code=303)

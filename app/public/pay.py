@@ -6,7 +6,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from .. import config, db, features, jobs, security, urls
+from .. import config, db, features, jobs, security, urls, workflows
 from ..render import templates
 
 log = logging.getLogger("mise.public.pay")
@@ -189,6 +189,7 @@ def _record_paid_session(event, session):
     # invoice unpaid, and Stripe's retry would short-circuit on the duplicate event
     # id (below) without ever repairing it. The INSERT runs first, so a duplicate
     # event rolls the whole tx back with nothing else written.
+    duplicate = False
     try:
         with db.tx() as con:
             con.execute(
@@ -214,7 +215,24 @@ def _record_paid_session(event, session):
                 (d["project_id"],),
             )
     except db.sqlite3.IntegrityError:
-        return {"ok": True, "duplicate": True}  # Stripe retries — idempotent by event id
+        duplicate = True  # Stripe retries. Workflow calls below are idempotent too.
+    trigger_key = "deposit_paid" if kind == "deposit" else "invoice_paid"
+    event_kind = "payment"
+    workflows.record_project_event(
+        d["project_id"],
+        event_kind,
+        f"Payment received: {kind} on invoice {d['title']}",
+        ref_kind="invoice",
+        ref_id=invoice_id,
+        dedupe_key=f"{trigger_key}:{event['id']}",
+    )
+    workflows.fire_workflow(trigger_key, d["project_id"], ref_kind="invoice", ref_id=invoice_id)
+    if trigger_key == "deposit_paid":
+        workflows.fire_workflow(
+            "status:retainer_paid", d["project_id"], ref_kind="invoice", ref_id=invoice_id
+        )
+    if duplicate:
+        return {"ok": True, "duplicate": True}
     jobs.enqueue("notion_sync_invoice", {"invoice_id": invoice_id})
     log.info(
         "invoice %s payment recorded: %s %s cents (event %s)",
