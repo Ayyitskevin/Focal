@@ -30,6 +30,8 @@
 
   {% if not access_ok %}
   <p class="error">Your trial or subscription needs attention before the studio can be used again.</p>
+  {% elif billing_status and billing_status.tone == "warn" %}
+  <p class="notice">{{ billing_status.message }}</p>
   {% endif %}
 
   {% if tenant.stripe_customer_id %}

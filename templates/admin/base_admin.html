@@ -41,6 +41,12 @@
   {% include "admin/_nav.html" %}
   <div class="admin-col">
     {% block topbar %}{% include "admin/_topbar.html" %}{% endblock %}
+    {% if saas_billing and saas_billing.tone != "ok" and not request.url.path.startswith('/admin/billing') %}
+    <section class="saas-billing-banner saas-billing-{{ saas_billing.tone }}">
+      <span>{{ saas_billing.message }}</span>
+      <a href="/admin/billing">Billing</a>
+    </section>
+    {% endif %}
     {% block admin_body %}{% endblock %}
   </div>
 </div>
