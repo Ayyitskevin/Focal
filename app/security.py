@@ -206,7 +206,9 @@ def check_admin_password(password: str) -> bool:
         tenant = saas.current_tenant()
         if tenant:
             return passwords.verify_password(password, tenant["admin_password_hash"])
-        return False
+        if not config.ADMIN_PASSWORD:
+            return False
+        return secrets.compare_digest(password, config.ADMIN_PASSWORD)
     if not config.ADMIN_PASSWORD:
         return False
     return secrets.compare_digest(password, config.ADMIN_PASSWORD)

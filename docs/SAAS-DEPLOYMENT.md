@@ -78,6 +78,7 @@ tenant database.
 ## Smoke Checks
 
 ```bash
+python scripts/hosted-preflight.py
 curl -fsS https://mise.example.com/healthz
 curl -fsS https://mise.example.com/pricing
 ```
@@ -94,6 +95,14 @@ Inside the admin:
 - Open `/admin/account` and save studio settings.
 - Open `/admin/billing` and verify status/trial fields.
 - Create and pay a small test invoice in Stripe test mode before live billing.
+
+## Operator Console
+
+On the root hosted domain, `/admin/login` accepts the operator
+`MISE_ADMIN_PASSWORD` and redirects to `/admin/saas`. This is a platform support
+view, separate from tenant admin accounts. Use it to review tenant billing
+states, custom-domain verification, launch readiness, and isolated tenant data
+paths without opening a tenant database manually.
 
 ## Do Not Touch KLP
 

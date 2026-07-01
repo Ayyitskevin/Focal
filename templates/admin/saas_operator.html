@@ -1,0 +1,118 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}SaaS Ops - Mise{% endblock %}
+{% block topbar %}{% endblock %}
+{% block admin_body %}
+<section class="page-top">
+  <div>
+    <p class="pgtop-eyebrow">Hosted operator</p>
+    <h1>SaaS control room</h1>
+    <p class="muted">Root-host support view for tenants, billing state, domains, and launch readiness.</p>
+  </div>
+  <div class="pgtop-actions">
+    <a class="pgtop-link" href="{{ platform_url }}">Pricing</a>
+  </div>
+</section>
+
+<section class="grid four">
+  <div class="panel">
+    <p class="muted">Tenants</p>
+    <h2>{{ overview.counts.total }}</h2>
+  </div>
+  <div class="panel">
+    <p class="muted">Active</p>
+    <h2>{{ overview.counts.active }}</h2>
+  </div>
+  <div class="panel">
+    <p class="muted">Trialing</p>
+    <h2>{{ overview.counts.trialing }}</h2>
+  </div>
+  <div class="panel">
+    <p class="muted">Needs support</p>
+    <h2>{{ overview.counts.attention + overview.counts.custom_domains_pending }}</h2>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Hosted readiness</h2>
+    <span class="badge {{ 'is-active' if preflight.ready else 'is-declined' }}">{{ 'ready' if preflight.ready else 'not ready' }}</span>
+  </div>
+  <table class="list">
+    <tr><th>Check</th><th>Status</th><th>Detail</th></tr>
+    {% for check in preflight.checks %}
+    <tr>
+      <td>{{ check.label }}</td>
+      <td><span class="badge {{ check.tone }}">{{ check.status }}</span></td>
+      <td>{{ check.detail }}{% if check.status != 'pass' and check.fix %}<br><span class="muted">{{ check.fix }}</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p class="muted">CLI equivalent: <code>python scripts/hosted-preflight.py</code></p>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Tenants</h2>
+    <span class="muted">{{ root_domain }} · ${{ '%.2f'|format(price_cents / 100) }}/month</span>
+  </div>
+  <table class="list">
+    <tr>
+      <th>Studio</th>
+      <th>Billing</th>
+      <th>Domain</th>
+      <th>Data</th>
+      <th>Support</th>
+    </tr>
+    {% for row in overview.rows %}
+    {% set tenant = row.tenant %}
+    <tr>
+      <td>
+        <strong>{{ tenant.studio_name }}</strong><br>
+        <a href="{{ row.tenant_url }}">{{ tenant.slug }}.{{ root_domain }}</a><br>
+        <span class="muted">{{ tenant.owner_email }}</span>
+      </td>
+      <td>
+        <span class="badge {{ 'is-active' if row.billing.tone == 'ok' else 'is-declined' if row.billing.tone == 'block' else 'is-sent' }}">{{ tenant.plan_status }}</span><br>
+        <span class="muted">{{ row.billing.message }}</span>
+        <form method="post" action="/admin/saas/{{ tenant.id }}/billing" class="inline-form">
+          <select name="plan_status" aria-label="Billing status for {{ tenant.slug }}">
+            {% for status in ['trialing','active','past_due','canceled','unpaid','paused','incomplete','incomplete_expired'] %}
+            <option value="{{ status }}"{% if tenant.plan_status == status %} selected{% endif %}>{{ status }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit">Save</button>
+        </form>
+      </td>
+      <td>
+        {% if tenant.custom_domain %}
+          <strong>{{ tenant.custom_domain }}</strong><br>
+          <span class="badge {{ 'is-active' if row.domain_state == 'verified' else 'is-sent' }}">{{ row.domain_state }}</span>
+          {% if row.domain_state == 'verified' %}
+          <form method="post" action="/admin/saas/{{ tenant.id }}/domain/reset" class="inline-form">
+            <button type="submit">Reset</button>
+          </form>
+          {% else %}
+          <form method="post" action="/admin/saas/{{ tenant.id }}/domain/verify" class="inline-form">
+            <button type="submit">Mark verified</button>
+          </form>
+          {% endif %}
+        {% else %}
+          <span class="muted">Built-in subdomain only</span>
+        {% endif %}
+      </td>
+      <td>
+        <span class="badge {{ 'is-active' if row.db_exists else 'is-declined' }}">{{ 'DB ready' if row.db_exists else 'DB missing' }}</span><br>
+        <span class="muted">{{ row.data_path }}</span>
+      </td>
+      <td>
+        <a href="{{ row.account_url }}">Open account</a><br>
+        {% if tenant.stripe_customer_id %}<span class="muted">Customer {{ tenant.stripe_customer_id }}</span><br>{% endif %}
+        {% if tenant.stripe_subscription_id %}<span class="muted">Subscription {{ tenant.stripe_subscription_id }}</span>{% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="muted">No hosted tenants yet.</td></tr>
+    {% endfor %}
+  </table>
+</section>
+{% endblock %}
