@@ -36,6 +36,26 @@
 
 <section class="panel">
   <div class="panel-head">
+    <div>
+      <p class="pgtop-eyebrow">Launch checklist</p>
+      <h2>{{ launch.headline }}</h2>
+    </div>
+    <span class="badge {{ 'is-active' if launch.done == launch.total else 'is-sent' }}">{{ launch.done }}/{{ launch.total }}</span>
+  </div>
+  <p class="muted">{{ launch.detail }}</p>
+  <table class="list">
+    {% for item in launch["items"] %}
+    <tr>
+      <td><span class="badge {{ 'is-active' if item.done else 'is-draft' }}">{{ 'done' if item.done else 'next' }}</span></td>
+      <td><strong>{{ item.label }}</strong><br><span class="muted">{{ item.detail }}</span></td>
+      <td><a href="{{ item.href }}">Open</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+
+<section class="panel" id="preflight">
+  <div class="panel-head">
     <h2>Hosted readiness</h2>
     <span class="badge {{ 'is-active' if preflight.ready else 'is-declined' }}">{{ 'ready' if preflight.ready else 'not ready' }}</span>
   </div>
@@ -52,7 +72,7 @@
   <p class="muted">CLI equivalent: <code>python scripts/hosted-preflight.py</code></p>
 </section>
 
-<section class="panel">
+<section class="panel" id="tenants">
   <div class="panel-head">
     <h2>Tenants</h2>
     <span class="muted">{{ root_domain }} · ${{ '%.2f'|format(price_cents / 100) }}/month · {{ overview.counts.custom_domains_verified }} verified domains</span>

@@ -310,6 +310,63 @@ def operator_tenant_overview() -> dict:
     return {"counts": counts, "rows": rows}
 
 
+def operator_launch_checklist(overview: dict | None = None, preflight: dict | None = None) -> dict:
+    overview = overview or operator_tenant_overview()
+    counts = overview["counts"]
+    stripe_ready = bool(
+        config.STRIPE_SECRET_KEY
+        and config.SAAS_STRIPE_PRICE_ID
+        and config.SAAS_STRIPE_WEBHOOK_SECRET
+    )
+    items = [
+        {
+            "label": "Hosted preflight is ready",
+            "detail": "Environment, pricing, paths, Docker/Caddy assets, and secrets are launch-safe.",
+            "done": bool(preflight and preflight.get("ready")),
+            "href": "#preflight",
+        },
+        {
+            "label": "Stripe billing is configured",
+            "detail": "The $20/month Price ID, secret key, and SaaS webhook secret are present.",
+            "done": stripe_ready,
+            "href": "#preflight",
+        },
+        {
+            "label": "Public demo and pricing are linked",
+            "detail": "Buyers can preview F&B and wedding workflows before starting a trial.",
+            "done": True,
+            "href": platform_url("/demo"),
+        },
+        {
+            "label": "At least one test studio exists",
+            "detail": "Create a trial tenant from /pricing and verify login, onboarding, and billing.",
+            "done": counts["total"] > 0,
+            "href": platform_url("/pricing"),
+        },
+        {
+            "label": "Support queue is clear",
+            "detail": "No past-due billing states or pending custom-domain checks need attention.",
+            "done": counts["support_queue"] == 0,
+            "href": "#tenants",
+        },
+    ]
+    done = sum(1 for item in items if item["done"])
+    remaining = len(items) - done
+    if remaining == 0:
+        headline = "Launch room is clear"
+        detail = "The hosted offer is ready for a public launch pass."
+    else:
+        headline = f"{remaining} launch check{'s' if remaining != 1 else ''} left"
+        detail = "Clear these before pushing paid traffic to the $20/month hosted offer."
+    return {
+        "done": done,
+        "total": len(items),
+        "items": items,
+        "headline": headline,
+        "detail": detail,
+    }
+
+
 def current_tenant() -> dict | None:
     return _TENANT_CTX.get()
 
@@ -843,12 +900,16 @@ async def operator_console(request: Request):
     require_platform_admin(request)
     from . import saas_preflight
 
+    overview = operator_tenant_overview()
+    preflight = saas_preflight.check_readiness(write_probes=False)
+
     return templates.TemplateResponse(
         request,
         "admin/saas_operator.html",
         {
-            "overview": operator_tenant_overview(),
-            "preflight": saas_preflight.check_readiness(write_probes=False),
+            "overview": overview,
+            "preflight": preflight,
+            "launch": operator_launch_checklist(overview, preflight),
             "root_domain": _root_domain(),
             "platform_url": platform_url("/pricing"),
             "price_cents": config.SAAS_PRICE_CENTS,

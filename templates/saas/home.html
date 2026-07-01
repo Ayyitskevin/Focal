@@ -33,9 +33,16 @@
   .ms-band div:last-child { border-right:0; }
   .ms-band h2 { font-size:1rem; margin:.2rem 0 .5rem; }
   .ms-band p { margin:0; color:var(--muted); line-height:1.45; }
+  .ms-faq { display:grid; grid-template-columns:minmax(0,.82fr) minmax(0,1.18fr); gap:clamp(24px,5vw,64px); padding:clamp(30px,6vw,72px) clamp(18px,4vw,56px); border-top:1px solid var(--line); }
+  .ms-faq h2 { font-size:clamp(1.8rem,3vw,3rem); line-height:1; margin:.45rem 0 1rem; }
+  .ms-faq p { color:var(--muted); line-height:1.55; }
+  .ms-faq-list { display:grid; gap:16px; }
+  .ms-faq-item { border-top:1px solid var(--line); padding-top:14px; }
+  .ms-faq-item b { display:block; margin-bottom:4px; }
+  .ms-faq-item span { color:var(--muted); line-height:1.5; }
   @media (max-width: 860px) {
     .ms-hero { grid-template-columns:1fr; padding-top:34px; }
-    .ms-proof, .ms-band { grid-template-columns:1fr; }
+    .ms-proof, .ms-band, .ms-faq { grid-template-columns:1fr; }
     .ms-band div { border-right:0; border-bottom:1px solid var(--line); }
   }
 </style>
@@ -77,6 +84,19 @@
     <div><h2>Client galleries</h2><p>Private delivery links, PIN access, favorites, comments, downloads, and proofing.</p></div>
     <div><h2>Booking paperwork</h2><p>Proposals, signed contracts, and Stripe-backed invoices stay connected to each project.</p></div>
     <div><h2>Hosted operations</h2><p>Tenant-isolated SQLite, file storage, onboarding presets, billing, and one-command Docker launch.</p></div>
+  </section>
+  <section class="ms-faq" id="faq">
+    <div>
+      <div class="ms-kicker">Founder-friendly value</div>
+      <h2>Built to replace the small-stack chaos.</h2>
+      <p>Mise keeps the buyer promise narrow: one professional client studio for solo creatives, hosted for exactly $20/month.</p>
+    </div>
+    <div class="ms-faq-list">
+      <div class="ms-faq-item"><b>Does Mise replace Pixieset and HoneyBook for a solo studio?</b><span>It covers the practical overlap: galleries, proofing, proposals, contracts, invoices, client portals, and workflow reminders in one lightweight place.</span></div>
+      <div class="ms-faq-item"><b>No paid tiers or hidden upgrades?</b><span>Correct. The hosted product has one flat plan: $20/month after the 14-day trial, cancel anytime.</span></div>
+      <div class="ms-faq-item"><b>What happens on day one?</b><span>New studios can load F&B or wedding presets, inspect demo records, then replace them with real clients.</span></div>
+      <div class="ms-faq-item"><b>Is each studio isolated?</b><span>Yes. Hosted mode gives every tenant its own SQLite database and media directory.</span></div>
+    </div>
   </section>
 </main>
 {% endblock %}
