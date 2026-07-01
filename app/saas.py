@@ -804,12 +804,33 @@ async def onboarding(request: Request):
     tenant = current_tenant()
     if not tenant:
         raise HTTPException(status_code=404)
+    from . import onboarding as onboarding_state
+    from . import preset_packs
+
     seeded = request.query_params.get("seeded")
+    installed = request.query_params.get("pack")
     return templates.TemplateResponse(
         request,
         "admin/onboarding.html",
-        {"tenant": tenant, "seeded": seeded},
+        {
+            "tenant": tenant,
+            "seeded": seeded,
+            "installed": installed,
+            "setup": onboarding_state.setup_status(),
+            "packs": preset_packs.PRESET_PACKS,
+        },
     )
+
+
+@router.post("/admin/onboarding/pack")
+async def install_onboarding_pack(request: Request, pack: str = Form(...)):
+    security.require_admin(request)
+    from . import preset_packs
+
+    if pack not in preset_packs.PRESET_PACKS:
+        raise HTTPException(status_code=400, detail="bad preset pack")
+    preset_packs.install_pack(pack)
+    return RedirectResponse(f"/admin/onboarding?pack={pack}", status_code=303)
 
 
 @router.post("/admin/onboarding/demo")
