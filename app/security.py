@@ -189,9 +189,32 @@ def delete_session_cookie(response: Response, name: str, *, path: str = "/") -> 
 ADMIN_COOKIE = "mise_admin"
 
 
+def admin_principal(request: Request) -> str:
+    """The identity a valid admin cookie MUST carry for this request's context, so a session is
+    bound to the host that minted it.
+
+    - Single-tenant (default): the legacy ``"admin"`` — unchanged, so existing self-hosted
+      sessions keep working byte-for-byte after this ships.
+    - Hosted: ``"tenant:<slug>"`` on a tenant host, ``"operator"`` on the platform/root host.
+
+    A tenant's own cookie replayed at another tenant subdomain or the operator console therefore
+    no longer authenticates: the payload won't equal the target context's principal, and it can't
+    be forged into a different one without the server's signing key. `request` is accepted for a
+    stable signature (future per-request binding) even though the principal derives from context.
+    """
+    if not config.SAAS_MODE:
+        return "admin"
+    from . import saas
+
+    tenant = saas.current_tenant()
+    return f"tenant:{tenant['slug']}" if tenant else "operator"
+
+
 def is_admin(request: Request) -> bool:
     raw = request.cookies.get(ADMIN_COOKIE)
-    return bool(raw) and unsign(raw) == "admin"
+    if not raw:
+        return False
+    return unsign(raw) == admin_principal(request)
 
 
 def require_admin(request: Request) -> None:

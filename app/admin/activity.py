@@ -41,6 +41,15 @@ async def home(request: Request):
     hour = dt.datetime.now().hour
     greeting = "Good morning" if hour < 12 else "Good afternoon" if hour < 18 else "Good evening"
     today_str = dt.date.today().strftime("%A, %B %-d")
+    # Who to greet. Hosted: the tenant's own studio name (never the founder's) — a leaked "Kevin"
+    # on every tenant dashboard is disqualifying. Single-tenant: the configured site name.
+    greeting_name = config.SITE_NAME
+    if config.SAAS_MODE:
+        from .. import saas
+
+        tenant = saas.current_tenant()
+        if tenant:
+            greeting_name = tenant["studio_name"]
 
     # Published galleries with no studio client — orphans, usually from a client
     # force-delete or a manual unlink. A live link means Kevin's lost the
@@ -356,6 +365,7 @@ async def home(request: Request):
         "admin/home.html",
         {
             "greeting": greeting,
+            "greeting_name": greeting_name,
             "today_str": today_str,
             "new_inquiries": new_inquiries,
             "outstanding": outstanding,

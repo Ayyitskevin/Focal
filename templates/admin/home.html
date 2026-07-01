@@ -21,7 +21,7 @@
 {% block topbar %}
 <header class="admin-topbar dash-top">
   <div class="dash-top-lead">
-    <h1>{{ greeting }}, Kevin</h1>
+    <h1>{{ greeting }}{% if greeting_name %}, {{ greeting_name }}{% endif %}</h1>
     <p>{{ today_str }}</p>
   </div>
   <form class="dash-search" method="get" action="/admin/search" role="search">

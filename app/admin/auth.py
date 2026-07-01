@@ -35,7 +35,12 @@ async def login(request: Request, password: str = Form(...)):
         if not saas.current_tenant():
             destination = "/admin/saas"
     resp = RedirectResponse(destination, status_code=303)
-    security.set_signed_session_cookie(resp, security.ADMIN_COOKIE, "admin")
+    # Bind the session to this host's principal (tenant slug / operator / legacy "admin") so a
+    # hosted cookie can't be replayed against another tenant or the operator console — see
+    # security.admin_principal.
+    security.set_signed_session_cookie(
+        resp, security.ADMIN_COOKIE, security.admin_principal(request)
+    )
     log.info("admin login from %s", ip)
     return resp
 
