@@ -3,15 +3,20 @@
 import json
 import logging
 
-import stripe
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from .. import config, db, features, jobs, security
+from .. import config, db, features, jobs, security, urls
 from ..render import templates
 
 log = logging.getLogger("mise.public.pay")
 router = APIRouter()
+
+
+def _stripe():
+    import stripe
+
+    return stripe
 
 
 def _invoice_or_404(slug: str) -> "db.sqlite3.Row":
@@ -105,7 +110,16 @@ async def pay_invoice(request: Request, slug: str):
     if not features.stripe_enabled():
         raise HTTPException(status_code=503, detail="online payment is not configured")
     label = {"deposit": "Deposit", "balance": "Balance", "full": "Payment"}[kind]
-    session = stripe.checkout.Session.create(
+    metadata = {"invoice_id": str(d["id"]), "kind": kind}
+    if config.SAAS_MODE:
+        from .. import saas
+
+        tenant = saas.current_tenant()
+        if tenant:
+            metadata["tenant_slug"] = tenant["slug"]
+    base = urls.public_base_url(request)
+    stripe_mod = _stripe()
+    session = stripe_mod.checkout.Session.create(
         api_key=config.STRIPE_SECRET_KEY,
         mode="payment",
         payment_method_types=["card", "us_bank_account"],
@@ -120,9 +134,9 @@ async def pay_invoice(request: Request, slug: str):
             }
         ],
         customer_email=d["client_email"] or None,
-        metadata={"invoice_id": str(d["id"]), "kind": kind},
-        success_url=f"{config.BASE_URL}/i/{slug}?thanks=1",
-        cancel_url=f"{config.BASE_URL}/i/{slug}",
+        metadata=metadata,
+        success_url=f"{base}/i/{slug}?thanks=1",
+        cancel_url=f"{base}/i/{slug}",
     )
     db.run("UPDATE invoices SET stripe_session_id=? WHERE id=?", (session.id, d["id"]))
     log.info("invoice %s checkout %s created (%s, %s cents)", d["id"], session.id, kind, amount)
@@ -134,11 +148,12 @@ async def stripe_webhook(request: Request):
     if not features.stripe_webhook_enabled():
         raise HTTPException(status_code=503, detail="webhook not configured")
     payload = await request.body()
+    stripe_mod = _stripe()
     try:
-        event = stripe.Webhook.construct_event(
+        event = stripe_mod.Webhook.construct_event(
             payload, request.headers.get("stripe-signature", ""), config.STRIPE_WEBHOOK_SECRET
         )
-    except (ValueError, stripe.SignatureVerificationError):
+    except (ValueError, stripe_mod.SignatureVerificationError):
         raise HTTPException(status_code=400, detail="bad signature")
 
     if event["type"] not in (
@@ -149,7 +164,20 @@ async def stripe_webhook(request: Request):
     session = event["data"]["object"]
     if session["payment_status"] != "paid":  # ACH settles via the async event
         return {"ok": True, "pending": True}
+    tenant_slug = (session.get("metadata") or {}).get("tenant_slug")
+    if config.SAAS_MODE:
+        from .. import saas
 
+        if not saas.current_tenant():
+            if not tenant_slug:
+                log.error("saas invoice webhook missing tenant_slug metadata")
+                raise HTTPException(status_code=400, detail="missing tenant metadata")
+            with saas.tenant_runtime(tenant_slug):
+                return _record_paid_session(event, session)
+    return _record_paid_session(event, session)
+
+
+def _record_paid_session(event, session):
     invoice_id = int(session["metadata"]["invoice_id"])
     kind = session["metadata"]["kind"]
     d = db.one("SELECT * FROM invoices WHERE id=?", (invoice_id,))

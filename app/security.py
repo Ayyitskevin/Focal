@@ -8,7 +8,7 @@ import time
 from fastapi import HTTPException, Request, Response
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
-from . import alerts, config, db, features
+from . import alerts, config, db, features, passwords
 
 log = logging.getLogger("mise.security")
 
@@ -199,6 +199,13 @@ def require_admin(request: Request) -> None:
 
 
 def check_admin_password(password: str) -> bool:
+    if config.SAAS_MODE:
+        from . import saas
+
+        tenant = saas.current_tenant()
+        if tenant:
+            return passwords.verify_password(password, tenant["admin_password_hash"])
+        return False
     if not config.ADMIN_PASSWORD:
         return False
     return secrets.compare_digest(password, config.ADMIN_PASSWORD)

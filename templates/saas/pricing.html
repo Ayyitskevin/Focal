@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block robots %}<meta name="robots" content="index, follow">{% endblock %}
+{% block title %}Mise Pricing - $20/month{% endblock %}
+{% block head %}
+<style>
+  :root { --ink:#171717; --muted:#62645f; --line:#d8d4ca; --paper:#faf7f0; --leaf:#2f5c45; --gold:#b98225; --danger:#9d2f21; }
+  body { margin:0; background:var(--paper); color:var(--ink); font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .pr-wrap { min-height:100vh; display:grid; grid-template-columns:minmax(0,.95fr) minmax(340px,1.05fr); }
+  .pr-copy { padding:clamp(24px,5vw,70px); display:flex; flex-direction:column; justify-content:center; border-right:1px solid var(--line); }
+  .pr-form-wrap { padding:clamp(24px,5vw,70px); display:flex; align-items:center; justify-content:center; }
+  .pr-kicker { color:var(--leaf); font-weight:800; text-transform:uppercase; font-size:.78rem; }
+  h1 { font-size:clamp(2.2rem,5vw,4.7rem); line-height:1; margin:.7rem 0 1rem; letter-spacing:0; }
+  .pr-lede { color:var(--muted); line-height:1.55; font-size:1.12rem; max-width:590px; }
+  .pr-price { display:flex; align-items:flex-end; gap:10px; margin:28px 0; }
+  .pr-price strong { font-size:clamp(3rem,7vw,5rem); line-height:.9; }
+  .pr-price span { color:var(--muted); margin-bottom:9px; font-weight:700; }
+  .pr-list { display:grid; gap:12px; padding:0; margin:0; list-style:none; max-width:520px; }
+  .pr-list li { display:flex; gap:10px; color:var(--muted); }
+  .pr-list b { color:var(--ink); }
+  .pr-check { color:var(--leaf); font-weight:900; }
+  .pr-card { width:min(100%,520px); border:1px solid var(--line); border-radius:8px; background:#fffdf7; padding:24px; box-shadow:0 18px 60px rgba(35,28,18,.12); }
+  .pr-card h2 { margin:0 0 6px; font-size:1.3rem; }
+  .pr-card p { margin:.2rem 0 20px; color:var(--muted); }
+  .pr-fields { display:grid; gap:14px; }
+  label { display:grid; gap:6px; font-size:.9rem; font-weight:800; }
+  input { min-height:44px; border:1px solid var(--line); border-radius:8px; padding:0 12px; font:inherit; background:white; }
+  .pr-slug { display:grid; grid-template-columns:1fr auto; gap:8px; align-items:end; }
+  .pr-domain { color:var(--muted); font-size:.9rem; padding-bottom:12px; }
+  button { min-height:48px; border:0; border-radius:8px; background:var(--leaf); color:white; font-weight:900; font:inherit; cursor:pointer; }
+  .pr-error { color:var(--danger); background:#fff3ef; border:1px solid #efc6bd; border-radius:8px; padding:10px 12px; }
+  .pr-note { font-size:.86rem; color:var(--muted); text-align:center; margin-top:12px; }
+  .pr-back { color:var(--ink); font-weight:800; text-decoration:none; width:max-content; }
+  @media (max-width: 860px) {
+    .pr-wrap { grid-template-columns:1fr; }
+    .pr-copy { border-right:0; border-bottom:1px solid var(--line); }
+    .pr-form-wrap { align-items:start; }
+    .pr-slug { grid-template-columns:1fr; }
+    .pr-domain { padding-bottom:0; }
+  }
+</style>
+{% endblock %}
+{% block content %}
+<main class="pr-wrap">
+  <section class="pr-copy">
+    <a class="pr-back" href="/">Mise</a>
+    <div class="pr-kicker">One plan. No paid tiers.</div>
+    <h1>$20/month for the whole client studio.</h1>
+    <p class="pr-lede">Start with demo data, replace it with your real clients, and keep the hosted system maintained for less than a single gallery delivery fee.</p>
+    <div class="pr-price"><strong>${{ (price_cents / 100)|round(0, 'floor')|int }}</strong><span>/ month after {{ trial_days }} days</span></div>
+    <ul class="pr-list">
+      <li><span class="pr-check">+</span><span><b>Client galleries</b> with PINs, favorites, comments, and downloads.</span></li>
+      <li><span class="pr-check">+</span><span><b>Booking flow</b> from proposal to contract to Stripe invoice.</span></li>
+      <li><span class="pr-check">+</span><span><b>Hosted and maintained</b> with tenant-isolated SQLite and media storage.</span></li>
+      <li><span class="pr-check">+</span><span><b>F&B and wedding presets</b> so the first login is not blank.</span></li>
+    </ul>
+  </section>
+  <section class="pr-form-wrap">
+    <form method="post" action="/start-trial" class="pr-card">
+      <h2>Start your free trial</h2>
+      <p>Choose your studio URL and admin password. Stripe starts the $20/month plan after the trial when configured.</p>
+      {% if error %}<div class="pr-error">{{ error }}</div>{% endif %}
+      <div class="pr-fields">
+        <label>Studio name
+          <input name="studio_name" value="{{ values.studio_name or '' }}" placeholder="River & Rye Photo" required>
+        </label>
+        <label>Email
+          <input type="email" name="owner_email" value="{{ values.owner_email or '' }}" placeholder="you@example.com" required>
+        </label>
+        <label>Studio URL
+          <span class="pr-slug">
+            <input name="slug" value="{{ values.slug or '' }}" placeholder="river-rye" pattern="[a-z0-9][a-z0-9-]{1,30}[a-z0-9]" required>
+            <span class="pr-domain">.{{ root_domain }}</span>
+          </span>
+        </label>
+        <label>Admin password
+          <input type="password" name="password" minlength="8" autocomplete="new-password" required>
+        </label>
+        <button type="submit">Start 14-day trial</button>
+      </div>
+      <div class="pr-note">Cancel anytime. No paid tiers. No setup fee.</div>
+    </form>
+  </section>
+</main>
+{% endblock %}

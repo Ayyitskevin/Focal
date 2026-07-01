@@ -1,3 +1,45 @@
+# Mise
+
+Mise is a lightweight client studio for solo photographers and videographers:
+PIN-gated galleries, proposals, contracts, Stripe invoices, scheduling, portals,
+and studio operations in one FastAPI + HTMX + SQLite app.
+
+## Hosted MicroSaaS Mode
+
+The hosted product is intentionally simple:
+
+- **One flat paid plan:** exactly **$20/month**
+- **Free trial:** 14 days
+- **No paid tiers:** every hosted customer gets the same client-studio workflow
+- **Target customer:** solo F&B, wedding, portrait, and video creatives who want
+  a professional hosted client studio without maintaining software
+
+Hosted mode is off by default. To run the SaaS version locally:
+
+```bash
+cp .env.example .env
+# edit .env:
+# MISE_SECRET_KEY=...
+# MISE_SAAS_MODE=true
+# MISE_SAAS_ROOT_DOMAIN=localhost
+# MISE_BASE_URL=http://localhost
+docker compose up --build
+```
+
+For production, set `MISE_CADDY_SITE_ADDRESS` to the platform host and tenant
+wildcard, for example `mise.example.com, *.mise.example.com`, then point DNS at
+the host. Tenant product data is isolated under `MISE_SAAS_TENANT_DATA_DIR`, with
+one migrated SQLite database and media tree per studio.
+
+Stripe subscription billing uses:
+
+- `MISE_STRIPE_SECRET_KEY`
+- `MISE_SAAS_STRIPE_PRICE_ID` for the exactly $20/month Stripe Price
+- `MISE_SAAS_STRIPE_WEBHOOK_SECRET` for `/webhooks/stripe/saas`
+
+The existing self-hosted mode remains the default and continues to use
+`MISE_ADMIN_PASSWORD` plus the single `MISE_DATA_DIR/mise.db` database.
+
 admin/      back-office routers (galleries, studio, invoices, contracts,
               proposals, licenses, presets, press, recurring, shotlist, uploads, activity)
               common.py (shared for splits)

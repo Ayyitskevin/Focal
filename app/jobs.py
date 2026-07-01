@@ -5,6 +5,7 @@ import json
 import logging
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 
 from . import (
@@ -28,6 +29,26 @@ log = logging.getLogger("mise.jobs")
 
 _pool: ThreadPoolExecutor | None = None
 MAX_ATTEMPTS = 3
+
+
+def _current_tenant_slug() -> str | None:
+    if not config.SAAS_MODE:
+        return None
+    from . import saas
+
+    tenant = saas.current_tenant()
+    return tenant["slug"] if tenant else None
+
+
+@contextmanager
+def _job_runtime(tenant_slug: str | None):
+    if config.SAAS_MODE and tenant_slug:
+        from . import saas
+
+        with saas.tenant_runtime(tenant_slug):
+            yield
+    else:
+        yield
 
 
 # ── handlers ───────────────────────────────────────────────────────────────
@@ -202,9 +223,10 @@ HANDLERS = {
 
 
 def enqueue(kind: str, payload: dict) -> int:
+    tenant_slug = _current_tenant_slug()
     job_id = db.run("INSERT INTO jobs (kind, payload) VALUES (?,?)", (kind, json.dumps(payload)))
     if _pool:
-        _pool.submit(_execute, job_id)
+        _pool.submit(_execute, job_id, tenant_slug)
     return job_id
 
 
@@ -224,32 +246,36 @@ def _claim(job_id: int) -> "db.sqlite3.Row | None":
         con.close()
 
 
-def _execute(job_id: int) -> None:
-    job = _claim(job_id)
-    if not job:
-        return
-    payload = json.loads(job["payload"])
-    try:
-        HANDLERS[job["kind"]](payload)
-        db.run(
-            "UPDATE jobs SET status='done', error=NULL, updated_at=datetime('now') WHERE id=?",
-            (job_id,),
-        )
-        log.info("job %s %s done", job_id, job["kind"])
-    except Exception as e:
-        status = "queued" if job["attempts"] < MAX_ATTEMPTS else "failed"
-        db.run(
-            "UPDATE jobs SET status=?, error=?, updated_at=datetime('now') WHERE id=?",
-            (status, str(e)[:500], job_id),
-        )
-        log.exception("job %s %s attempt %s -> %s", job_id, job["kind"], job["attempts"], status)
-        if status == "failed" and "asset_id" in payload:
-            db.run("UPDATE assets SET status='failed' WHERE id=?", (payload["asset_id"],))
-        if status == "queued" and _pool:
-            _pool.submit(_execute, job_id)
+def _execute(job_id: int, tenant_slug: str | None = None) -> None:
+    with _job_runtime(tenant_slug):
+        job = _claim(job_id)
+        if not job:
+            return
+        payload = json.loads(job["payload"])
+        try:
+            HANDLERS[job["kind"]](payload)
+            db.run(
+                "UPDATE jobs SET status='done', error=NULL, updated_at=datetime('now') WHERE id=?",
+                (job_id,),
+            )
+            log.info("job %s %s done", job_id, job["kind"])
+        except Exception as e:
+            status = "queued" if job["attempts"] < MAX_ATTEMPTS else "failed"
+            db.run(
+                "UPDATE jobs SET status=?, error=?, updated_at=datetime('now') WHERE id=?",
+                (status, str(e)[:500], job_id),
+            )
+            log.exception(
+                "job %s %s attempt %s -> %s", job_id, job["kind"], job["attempts"], status
+            )
+            if status == "failed" and "asset_id" in payload:
+                db.run("UPDATE assets SET status='failed' WHERE id=?", (payload["asset_id"],))
+            if status == "queued" and _pool:
+                _pool.submit(_execute, job_id, tenant_slug)
 
 
 def retry(job_id: int) -> bool:
+    tenant_slug = _current_tenant_slug()
     con = db.connect()
     try:
         cur = con.execute(
@@ -264,19 +290,35 @@ def retry(job_id: int) -> bool:
         return False
     log.info("job %s retried by admin", job_id)
     if _pool:
-        _pool.submit(_execute, job_id)
+        _pool.submit(_execute, job_id, tenant_slug)
     return True
 
 
 def pending_count() -> int:
+    if config.SAAS_MODE and not _current_tenant_slug():
+        return 0
     row = db.one("SELECT COUNT(*) AS n FROM jobs WHERE status IN ('queued','running')")
     return row["n"] if row else 0
 
 
 def start() -> None:
     global _pool
-    db.run("UPDATE jobs SET status='queued' WHERE status='running'")
     _pool = ThreadPoolExecutor(max_workers=config.JOB_WORKERS, thread_name_prefix="mise-job")
+    if config.SAAS_MODE:
+        from . import saas
+
+        total = 0
+        for tenant in saas.list_tenants(billable_only=True):
+            with saas.tenant_runtime(tenant):
+                db.run("UPDATE jobs SET status='queued' WHERE status='running'")
+                backlog = db.all_("SELECT id FROM jobs WHERE status='queued' ORDER BY id")
+            for row in backlog:
+                _pool.submit(_execute, row["id"], tenant["slug"])
+            total += len(backlog)
+        if total:
+            log.info("re-queued %d tenant jobs from previous run", total)
+        return
+    db.run("UPDATE jobs SET status='queued' WHERE status='running'")
     backlog = db.all_("SELECT id FROM jobs WHERE status='queued' ORDER BY id")
     for row in backlog:
         _pool.submit(_execute, row["id"])

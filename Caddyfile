@@ -1,0 +1,13 @@
+# Set MISE_CADDY_SITE_ADDRESS to the platform host and tenant wildcard, for example:
+#   mise.example.com, *.mise.example.com
+#
+# Public wildcard certificates require DNS-challenge support in your Caddy build.
+# Without wildcard TLS, point individual tenant DNS records at this host or put
+# Cloudflare/Tailscale in front and keep this reverse proxy private.
+
+{$MISE_CADDY_SITE_ADDRESS} {
+	reverse_proxy mise:8400 {
+		header_up Host {host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+}

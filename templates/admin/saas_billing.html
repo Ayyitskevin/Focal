@@ -1,0 +1,39 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Billing - Mise{% endblock %}
+{% block admin_body %}
+<section class="page-top">
+  <div>
+    <p class="pgtop-eyebrow">Mise hosted plan</p>
+    <h1>Billing</h1>
+    <p class="muted">$20/month flat plan - 14-day trial - cancel anytime</p>
+  </div>
+  <div class="pgtop-actions">
+    <a class="pgtop-link" href="/admin/onboarding">Onboarding</a>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>{{ tenant.studio_name }}</h2>
+  <table class="kv">
+    <tr><th>Plan</th><td>${{ (price_cents / 100)|round(0, 'floor')|int }}/month</td></tr>
+    <tr><th>Status</th><td>{{ tenant.plan_status }}</td></tr>
+    <tr><th>Trial ends</th><td>{{ tenant.trial_ends_at }}</td></tr>
+    <tr><th>Studio URL</th><td><a href="{{ base_url }}">{{ base_url }}</a></td></tr>
+    {% if tenant.stripe_subscription_id %}
+    <tr><th>Stripe subscription</th><td>{{ tenant.stripe_subscription_id }}</td></tr>
+    {% endif %}
+  </table>
+
+  {% if not access_ok %}
+  <p class="error">Your trial or subscription needs attention before the studio can be used again.</p>
+  {% endif %}
+
+  {% if tenant.stripe_customer_id %}
+  <form method="post" action="/admin/billing/portal">
+    <button type="submit">Open Stripe billing portal</button>
+  </form>
+  {% else %}
+  <p class="muted">Stripe will attach to this account when the hosted billing checkout is completed.</p>
+  {% endif %}
+</section>
+{% endblock %}
