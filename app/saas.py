@@ -945,6 +945,7 @@ async def onboarding(request: Request):
 
     seeded = request.query_params.get("seeded")
     installed = request.query_params.get("pack")
+    setup = onboarding_state.setup_status()
     return templates.TemplateResponse(
         request,
         "admin/onboarding.html",
@@ -952,7 +953,8 @@ async def onboarding(request: Request):
             "tenant": tenant,
             "seeded": seeded,
             "installed": installed,
-            "setup": onboarding_state.setup_status(),
+            "setup": setup,
+            "launch": onboarding_state.launch_plan(setup),
             "packs": preset_packs.PRESET_PACKS,
         },
     )

@@ -15,6 +15,7 @@ def isolated_db(tmp_path):
 
 def test_onboarding_status_starts_empty(isolated_db):
     status = onboarding.setup_status()
+    launch = onboarding.launch_plan(status)
 
     assert status["total"] == 4
     assert not status["complete"]
@@ -25,6 +26,9 @@ def test_onboarding_status_starts_empty(isolated_db):
     assert status["steps"][2]["done"] is False
     assert status["steps"][3]["key"] == "delivery"
     assert status["steps"][3]["done"] is False
+    assert launch["score"] == round(status["done"] * 100 / status["total"])
+    assert launch["cta_label"] == "Install a niche preset"
+    assert launch["cta_href"] == "/admin/studio/automation"
 
 
 def test_onboarding_status_tracks_pack_project_and_delivery(isolated_db):
@@ -46,8 +50,11 @@ def test_onboarding_status_tracks_pack_project_and_delivery(isolated_db):
     )
 
     complete = onboarding.setup_status()
+    launch = onboarding.launch_plan(complete)
     assert complete["done"] == 4
     assert complete["complete"] is True
+    assert launch["score"] == 100
+    assert launch["cta_label"] == "Open Studio"
 
 
 def test_first_admin_destination_only_redirects_incomplete_hosted_tenants(isolated_db, monkeypatch):

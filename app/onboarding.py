@@ -61,6 +61,31 @@ def setup_status() -> dict:
     }
 
 
+def launch_plan(status: dict | None = None) -> dict:
+    """Turn the setup checklist into a simple trial-user launch prompt."""
+    status = status or setup_status()
+    next_step = next((step for step in status["steps"] if not step["done"]), None)
+    score = round(status["done"] * 100 / status["total"]) if status["total"] else 0
+    if status["complete"]:
+        headline = "Your client studio is launch-ready."
+        detail = "You have a lead path, project record, and delivery surface ready to show clients."
+        cta_label = "Open Studio"
+        cta_href = "/admin/studio"
+    else:
+        headline = f"{score}% launch-ready"
+        detail = f"Next: {next_step['label']}. {next_step['detail']}"
+        cta_label = next_step["label"]
+        cta_href = next_step["href"]
+    return {
+        "score": score,
+        "headline": headline,
+        "detail": detail,
+        "cta_label": cta_label,
+        "cta_href": cta_href,
+        "next_step": next_step,
+    }
+
+
 def first_admin_destination(default: str = "/admin/home") -> str:
     """Return the first useful hosted admin destination for the current tenant."""
     if not config.SAAS_MODE:
