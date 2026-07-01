@@ -1,0 +1,91 @@
+import asyncio
+
+from starlette.requests import Request
+
+from app import config, db, onboarding, saas
+from app.admin import activity, auth
+
+
+def _configure_saas(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "SAAS_MODE", True)
+    monkeypatch.setattr(config, "BASE_URL", "https://mise.test")
+    monkeypatch.setattr(config, "SAAS_ROOT_DOMAIN", "mise.test")
+    monkeypatch.setattr(config, "SAAS_MARKETING_HOST", "mise.test")
+    monkeypatch.setattr(config, "SAAS_CONTROL_DB_PATH", tmp_path / "control.db")
+    monkeypatch.setattr(config, "SAAS_TENANT_DATA_DIR", tmp_path / "tenants")
+    monkeypatch.setattr(config, "SAAS_TRIAL_DAYS", 14)
+    saas._MIGRATED_TENANT_DBS.clear()
+    saas.migrate_control()
+
+
+def _request(path: str, host: str, *, method: str = "GET") -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": method,
+            "path": path,
+            "query_string": b"",
+            "headers": [(b"host", host.encode()), (b"accept", b"text/html")],
+            "scheme": "https",
+            "server": (host, 443),
+            "client": ("127.0.0.1", 50000),
+        }
+    )
+
+
+def test_fresh_hosted_login_starts_in_onboarding(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+
+    with saas.tenant_runtime(tenant):
+        login = asyncio.run(auth.login(_request("/admin/login", "alpha.mise.test"), "secret123"))
+        assert login.status_code == 303
+        assert login.headers["location"] == onboarding.ADMIN_ONBOARDING_PATH
+
+        home = asyncio.run(activity.home(_request("/admin/home", "alpha.mise.test")))
+        assert home.status_code == 303
+        assert home.headers["location"] == onboarding.ADMIN_ONBOARDING_PATH
+
+
+def test_hosted_trial_route_creates_isolated_tenant_and_onboarding(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+
+    trial = asyncio.run(
+        saas.start_trial(
+            _request("/start-trial", "mise.test", method="POST"),
+            studio_name="Smoke Studio",
+            owner_email="smoke@example.com",
+            slug="smokestudio",
+            password="secret123",
+        )
+    )
+    assert trial.status_code == 303
+    assert trial.headers["location"] == "https://smokestudio.mise.test/admin/login?trial=1"
+    assert (tmp_path / "tenants" / "smokestudio" / "mise.db").exists()
+
+    tenant = saas.tenant_by_slug("smokestudio")
+    with saas.tenant_runtime(tenant):
+        login = asyncio.run(
+            auth.login(_request("/admin/login", "smokestudio.mise.test"), "secret123")
+        )
+        assert login.status_code == 303
+        assert login.headers["location"] == onboarding.ADMIN_ONBOARDING_PATH
+
+
+def test_tenant_middleware_scopes_hosted_requests(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    seen = {}
+
+    async def call_next(request):
+        seen["tenant"] = request.state.tenant["slug"]
+        seen["db"] = str(db.current_db_path())
+        return saas.JSONResponse({"ok": True})
+
+    response = asyncio.run(
+        saas.tenant_middleware(_request("/admin/home", "alpha.mise.test"), call_next)
+    )
+
+    assert response.status_code == 200
+    assert seen["tenant"] == "alpha"
+    assert seen["db"].endswith("/tenants/alpha/mise.db")

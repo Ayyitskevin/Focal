@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app import db, onboarding, preset_packs
+from app import db, onboarding, preset_packs, saas
 
 
 @pytest.fixture()
@@ -48,3 +48,26 @@ def test_onboarding_status_tracks_pack_project_and_delivery(isolated_db):
     complete = onboarding.setup_status()
     assert complete["done"] == 4
     assert complete["complete"] is True
+
+
+def test_first_admin_destination_only_redirects_incomplete_hosted_tenants(isolated_db, monkeypatch):
+    monkeypatch.setattr(onboarding.config, "SAAS_MODE", False)
+    monkeypatch.setattr(saas, "current_tenant", lambda: {"slug": "alpha"})
+
+    assert onboarding.first_admin_destination("/admin/home") == "/admin/home"
+
+    monkeypatch.setattr(onboarding.config, "SAAS_MODE", True)
+    assert onboarding.first_admin_destination("/admin/home") == "/admin/onboarding"
+
+    preset_packs.install_pack("wedding")
+    client_id = db.run("INSERT INTO clients (name, email) VALUES (?,?)", ("Ari", "ari@test"))
+    gallery_id = db.run(
+        "INSERT INTO galleries (slug, title, pin, published) VALUES (?,?,?,1)",
+        ("ari-gallery", "Ari Gallery", "1234"),
+    )
+    db.run(
+        "INSERT INTO projects (client_id, title, status, gallery_id) VALUES (?,?,?,?)",
+        (client_id, "Ari Wedding", "contract_signed", gallery_id),
+    )
+
+    assert onboarding.first_admin_destination("/admin/home") == "/admin/home"

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from . import db
+from . import config, db
+
+ADMIN_ONBOARDING_PATH = "/admin/onboarding"
 
 
 def _count(sql: str, params: tuple = ()) -> int:
@@ -57,3 +59,14 @@ def setup_status() -> dict:
         "total": len(steps),
         "complete": done == len(steps),
     }
+
+
+def first_admin_destination(default: str = "/admin/home") -> str:
+    """Return the first useful hosted admin destination for the current tenant."""
+    if not config.SAAS_MODE:
+        return default
+    from . import saas
+
+    if not saas.current_tenant():
+        return default
+    return default if setup_status()["complete"] else ADMIN_ONBOARDING_PATH

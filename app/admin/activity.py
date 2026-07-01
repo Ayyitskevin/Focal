@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 
-from .. import config, db, jobs, security
+from .. import config, db, jobs, onboarding, security
 from ..render import templates
 from . import common
 
@@ -34,6 +34,10 @@ async def home(request: Request):
     with headline stat tiles, quick-create shortcuts, and panels that each link
     out to the deep view (Studio pipeline, Today feed, Galleries). Read-only
     rollups; every number is a link to where you'd act on it."""
+    destination = onboarding.first_admin_destination("/admin/home")
+    if destination != "/admin/home":
+        return RedirectResponse(destination, status_code=303)
+
     hour = dt.datetime.now().hour
     greeting = "Good morning" if hour < 12 else "Good afternoon" if hour < 18 else "Good evening"
     today_str = dt.date.today().strftime("%A, %B %-d")
