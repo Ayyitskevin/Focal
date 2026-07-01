@@ -2,6 +2,7 @@
 
 import sqlite3
 from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -16,10 +17,25 @@ MIGRATION_ALIASES = {
     "055_plutus_upsell.sql": {"058_plutus_upsell.sql"},
     "058_plutus_upsell.sql": {"055_plutus_upsell.sql"},
 }
+_DB_PATH_CTX: ContextVar[Path | None] = ContextVar("mise_db_path", default=None)
 
 
-def connect() -> sqlite3.Connection:
-    con = sqlite3.connect(config.DB_PATH, timeout=30)
+def current_db_path() -> Path:
+    return _DB_PATH_CTX.get() or Path(config.DB_PATH)
+
+
+def set_request_db_path(path: Path):
+    return _DB_PATH_CTX.set(Path(path))
+
+
+def reset_request_db_path(token) -> None:
+    _DB_PATH_CTX.reset(token)
+
+
+def connect(path: Path | None = None) -> sqlite3.Connection:
+    db_path = Path(path) if path is not None else current_db_path()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(db_path, timeout=30)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("PRAGMA foreign_keys=ON")
@@ -27,9 +43,9 @@ def connect() -> sqlite3.Connection:
     return con
 
 
-def migrate() -> None:
+def migrate(path: Path | None = None) -> None:
     config.ensure_dirs()
-    con = connect()
+    con = connect(path)
     try:
         con.execute("""CREATE TABLE IF NOT EXISTS schema_migrations (
                        name TEXT PRIMARY KEY,

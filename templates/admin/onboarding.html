@@ -1,0 +1,40 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Onboarding - Mise{% endblock %}
+{% block admin_body %}
+<section class="page-top">
+  <div>
+    <p class="pgtop-eyebrow">Hosted setup</p>
+    <h1>Onboarding</h1>
+    <p class="muted">Seed a realistic starting point, then replace the demo records with your real clients.</p>
+  </div>
+  <div class="pgtop-actions">
+    <a class="pgtop-link" href="/admin/billing">Billing</a>
+    <a class="pgtop-link" href="/admin/studio">Studio</a>
+  </div>
+</section>
+
+{% if seeded %}
+<section class="notice">Demo preset loaded: {{ seeded }}. Open Studio to inspect the client, project, proposal, contract, invoice, and gallery.</section>
+{% endif %}
+
+<section class="grid two">
+  <article class="panel">
+    <p class="pgtop-eyebrow">Food and beverage</p>
+    <h2>Restaurant content day</h2>
+    <p class="muted">Adds a restaurant client, menu content project, sent proposal, draft contract, draft invoice, and private gallery.</p>
+    <form method="post" action="/admin/onboarding/demo">
+      <input type="hidden" name="preset" value="fnb">
+      <button type="submit">Load F&B demo</button>
+    </form>
+  </article>
+  <article class="panel">
+    <p class="pgtop-eyebrow">Wedding</p>
+    <h2>Wedding story collection</h2>
+    <p class="muted">Adds a wedding client, accepted proposal, signed contract, sent retainer invoice, and proofing gallery.</p>
+    <form method="post" action="/admin/onboarding/demo">
+      <input type="hidden" name="preset" value="wedding">
+      <button type="submit">Load wedding demo</button>
+    </form>
+  </article>
+</section>
+{% endblock %}

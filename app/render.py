@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi.templating import Jinja2Templates
 
-from . import config, db
+from . import config, db, urls
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -20,10 +20,16 @@ def _static_rev() -> int:
     )
 
 
-templates = Jinja2Templates(
-    directory=ROOT / "templates",
-    context_processors=[lambda request: {"static_rev": _static_rev()}],
-)
+def _context(request) -> dict:
+    return {
+        "static_rev": _static_rev(),
+        "base_url": urls.public_base_url(request),
+        "saas_mode": config.SAAS_MODE,
+        "saas_tenant": getattr(request.state, "tenant", None),
+    }
+
+
+templates = Jinja2Templates(directory=ROOT / "templates", context_processors=[_context])
 templates.env.globals["site_name"] = config.SITE_NAME
 templates.env.globals["base_url"] = config.BASE_URL
 # Startup fallback for any render path that doesn't run context processors

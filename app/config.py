@@ -1,6 +1,7 @@
 """Mise configuration — env-driven, .env loaded if present (systemd uses EnvironmentFile)."""
 
 import os
+from contextvars import ContextVar
 from pathlib import Path
 
 _ENV_FILE = os.environ.get("MISE_ENV_FILE", "/opt/mise/.env")
@@ -35,13 +36,73 @@ HOST = os.environ.get("MISE_HOST", "127.0.0.1")
 PORT = int(os.environ.get("MISE_PORT", "8400"))
 BASE_URL = os.environ.get("MISE_BASE_URL", f"http://localhost:{PORT}")
 
-DATA_DIR = Path(os.environ.get("MISE_DATA_DIR", "/opt/mise/data"))
-DB_PATH = DATA_DIR / "mise.db"
-MEDIA_DIR = DATA_DIR / "media"
-ZIP_DIR = DATA_DIR / "zips"
-TMP_DIR = DATA_DIR / "tmp"
-BRAND_DIR = DATA_DIR / "brand"
-RECEIPTS_DIR = DATA_DIR / "receipts"  # uploaded expense-receipt scans (photo/PDF)
+_BASE_DATA_DIR = Path(os.environ.get("MISE_DATA_DIR", "/opt/mise/data"))
+_DATA_DIR_CTX: ContextVar[Path | None] = ContextVar("mise_data_dir", default=None)
+_MEDIA_DIR_CTX: ContextVar[Path | None] = ContextVar("mise_media_dir", default=None)
+_ZIP_DIR_CTX: ContextVar[Path | None] = ContextVar("mise_zip_dir", default=None)
+_TMP_DIR_CTX: ContextVar[Path | None] = ContextVar("mise_tmp_dir", default=None)
+_BRAND_DIR_CTX: ContextVar[Path | None] = ContextVar("mise_brand_dir", default=None)
+_RECEIPTS_DIR_CTX: ContextVar[Path | None] = ContextVar("mise_receipts_dir", default=None)
+
+
+class ScopedPath(os.PathLike):
+    """Path-like object whose value can be swapped for the current request.
+
+    The existing code uses module-level paths such as ``config.MEDIA_DIR / id``.
+    Hosted mode needs those paths to become tenant-scoped without rewriting every
+    call site, so this proxy delegates common Path behavior to a ContextVar-backed
+    current path and remains a normal os.PathLike for shutil/open/etc.
+    """
+
+    def __init__(self, default: Path, current: ContextVar[Path | None]):
+        self.default = default
+        self.current = current
+
+    def path(self) -> Path:
+        return self.current.get() or self.default
+
+    def __fspath__(self) -> str:
+        return os.fspath(self.path())
+
+    def __truediv__(self, other) -> Path:
+        return self.path() / other
+
+    def __rtruediv__(self, other) -> Path:
+        return Path(other) / self.path()
+
+    def __getattr__(self, name: str):
+        return getattr(self.path(), name)
+
+    def __str__(self) -> str:
+        return str(self.path())
+
+    def __repr__(self) -> str:
+        return repr(self.path())
+
+
+DATA_DIR = ScopedPath(_BASE_DATA_DIR, _DATA_DIR_CTX)
+DB_PATH = _BASE_DATA_DIR / "mise.db"
+MEDIA_DIR = ScopedPath(_BASE_DATA_DIR / "media", _MEDIA_DIR_CTX)
+ZIP_DIR = ScopedPath(_BASE_DATA_DIR / "zips", _ZIP_DIR_CTX)
+TMP_DIR = ScopedPath(_BASE_DATA_DIR / "tmp", _TMP_DIR_CTX)
+BRAND_DIR = ScopedPath(_BASE_DATA_DIR / "brand", _BRAND_DIR_CTX)
+RECEIPTS_DIR = ScopedPath(_BASE_DATA_DIR / "receipts", _RECEIPTS_DIR_CTX)
+
+# Hosted MicroSaaS mode. Defaults off so the existing single-tenant deployment is
+# byte-for-byte the default posture until a SaaS host explicitly arms it.
+SAAS_MODE = _b("MISE_SAAS_MODE", "false")
+SAAS_ROOT_DOMAIN = os.environ.get("MISE_SAAS_ROOT_DOMAIN", "")
+SAAS_MARKETING_HOST = os.environ.get("MISE_SAAS_MARKETING_HOST", "")
+SAAS_CONTROL_DB_PATH = Path(
+    os.environ.get("MISE_SAAS_CONTROL_DB_PATH", str(_BASE_DATA_DIR / "saas-control.db"))
+)
+SAAS_TENANT_DATA_DIR = Path(
+    os.environ.get("MISE_SAAS_TENANT_DATA_DIR", str(_BASE_DATA_DIR / "tenants"))
+)
+SAAS_TRIAL_DAYS = int(os.environ.get("MISE_SAAS_TRIAL_DAYS", "14"))
+SAAS_PRICE_CENTS = int(os.environ.get("MISE_SAAS_PRICE_CENTS", "2000"))
+SAAS_STRIPE_PRICE_ID = os.environ.get("MISE_SAAS_STRIPE_PRICE_ID", "")
+SAAS_STRIPE_WEBHOOK_SECRET = os.environ.get("MISE_SAAS_STRIPE_WEBHOOK_SECRET", "")
 
 SECRET_KEY = os.environ.get("MISE_SECRET_KEY", "")  # required in prod
 ADMIN_PASSWORD = os.environ.get("MISE_ADMIN_PASSWORD", "")  # required in prod
@@ -331,6 +392,38 @@ SESSION_MAX_AGE = int(os.environ.get("MISE_SESSION_MAX_AGE", str(60 * 60 * 24 * 
 COOKIE_SECURE = _b("MISE_COOKIE_SECURE", "false")  # true once behind the tunnel
 
 
+def set_runtime_dirs(data_dir: Path):
+    """Switch file-storage roots for the current request/job; returns reset tokens."""
+    data_dir = Path(data_dir)
+    return (
+        _DATA_DIR_CTX.set(data_dir),
+        _MEDIA_DIR_CTX.set(data_dir / "media"),
+        _ZIP_DIR_CTX.set(data_dir / "zips"),
+        _TMP_DIR_CTX.set(data_dir / "tmp"),
+        _BRAND_DIR_CTX.set(data_dir / "brand"),
+        _RECEIPTS_DIR_CTX.set(data_dir / "receipts"),
+    )
+
+
+def reset_runtime_dirs(tokens) -> None:
+    for ctx, token in zip(
+        (
+            _DATA_DIR_CTX,
+            _MEDIA_DIR_CTX,
+            _ZIP_DIR_CTX,
+            _TMP_DIR_CTX,
+            _BRAND_DIR_CTX,
+            _RECEIPTS_DIR_CTX,
+        ),
+        tokens,
+        strict=True,
+    ):
+        ctx.reset(token)
+
+
 def ensure_dirs() -> None:
     for d in (DATA_DIR, MEDIA_DIR, ZIP_DIR, TMP_DIR, BRAND_DIR, RECEIPTS_DIR):
-        d.mkdir(parents=True, exist_ok=True)
+        Path(d).mkdir(parents=True, exist_ok=True)
+    if SAAS_MODE:
+        SAAS_CONTROL_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        SAAS_TENANT_DATA_DIR.mkdir(parents=True, exist_ok=True)

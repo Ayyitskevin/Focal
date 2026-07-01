@@ -1,0 +1,561 @@
+"""Hosted MicroSaaS control plane for Mise.
+
+Product data remains in the existing Mise schema. This module adds a small
+control database for tenants and switches requests/jobs into a tenant-specific
+SQLite database and file-storage root.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+import sqlite3
+from contextlib import contextmanager
+from contextvars import ContextVar
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from urllib.parse import urlsplit
+
+from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+
+from . import config, db, passwords, security
+from .render import templates
+
+log = logging.getLogger("mise.saas")
+router = APIRouter()
+
+_TENANT_CTX: ContextVar[dict | None] = ContextVar("mise_tenant", default=None)
+_MIGRATED_TENANT_DBS: set[str] = set()
+_SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])$")
+_RESERVED_SLUGS = {
+    "admin",
+    "api",
+    "app",
+    "assets",
+    "billing",
+    "book",
+    "cdn",
+    "dashboard",
+    "demo",
+    "docs",
+    "forms",
+    "g",
+    "i",
+    "login",
+    "media",
+    "portal",
+    "pricing",
+    "static",
+    "status",
+    "support",
+    "webhooks",
+    "www",
+}
+
+
+def _stripe():
+    import stripe
+
+    return stripe
+
+
+def _now() -> datetime:
+    return datetime.now(UTC).replace(microsecond=0)
+
+
+def _iso(value: datetime) -> str:
+    return value.isoformat().replace("+00:00", "Z")
+
+
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _row_to_dict(row) -> dict | None:
+    return dict(row) if row is not None else None
+
+
+def _root_domain() -> str:
+    raw = config.SAAS_ROOT_DOMAIN.strip()
+    if raw:
+        if "://" in raw:
+            raw = urlsplit(raw).netloc
+        return raw.lower().strip("/")
+    parsed = urlsplit(config.BASE_URL)
+    return (parsed.netloc or parsed.hostname or "").lower()
+
+
+def _host_only(host: str) -> str:
+    host = (host or "").split(",", 1)[0].strip().lower()
+    if host.startswith("["):
+        return host
+    return host.split(":", 1)[0].rstrip(".")
+
+
+def _root_host_only() -> str:
+    return _host_only(_root_domain())
+
+
+def platform_url(path: str = "/") -> str:
+    path = path if path.startswith("/") else f"/{path}"
+    parsed = urlsplit(config.BASE_URL)
+    scheme = parsed.scheme or "https"
+    host = _root_domain() or parsed.netloc or f"localhost:{config.PORT}"
+    return f"{scheme}://{host}{path}"
+
+
+def tenant_url(slug: str, path: str = "/") -> str:
+    path = path if path.startswith("/") else f"/{path}"
+    parsed = urlsplit(config.BASE_URL)
+    scheme = parsed.scheme or "https"
+    root = _root_domain() or parsed.netloc or f"localhost:{config.PORT}"
+    return f"{scheme}://{slug}.{root}{path}"
+
+
+def tenant_slug_from_host(host: str) -> str | None:
+    host_only = _host_only(host)
+    root = _root_host_only()
+    marketing = _host_only(config.SAAS_MARKETING_HOST)
+    if not host_only or not root or host_only in {root, marketing, f"www.{root}"}:
+        return None
+    suffix = f".{root}"
+    if not host_only.endswith(suffix):
+        return None
+    slug = host_only[: -len(suffix)]
+    return slug if slug and "." not in slug else None
+
+
+def tenant_data_path(slug: str) -> Path:
+    return config.SAAS_TENANT_DATA_DIR / slug
+
+
+def tenant_db_path(slug: str) -> Path:
+    return tenant_data_path(slug) / "mise.db"
+
+
+def control_connect() -> sqlite3.Connection:
+    config.SAAS_CONTROL_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(config.SAAS_CONTROL_DB_PATH, timeout=30)
+    con.row_factory = sqlite3.Row
+    con.execute("PRAGMA journal_mode=WAL")
+    con.execute("PRAGMA foreign_keys=ON")
+    con.execute("PRAGMA busy_timeout=30000")
+    return con
+
+
+def migrate_control() -> None:
+    config.ensure_dirs()
+    with control_connect() as con:
+        con.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS tenants (
+                id INTEGER PRIMARY KEY,
+                slug TEXT UNIQUE NOT NULL,
+                studio_name TEXT NOT NULL,
+                owner_email TEXT NOT NULL,
+                admin_password_hash TEXT NOT NULL,
+                plan_status TEXT NOT NULL DEFAULT 'trialing'
+                    CHECK (plan_status IN (
+                        'trialing','active','past_due','canceled','unpaid','paused',
+                        'incomplete','incomplete_expired'
+                    )),
+                trial_started_at TEXT NOT NULL,
+                trial_ends_at TEXT NOT NULL,
+                stripe_customer_id TEXT,
+                stripe_subscription_id TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_tenants_slug ON tenants(slug);
+            CREATE INDEX IF NOT EXISTS idx_tenants_subscription
+                ON tenants(stripe_subscription_id);
+            CREATE TABLE IF NOT EXISTS saas_events (
+                id TEXT PRIMARY KEY,
+                type TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            """
+        )
+
+
+def tenant_by_slug(slug: str) -> dict | None:
+    with control_connect() as con:
+        row = con.execute("SELECT * FROM tenants WHERE slug=?", (slug,)).fetchone()
+    return _row_to_dict(row)
+
+
+def tenant_by_id(tenant_id: int) -> dict | None:
+    with control_connect() as con:
+        row = con.execute("SELECT * FROM tenants WHERE id=?", (tenant_id,)).fetchone()
+    return _row_to_dict(row)
+
+
+def tenant_by_subscription(subscription_id: str) -> dict | None:
+    with control_connect() as con:
+        row = con.execute(
+            "SELECT * FROM tenants WHERE stripe_subscription_id=?", (subscription_id,)
+        ).fetchone()
+    return _row_to_dict(row)
+
+
+def list_tenants(*, billable_only: bool = False) -> list[dict]:
+    where = ""
+    params: tuple = ()
+    if billable_only:
+        where = "WHERE plan_status IN ('trialing','active','past_due')"
+    with control_connect() as con:
+        rows = con.execute(f"SELECT * FROM tenants {where} ORDER BY id", params).fetchall()
+    return [dict(r) for r in rows]
+
+
+def current_tenant() -> dict | None:
+    return _TENANT_CTX.get()
+
+
+def current_tenant_id() -> int | None:
+    tenant = current_tenant()
+    return int(tenant["id"]) if tenant else None
+
+
+def validate_slug(slug: str) -> str:
+    slug = (slug or "").strip().lower()
+    if not _SLUG_RE.match(slug):
+        raise ValueError("Use 3-32 lowercase letters, numbers, or hyphens.")
+    if slug in _RESERVED_SLUGS:
+        raise ValueError("That studio URL is reserved.")
+    return slug
+
+
+def create_tenant(slug: str, studio_name: str, owner_email: str, password: str) -> dict:
+    slug = validate_slug(slug)
+    studio_name = (studio_name or "").strip()
+    owner_email = (owner_email or "").strip().lower()
+    if not studio_name:
+        raise ValueError("Studio name is required.")
+    if "@" not in owner_email:
+        raise ValueError("A valid email is required.")
+    if len(password or "") < 8:
+        raise ValueError("Use at least 8 characters for the admin password.")
+    started = _now()
+    ends = started + timedelta(days=config.SAAS_TRIAL_DAYS)
+    try:
+        with control_connect() as con:
+            cur = con.execute(
+                """INSERT INTO tenants
+                   (slug, studio_name, owner_email, admin_password_hash,
+                    trial_started_at, trial_ends_at)
+                   VALUES (?,?,?,?,?,?)""",
+                (
+                    slug,
+                    studio_name,
+                    owner_email,
+                    passwords.hash_password(password),
+                    _iso(started),
+                    _iso(ends),
+                ),
+            )
+            tenant_id = cur.lastrowid
+    except sqlite3.IntegrityError:
+        raise ValueError("That studio URL is already taken.") from None
+    tenant = tenant_by_id(tenant_id)
+    ensure_tenant_database(tenant)
+    log.info("tenant %s created for %s", slug, owner_email)
+    return tenant
+
+
+def update_tenant_billing(
+    tenant_id: int,
+    *,
+    plan_status: str | None = None,
+    stripe_customer_id: str | None = None,
+    stripe_subscription_id: str | None = None,
+) -> None:
+    updates = ["updated_at=?"]
+    params: list = [_iso(_now())]
+    if plan_status:
+        updates.append("plan_status=?")
+        params.append(plan_status)
+    if stripe_customer_id:
+        updates.append("stripe_customer_id=?")
+        params.append(stripe_customer_id)
+    if stripe_subscription_id:
+        updates.append("stripe_subscription_id=?")
+        params.append(stripe_subscription_id)
+    params.append(tenant_id)
+    with control_connect() as con:
+        con.execute(f"UPDATE tenants SET {', '.join(updates)} WHERE id=?", params)
+
+
+def ensure_tenant_database(tenant: dict | None) -> None:
+    if not tenant:
+        return
+    slug = tenant["slug"]
+    data_path = tenant_data_path(slug)
+    for path in (
+        data_path,
+        data_path / "media",
+        data_path / "zips",
+        data_path / "tmp",
+        data_path / "brand",
+        data_path / "receipts",
+    ):
+        path.mkdir(parents=True, exist_ok=True)
+    path_key = str(tenant_db_path(slug))
+    if path_key not in _MIGRATED_TENANT_DBS:
+        db.migrate(tenant_db_path(slug))
+        _MIGRATED_TENANT_DBS.add(path_key)
+
+
+@contextmanager
+def tenant_runtime(tenant_or_slug):
+    tenant = tenant_by_slug(tenant_or_slug) if isinstance(tenant_or_slug, str) else tenant_or_slug
+    if not tenant:
+        raise RuntimeError("tenant not found")
+    ensure_tenant_database(tenant)
+    tenant_token = _TENANT_CTX.set(dict(tenant))
+    db_token = db.set_request_db_path(tenant_db_path(tenant["slug"]))
+    dir_tokens = config.set_runtime_dirs(tenant_data_path(tenant["slug"]))
+    try:
+        yield tenant
+    finally:
+        config.reset_runtime_dirs(dir_tokens)
+        db.reset_request_db_path(db_token)
+        _TENANT_CTX.reset(tenant_token)
+
+
+def tenant_has_access(tenant: dict) -> bool:
+    status = tenant["plan_status"]
+    if status == "active":
+        return True
+    if status == "trialing":
+        trial_ends_at = _parse_iso(tenant["trial_ends_at"])
+        return bool(trial_ends_at and trial_ends_at >= _now())
+    return False
+
+
+def _platform_path(path: str) -> bool:
+    return (
+        path in {"/", "/pricing", "/start-trial", "/healthz", "/favicon.ico"}
+        or path.startswith("/static/")
+        or path in {"/webhooks/stripe", "/webhooks/stripe/saas"}
+    )
+
+
+def _billing_allowed_path(path: str) -> bool:
+    return (
+        path.startswith("/admin/billing")
+        or path in {"/admin/login", "/admin/logout", "/healthz"}
+        or path.startswith("/static/")
+        or path in {"/webhooks/stripe", "/webhooks/stripe/saas"}
+    )
+
+
+async def tenant_middleware(request: Request, call_next):
+    if not config.SAAS_MODE:
+        return await call_next(request)
+    path = request.url.path
+    slug = tenant_slug_from_host(request.headers.get("host", ""))
+    if not slug:
+        if _platform_path(path):
+            return await call_next(request)
+        return RedirectResponse("/pricing", status_code=303)
+
+    tenant = tenant_by_slug(slug)
+    if not tenant:
+        if "text/html" in request.headers.get("accept", ""):
+            return templates.TemplateResponse(
+                request,
+                "saas/unknown_tenant.html",
+                {"slug": slug, "root_url": platform_url("/pricing")},
+                status_code=404,
+            )
+        return JSONResponse({"detail": "unknown tenant"}, status_code=404)
+
+    with tenant_runtime(tenant):
+        request.state.tenant = dict(tenant)
+        if not tenant_has_access(tenant) and not _billing_allowed_path(path):
+            if path.startswith("/admin"):
+                return RedirectResponse("/admin/billing?expired=1", status_code=303)
+            return JSONResponse({"detail": "subscription required"}, status_code=402)
+        return await call_next(request)
+
+
+def _pricing_context(error: str | None = None, values: dict | None = None) -> dict:
+    return {
+        "error": error,
+        "values": values or {},
+        "price_cents": config.SAAS_PRICE_CENTS,
+        "trial_days": config.SAAS_TRIAL_DAYS,
+        "root_domain": _root_domain(),
+    }
+
+
+@router.get("/", response_class=HTMLResponse)
+async def saas_home(request: Request):
+    return templates.TemplateResponse(request, "saas/home.html", _pricing_context())
+
+
+@router.get("/pricing", response_class=HTMLResponse)
+async def pricing(request: Request):
+    return templates.TemplateResponse(request, "saas/pricing.html", _pricing_context())
+
+
+@router.post("/start-trial")
+async def start_trial(
+    request: Request,
+    studio_name: str = Form(...),
+    owner_email: str = Form(...),
+    slug: str = Form(...),
+    password: str = Form(...),
+):
+    values = {"studio_name": studio_name, "owner_email": owner_email, "slug": slug}
+    try:
+        tenant = create_tenant(slug, studio_name, owner_email, password)
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            request,
+            "saas/pricing.html",
+            _pricing_context(str(exc), values),
+            status_code=400,
+        )
+
+    success_url = tenant_url(tenant["slug"], "/admin/login?trial=1")
+    cancel_url = platform_url("/pricing")
+    if config.STRIPE_SECRET_KEY or config.SAAS_STRIPE_PRICE_ID:
+        if not (config.STRIPE_SECRET_KEY and config.SAAS_STRIPE_PRICE_ID):
+            return templates.TemplateResponse(
+                request,
+                "saas/pricing.html",
+                _pricing_context("Stripe billing is not fully configured yet.", values),
+                status_code=503,
+            )
+        stripe_mod = _stripe()
+        session = stripe_mod.checkout.Session.create(
+            api_key=config.STRIPE_SECRET_KEY,
+            mode="subscription",
+            customer_email=tenant["owner_email"],
+            line_items=[{"price": config.SAAS_STRIPE_PRICE_ID, "quantity": 1}],
+            metadata={"tenant_id": str(tenant["id"]), "slug": tenant["slug"]},
+            subscription_data={
+                "trial_period_days": config.SAAS_TRIAL_DAYS,
+                "metadata": {"tenant_id": str(tenant["id"]), "slug": tenant["slug"]},
+            },
+            success_url=success_url,
+            cancel_url=cancel_url,
+        )
+        log.info("tenant %s checkout session %s created", tenant["slug"], session.id)
+        return RedirectResponse(session.url, status_code=303)
+
+    return RedirectResponse(success_url, status_code=303)
+
+
+@router.post("/webhooks/stripe/saas")
+async def saas_stripe_webhook(request: Request):
+    if not (config.SAAS_STRIPE_WEBHOOK_SECRET and config.STRIPE_SECRET_KEY):
+        raise HTTPException(status_code=503, detail="saas billing webhook not configured")
+    payload = await request.body()
+    stripe_mod = _stripe()
+    try:
+        event = stripe_mod.Webhook.construct_event(
+            payload,
+            request.headers.get("stripe-signature", ""),
+            config.SAAS_STRIPE_WEBHOOK_SECRET,
+        )
+    except (ValueError, stripe_mod.SignatureVerificationError):
+        raise HTTPException(status_code=400, detail="bad signature")
+
+    with control_connect() as con:
+        try:
+            con.execute(
+                "INSERT INTO saas_events (id, type) VALUES (?,?)", (event["id"], event["type"])
+            )
+        except sqlite3.IntegrityError:
+            return {"ok": True, "duplicate": True}
+
+    obj = event["data"]["object"]
+    event_type = event["type"]
+    if event_type == "checkout.session.completed":
+        metadata = obj.get("metadata") or {}
+        tenant_id = int(metadata.get("tenant_id") or 0)
+        if tenant_id:
+            update_tenant_billing(
+                tenant_id,
+                plan_status="trialing",
+                stripe_customer_id=obj.get("customer"),
+                stripe_subscription_id=obj.get("subscription"),
+            )
+    elif event_type.startswith("customer.subscription."):
+        metadata = obj.get("metadata") or {}
+        tenant_id = int(metadata.get("tenant_id") or 0)
+        tenant = tenant_by_id(tenant_id) if tenant_id else tenant_by_subscription(obj["id"])
+        if tenant:
+            status = obj.get("status") or "incomplete"
+            update_tenant_billing(
+                tenant["id"],
+                plan_status=status,
+                stripe_customer_id=obj.get("customer"),
+                stripe_subscription_id=obj["id"],
+            )
+    return {"ok": True, "type": event_type}
+
+
+@router.get("/admin/billing", response_class=HTMLResponse)
+async def billing(request: Request):
+    security.require_admin(request)
+    tenant = current_tenant()
+    if not tenant:
+        raise HTTPException(status_code=404)
+    return templates.TemplateResponse(
+        request,
+        "admin/saas_billing.html",
+        {
+            "tenant": tenant,
+            "price_cents": config.SAAS_PRICE_CENTS,
+            "access_ok": tenant_has_access(tenant),
+        },
+    )
+
+
+@router.post("/admin/billing/portal")
+async def billing_portal(request: Request):
+    security.require_admin(request)
+    tenant = current_tenant()
+    if not tenant or not tenant.get("stripe_customer_id"):
+        raise HTTPException(status_code=503, detail="billing portal not available yet")
+    stripe_mod = _stripe()
+    session = stripe_mod.billing_portal.Session.create(
+        api_key=config.STRIPE_SECRET_KEY,
+        customer=tenant["stripe_customer_id"],
+        return_url=tenant_url(tenant["slug"], "/admin/billing"),
+    )
+    return RedirectResponse(session.url, status_code=303)
+
+
+@router.get("/admin/onboarding", response_class=HTMLResponse)
+async def onboarding(request: Request):
+    security.require_admin(request)
+    tenant = current_tenant()
+    if not tenant:
+        raise HTTPException(status_code=404)
+    seeded = request.query_params.get("seeded")
+    return templates.TemplateResponse(
+        request,
+        "admin/onboarding.html",
+        {"tenant": tenant, "seeded": seeded},
+    )
+
+
+@router.post("/admin/onboarding/demo")
+async def seed_demo(request: Request, preset: str = Form(...)):
+    security.require_admin(request)
+    from . import saas_demo
+
+    result = saas_demo.seed_preset(preset)
+    suffix = result["preset"]
+    return RedirectResponse(f"/admin/onboarding?seeded={suffix}", status_code=303)

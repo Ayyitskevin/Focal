@@ -7,10 +7,15 @@
 <main class="login-wrap">
   <div class="login-stack">
     <div class="login-brand">
-      <span class="login-crest">K</span>
+      <span class="login-crest">{{ (saas_tenant.studio_name[:1] if saas_tenant else "K") }}</span>
       <div class="login-word">
+        {% if saas_mode and saas_tenant %}
+        <div class="login-name">{{ saas_tenant.studio_name }}</div>
+        <div class="login-eyebrow">Hosted client studio</div>
+        {% else %}
         <div class="login-name">Kevin <span>Lee</span></div>
         <div class="login-eyebrow">Studio admin</div>
+        {% endif %}
       </div>
     </div>
 
@@ -20,10 +25,12 @@
              autocomplete="current-password" placeholder="••••••••••">
       {% if error %}<p class="error">{{ error }}</p>{% endif %}
       <button type="submit">Sign in</button>
-      <p class="login-note">Also gated by Cloudflare Access · per-IP lockout after 5 tries</p>
+      <p class="login-note">
+        {% if saas_mode %}14-day trial · $20/month after trial · cancel anytime{% else %}Also gated by Cloudflare Access · per-IP lockout after 5 tries{% endif %}
+      </p>
     </form>
 
-    <p class="login-foot">Self-hosted · {{ base_url|replace("https://", "")|replace("http://", "") }}</p>
+    <p class="login-foot">{% if saas_mode %}Hosted by Mise{% else %}Self-hosted{% endif %} · {{ base_url|replace("https://", "")|replace("http://", "") }}</p>
   </div>
 </main>
 {% endblock %}

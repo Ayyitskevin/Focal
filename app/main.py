@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import alerts, bootstrap, config, csrf, db, jobs, ratelimit, scheduler, service_api
+from . import alerts, bootstrap, config, csrf, db, jobs, ratelimit, saas, scheduler, service_api
 from .admin import (
     activity,
     ai_cost,
@@ -63,8 +63,11 @@ log = logging.getLogger("mise.app")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    db.migrate()
-    if config.SHOWCASE_SEED:
+    if config.SAAS_MODE:
+        saas.migrate_control()
+    else:
+        db.migrate()
+    if config.SHOWCASE_SEED and not config.SAAS_MODE:
         bootstrap.ensure_public_showcase()
     jobs.start()
     scheduler.start()
@@ -107,6 +110,13 @@ CSP_POLICY = "; ".join(
         "connect-src 'self' https://plausible.io",
     )
 )
+
+
+@app.middleware("http")
+async def tenant_context(request: Request, call_next):
+    if config.SAAS_MODE:
+        return await saas.tenant_middleware(request, call_next)
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -187,7 +197,7 @@ async def healthz():
     return {"ok": True, "service": "mise", "jobs_pending": jobs.pending_count()}
 
 
-for r in (
+routers = (
     auth.router,
     galleries.router,
     uploads.router,
@@ -236,5 +246,9 @@ for r in (
     site.router,
     sms_webhook.router,
     service_api.router,
-):
+)
+if config.SAAS_MODE:
+    routers = (saas.router,) + routers
+
+for r in routers:
     app.include_router(r)

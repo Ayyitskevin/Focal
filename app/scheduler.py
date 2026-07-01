@@ -36,34 +36,48 @@ _thread: threading.Thread | None = None
 
 def _loop() -> None:
     while not _stop.wait(config.RECURRING_TICK_SECONDS):
-        try:
-            recurring.run_due_plans()
-        except Exception:
-            log.exception("recurring sweep failed")
-        try:
-            booking_reminders.sweep()
-        except Exception:
-            log.exception("booking reminder sweep failed")
-        try:
-            gallery_reminders.sweep()
-        except Exception:
-            log.exception("gallery reminder sweep failed")
-        try:
-            contract_reminders.sweep()
-        except Exception:
-            log.exception("contract reminder sweep failed")
-        try:
-            retainer_reminders.sweep()
-        except Exception:
-            log.exception("retainer renewal reminder sweep failed")
-        try:
-            ops_monitor.sweep()
-        except Exception:
-            log.exception("ops monitor sweep failed")
-        try:
-            postshoot_reminders.sweep()
-        except Exception:
-            log.exception("post-shoot reminder sweep failed")
+        if config.SAAS_MODE:
+            from . import saas
+
+            for tenant in saas.list_tenants(billable_only=True):
+                try:
+                    with saas.tenant_runtime(tenant):
+                        _sweep_once()
+                except Exception:
+                    log.exception("tenant scheduler sweep failed: %s", tenant["slug"])
+            continue
+        _sweep_once()
+
+
+def _sweep_once() -> None:
+    try:
+        recurring.run_due_plans()
+    except Exception:
+        log.exception("recurring sweep failed")
+    try:
+        booking_reminders.sweep()
+    except Exception:
+        log.exception("booking reminder sweep failed")
+    try:
+        gallery_reminders.sweep()
+    except Exception:
+        log.exception("gallery reminder sweep failed")
+    try:
+        contract_reminders.sweep()
+    except Exception:
+        log.exception("contract reminder sweep failed")
+    try:
+        retainer_reminders.sweep()
+    except Exception:
+        log.exception("retainer renewal reminder sweep failed")
+    try:
+        ops_monitor.sweep()
+    except Exception:
+        log.exception("ops monitor sweep failed")
+    try:
+        postshoot_reminders.sweep()
+    except Exception:
+        log.exception("post-shoot reminder sweep failed")
 
 
 def start() -> None:
