@@ -1,72 +1,140 @@
 # Mise
 
-Mise is a lightweight client studio for solo photographers and videographers:
-PIN-gated galleries, proposals, contracts, Stripe invoices, scheduling, portals,
-and studio operations in one FastAPI + HTMX + SQLite app.
+Professional client studio, hosted and maintained for solo photographers and
+videographers. Exactly **$20/month** after a 14-day trial. No paid tiers, no
+setup fee, cancel anytime.
 
-## Hosted MicroSaaS Mode
+Mise combines the parts solo creatives usually stitch together from Pixieset,
+HoneyBook, Dubsado, ShootProof, and spreadsheets:
 
-The hosted product is intentionally simple:
+- PIN-gated galleries, favorites, comments, proofing, and downloads
+- proposals, contracts, Stripe invoices, and receipts
+- client portals, package intake pages, lead forms, and booking paperwork
+- Studio OS automation for reminders, tasks, packages, and project timelines
+- F&B, wedding, and portrait starter presets so the first login is not blank
 
-- **One flat paid plan:** exactly **$20/month**, locked in code at 2000 cents
-- **Free trial:** 14 days
-- **No paid tiers:** every hosted customer gets the same client-studio workflow
-- **Target customer:** solo F&B, wedding, portrait, and video creatives who want
-  a professional hosted client studio without maintaining software
+The hosted promise is simple:
 
-The competitive promise is "Pixieset delivery + HoneyBook paperwork + Dubsado
-follow-up, without the $50-$129/month software bill." Hosted studios now get:
+> Professional client studio, hosted and maintained for you, only $20/month.
 
-- **Studio OS:** `/admin/studio/automation` for niche preset packs, packages,
-  workflow rules, package leads, and open reminders
-- **Project cockpit:** project pages show timeline events, workflow-created
-  tasks, client tags, and custom fields next to proposals/contracts/invoices
-- **Package intake:** public `/packages/{slug}` pages create package leads and
-  inquiries from simple bookable offers
-- **Niche presets:** Food & Beverage, Wedding, and Portrait starter packs seed
-  packages, workflow reminders, forms, and CRM tags
-- **Visible automation:** business events such as proposal sent, contract signed,
-  invoice paid, and gallery published create ordinary tasks the owner can edit
+## Why $20 Is A Bargain
 
-Hosted mode is off by default. To run the SaaS version locally:
+| What solo creatives need | Usually bought as | Included in Mise |
+| --- | --- | --- |
+| Private galleries and proofing | gallery delivery platform | yes |
+| Proposals, contracts, invoices | client CRM | yes |
+| Package inquiry pages | website plugin/form stack | yes |
+| Workflow reminders | automation tool or spreadsheet | yes |
+| Hosted maintenance | developer/server time | yes |
+| Niche starting point | paid templates/course | yes |
+
+One customer can run the full inquiry -> booking -> paperwork -> payment ->
+delivery loop without graduating into a more expensive tier.
+
+## Hosted SaaS Mode
+
+Hosted mode is dormant by default. Self-hosted installs keep the original
+single-database behavior unless `MISE_SAAS_MODE=true`.
+
+Hosted mode adds:
+
+- tenant resolution by subdomain or verified custom domain
+- isolated SQLite database and media tree per studio
+- 14-day trial and Stripe subscription billing for the flat $20 plan
+- root-host operator console at `/admin/saas`
+- launch readiness checks with `python scripts/hosted-preflight.py`
+- onboarding checklist, demo data, and niche preset packs
+
+Production billing uses:
+
+- `MISE_STRIPE_SECRET_KEY`
+- `MISE_SAAS_STRIPE_PRICE_ID` for the exactly $20/month recurring Stripe Price
+- `MISE_SAAS_STRIPE_WEBHOOK_SECRET` for `/webhooks/stripe/saas`
+
+The price is locked in code at `2000` cents. Do not make it configurable unless
+the product model changes.
+
+## One-Command Local SaaS Launch
 
 ```bash
 cp .env.example .env
-# edit .env:
-# MISE_SECRET_KEY=...
-# MISE_SAAS_MODE=true
-# MISE_SAAS_ROOT_DOMAIN=localhost
-# MISE_BASE_URL=http://localhost
+# edit .env with hosted values
 docker compose up --build
 ```
 
-For production, set `MISE_CADDY_SITE_ADDRESS` to the platform host and tenant
-wildcard, for example `mise.example.com, *.mise.example.com`, then point DNS at
-the host. Tenant product data is isolated under `MISE_SAAS_TENANT_DATA_DIR`, with
-one migrated SQLite database and media tree per studio.
+Minimum hosted env:
 
-Stripe subscription billing uses:
+```bash
+MISE_SECRET_KEY=change-me
+MISE_ADMIN_PASSWORD=change-me
+MISE_BASE_URL=https://mise.example.com
+MISE_COOKIE_SECURE=true
+MISE_SAAS_MODE=true
+MISE_SAAS_ROOT_DOMAIN=mise.example.com
+MISE_SAAS_MARKETING_HOST=mise.example.com
+MISE_SAAS_CONTROL_DB_PATH=/data/saas-control.db
+MISE_SAAS_TENANT_DATA_DIR=/data/tenants
+MISE_SAAS_TRIAL_DAYS=14
+MISE_STRIPE_SECRET_KEY=sk_live_xxx
+MISE_SAAS_STRIPE_PRICE_ID=price_xxx
+MISE_SAAS_STRIPE_WEBHOOK_SECRET=whsec_xxx
+```
 
-- `MISE_STRIPE_SECRET_KEY`
-- `MISE_SAAS_STRIPE_PRICE_ID` for the exactly $20/month Stripe Price
-- `MISE_SAAS_STRIPE_WEBHOOK_SECRET` for `/webhooks/stripe/saas`
+Run readiness checks before launch:
 
-Deployment details live in [docs/SAAS-DEPLOYMENT.md](docs/SAAS-DEPLOYMENT.md).
+```bash
+python scripts/hosted-preflight.py
+python scripts/smoke-saas-hosted.py
+```
 
-The existing self-hosted mode remains the default and continues to use
-`MISE_ADMIN_PASSWORD` plus the single `MISE_DATA_DIR/mise.db` database.
+Detailed deployment notes live in [docs/SAAS-DEPLOYMENT.md](docs/SAAS-DEPLOYMENT.md).
 
-admin/      back-office routers (galleries, studio, invoices, contracts,
-              proposals, licenses, presets, press, recurring, shotlist, uploads, activity)
-              common.py (shared for splits)
+## Operator Workflow
 
-Extractions (2026-06): dir_size/fmt_size/short_date/gallery_card/today moved to common.py; spark_series + get_or_404 + clients_for_select to db.py. Tests for common + fixed test_admin_common imports. CI: units (ignore smoke) + ruff check/format strict before smoke.
+On the root hosted domain, `/admin/login` uses `MISE_ADMIN_PASSWORD` and opens
+`/admin/saas`. Tenant subdomains still use each tenant's hashed admin password.
 
-Ruff fixes post-extract (import hygiene, unused).
+The operator console shows:
 
-## Testing
+- tenant count, active/trialing/support counts, and readiness state
+- per-tenant billing status and Stripe IDs
+- custom-domain pending/verified state
+- isolated data path and tenant DB presence
+- manual support actions for billing status and domain verification
 
-- Unit tests (fast feedback): `python -m pytest tests/ --ignore=tests/test_smoke.py -q -m unit`
-- Full smoke (e2e against temp DB): `MISE_DATA_DIR=$(mktemp -d) MISE_SECRET_KEY=test MISE_ADMIN_PASSWORD=pw python -m pytest tests/test_smoke.py -q`
-- Extracted basics (healthz, security headers, CSP, CSRF) now in `tests/test_basic.py` for units.
-- Lint + format enforced in CI (ruff check + ruff format --check) before smoke.
+This keeps support simple enough for one founder.
+
+## Self-Hosted Mode
+
+The original self-hosted product remains the default:
+
+- `MISE_SAAS_MODE=false`
+- one SQLite database at `MISE_DATA_DIR/mise.db`
+- admin password from `MISE_ADMIN_PASSWORD`
+- no hosted billing or tenant routing
+
+Do not deploy SaaS conversion work to `flow:/opt/mise` or
+`kleephotography.com` unless explicitly requested.
+
+## Development
+
+```bash
+python -m pytest tests/test_saas.py tests/test_saas_preflight.py tests/test_saas_hosted_smoke.py -q
+ruff check .
+ruff format --check .
+```
+
+Full smoke:
+
+```bash
+MISE_DATA_DIR=$(mktemp -d) MISE_SECRET_KEY=test MISE_ADMIN_PASSWORD=pw \
+  python -m pytest tests/test_smoke.py -q
+```
+
+## Launch Copy
+
+Mise is a hosted client studio for solo photographers and videographers:
+professional galleries, booking paperwork, payments, portals, and workflow
+reminders for exactly $20/month.
+
+No tiers. No setup. Hosted and maintained for you.
