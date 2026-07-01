@@ -1,0 +1,50 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Account - Mise{% endblock %}
+{% block admin_body %}
+<section class="page-top">
+  <div>
+    <p class="pgtop-eyebrow">Hosted account</p>
+    <h1>Studio settings</h1>
+    <p class="muted">These settings live in the hosted control plane and do not touch client project data.</p>
+  </div>
+  <div class="pgtop-actions">
+    <a class="pgtop-link" href="/admin/billing">Billing</a>
+    <a class="pgtop-link" href="/admin/onboarding">Onboarding</a>
+  </div>
+</section>
+
+{% if saved %}
+<section class="notice">Studio settings saved.</section>
+{% endif %}
+{% if error %}
+<section class="error">{{ error }}</section>
+{% endif %}
+
+<section class="panel">
+  <form method="post" action="/admin/account">
+    <div class="grid two">
+      <label>Studio name
+        <input name="studio_name" value="{{ tenant.studio_name }}" required>
+      </label>
+      <label>Owner email
+        <input type="email" name="owner_email" value="{{ tenant.owner_email }}" required>
+      </label>
+      <label>Brand accent
+        <input type="color" name="brand_accent" value="{{ tenant.brand_accent or '#2f5c45' }}">
+      </label>
+      <label>Custom domain
+        <input name="custom_domain" value="{{ tenant.custom_domain or '' }}" placeholder="studio.example.com">
+      </label>
+    </div>
+    <p class="muted">Your built-in studio URL stays available at {{ tenant.slug }}.{{ root_domain }}.</p>
+    {% if tenant.custom_domain %}
+      {% if tenant.custom_domain_verified_at %}
+      <p class="muted">Custom domain verified: {{ tenant.custom_domain }}</p>
+      {% else %}
+      <p class="muted">Custom domain pending: point {{ tenant.custom_domain }} at the hosted Mise app, then visit it once.</p>
+      {% endif %}
+    {% endif %}
+    <button type="submit">Save studio settings</button>
+  </form>
+</section>
+{% endblock %}

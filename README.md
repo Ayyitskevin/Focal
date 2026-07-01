@@ -8,7 +8,7 @@ and studio operations in one FastAPI + HTMX + SQLite app.
 
 The hosted product is intentionally simple:
 
-- **One flat paid plan:** exactly **$20/month**
+- **One flat paid plan:** exactly **$20/month**, locked in code at 2000 cents
 - **Free trial:** 14 days
 - **No paid tiers:** every hosted customer gets the same client-studio workflow
 - **Target customer:** solo F&B, wedding, portrait, and video creatives who want
@@ -36,6 +36,8 @@ Stripe subscription billing uses:
 - `MISE_STRIPE_SECRET_KEY`
 - `MISE_SAAS_STRIPE_PRICE_ID` for the exactly $20/month Stripe Price
 - `MISE_SAAS_STRIPE_WEBHOOK_SECRET` for `/webhooks/stripe/saas`
+
+Deployment details live in [docs/SAAS-DEPLOYMENT.md](docs/SAAS-DEPLOYMENT.md).
 
 The existing self-hosted mode remains the default and continues to use
 `MISE_ADMIN_PASSWORD` plus the single `MISE_DATA_DIR/mise.db` database.

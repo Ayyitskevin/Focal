@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from . import config, db, passwords, security
+from . import config, db, passwords, security, urls
 from .render import templates
 
 log = logging.getLogger("mise.saas")
@@ -28,6 +28,9 @@ router = APIRouter()
 _TENANT_CTX: ContextVar[dict | None] = ContextVar("mise_tenant", default=None)
 _MIGRATED_TENANT_DBS: set[str] = set()
 _SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])$")
+_DOMAIN_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+_HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+_DEFAULT_BRAND_ACCENT = "#2f5c45"
 _RESERVED_SLUGS = {
     "admin",
     "api",
@@ -126,7 +129,8 @@ def tenant_slug_from_host(host: str) -> str | None:
         return None
     suffix = f".{root}"
     if not host_only.endswith(suffix):
-        return None
+        tenant = tenant_by_custom_domain(host_only)
+        return tenant["slug"] if tenant else None
     slug = host_only[: -len(suffix)]
     return slug if slug and "." not in slug else None
 
@@ -169,6 +173,9 @@ def migrate_control() -> None:
                 trial_ends_at TEXT NOT NULL,
                 stripe_customer_id TEXT,
                 stripe_subscription_id TEXT,
+                custom_domain TEXT UNIQUE,
+                custom_domain_verified_at TEXT,
+                brand_accent TEXT NOT NULL DEFAULT '#2f5c45',
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT
             );
@@ -182,6 +189,29 @@ def migrate_control() -> None:
             );
             """
         )
+        _ensure_column(con, "tenants", "custom_domain", "custom_domain TEXT")
+        _ensure_column(
+            con,
+            "tenants",
+            "custom_domain_verified_at",
+            "custom_domain_verified_at TEXT",
+        )
+        _ensure_column(
+            con,
+            "tenants",
+            "brand_accent",
+            "brand_accent TEXT NOT NULL DEFAULT '#2f5c45'",
+        )
+        con.execute(
+            """CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_custom_domain
+               ON tenants(custom_domain) WHERE custom_domain IS NOT NULL"""
+        )
+
+
+def _ensure_column(con: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+    columns = {row["name"] for row in con.execute(f"PRAGMA table_info({table})")}
+    if column not in columns:
+        con.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
 
 
 def tenant_by_slug(slug: str) -> dict | None:
@@ -201,6 +231,18 @@ def tenant_by_subscription(subscription_id: str) -> dict | None:
         row = con.execute(
             "SELECT * FROM tenants WHERE stripe_subscription_id=?", (subscription_id,)
         ).fetchone()
+    return _row_to_dict(row)
+
+
+def tenant_by_custom_domain(host: str) -> dict | None:
+    host = _host_only(host)
+    if not host:
+        return None
+    try:
+        with control_connect() as con:
+            row = con.execute("SELECT * FROM tenants WHERE custom_domain=?", (host,)).fetchone()
+    except sqlite3.OperationalError:
+        return None
     return _row_to_dict(row)
 
 
@@ -230,6 +272,37 @@ def validate_slug(slug: str) -> str:
     if slug in _RESERVED_SLUGS:
         raise ValueError("That studio URL is reserved.")
     return slug
+
+
+def validate_brand_accent(value: str) -> str:
+    value = (value or _DEFAULT_BRAND_ACCENT).strip()
+    if not _HEX_COLOR_RE.match(value):
+        raise ValueError("Brand accent must be a hex color like #2f5c45.")
+    return value.lower()
+
+
+def normalize_custom_domain(value: str | None) -> str | None:
+    raw = (value or "").strip().lower()
+    if not raw:
+        return None
+    if "://" in raw:
+        parsed = urlsplit(raw)
+        if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+            raise ValueError("Use only the custom domain, not a full URL path.")
+        raw = parsed.netloc
+    if "/" in raw or "?" in raw or "#" in raw:
+        raise ValueError("Use only the custom domain, not a URL path.")
+    host = _host_only(raw)
+    root = _root_host_only()
+    marketing = _host_only(config.SAAS_MARKETING_HOST)
+    if host in {root, marketing, f"www.{root}"} or host.endswith(f".{root}"):
+        raise ValueError("Use the assigned Mise subdomain for hosted Mise domains.")
+    labels = host.split(".")
+    if len(labels) < 2 or len(host) > 253:
+        raise ValueError("Use a real domain such as studio.example.com.")
+    if any(not _DOMAIN_LABEL_RE.match(label) for label in labels):
+        raise ValueError("Custom domain contains invalid characters.")
+    return host
 
 
 def create_tenant(slug: str, studio_name: str, owner_email: str, password: str) -> dict:
@@ -269,6 +342,50 @@ def create_tenant(slug: str, studio_name: str, owner_email: str, password: str) 
     return tenant
 
 
+def update_tenant_account(
+    tenant_id: int,
+    *,
+    studio_name: str,
+    owner_email: str,
+    custom_domain: str | None,
+    brand_accent: str,
+) -> dict:
+    studio_name = (studio_name or "").strip()
+    owner_email = (owner_email or "").strip().lower()
+    if not studio_name:
+        raise ValueError("Studio name is required.")
+    if "@" not in owner_email:
+        raise ValueError("A valid email is required.")
+    custom_domain = normalize_custom_domain(custom_domain)
+    brand_accent = validate_brand_accent(brand_accent)
+    current = tenant_by_id(tenant_id)
+    if not current:
+        raise ValueError("Tenant not found.")
+    existing = tenant_by_custom_domain(custom_domain) if custom_domain else None
+    if existing and existing["id"] != tenant_id:
+        raise ValueError("That custom domain is already connected to another studio.")
+    verified_at = current.get("custom_domain_verified_at")
+    if custom_domain != current.get("custom_domain"):
+        verified_at = None
+    with control_connect() as con:
+        con.execute(
+            """UPDATE tenants
+               SET studio_name=?, owner_email=?, custom_domain=?,
+                   custom_domain_verified_at=?, brand_accent=?, updated_at=?
+               WHERE id=?""",
+            (
+                studio_name,
+                owner_email,
+                custom_domain,
+                verified_at,
+                brand_accent,
+                _iso(_now()),
+                tenant_id,
+            ),
+        )
+    return tenant_by_id(tenant_id)
+
+
 def update_tenant_billing(
     tenant_id: int,
     *,
@@ -290,6 +407,21 @@ def update_tenant_billing(
     params.append(tenant_id)
     with control_connect() as con:
         con.execute(f"UPDATE tenants SET {', '.join(updates)} WHERE id=?", params)
+
+
+def mark_custom_domain_verified(tenant: dict, host: str) -> dict:
+    host = _host_only(host)
+    if not tenant.get("custom_domain") or tenant["custom_domain"] != host:
+        return tenant
+    if tenant.get("custom_domain_verified_at"):
+        return tenant
+    with control_connect() as con:
+        con.execute(
+            "UPDATE tenants SET custom_domain_verified_at=?, updated_at=? WHERE id=?",
+            (_iso(_now()), _iso(_now()), tenant["id"]),
+        )
+    updated = tenant_by_id(tenant["id"])
+    return updated or tenant
 
 
 def ensure_tenant_database(tenant: dict | None) -> None:
@@ -350,6 +482,7 @@ def _platform_path(path: str) -> bool:
 def _billing_allowed_path(path: str) -> bool:
     return (
         path.startswith("/admin/billing")
+        or path.startswith("/admin/account")
         or path in {"/admin/login", "/admin/logout", "/healthz"}
         or path.startswith("/static/")
         or path in {"/webhooks/stripe", "/webhooks/stripe/saas"}
@@ -377,6 +510,7 @@ async def tenant_middleware(request: Request, call_next):
             )
         return JSONResponse({"detail": "unknown tenant"}, status_code=404)
 
+    tenant = mark_custom_domain_verified(tenant, request.headers.get("host", ""))
     with tenant_runtime(tenant):
         request.state.tenant = dict(tenant)
         if not tenant_has_access(tenant) and not _billing_allowed_path(path):
@@ -526,15 +660,84 @@ async def billing(request: Request):
 async def billing_portal(request: Request):
     security.require_admin(request)
     tenant = current_tenant()
+    return_url = f"{urls.public_base_url(request)}/admin/billing"
+    portal_url = create_billing_portal_url(tenant, return_url)
+    return RedirectResponse(portal_url, status_code=303)
+
+
+def create_billing_portal_url(tenant: dict | None, return_url: str) -> str:
+    if not config.STRIPE_SECRET_KEY:
+        raise HTTPException(status_code=503, detail="stripe is not configured")
     if not tenant or not tenant.get("stripe_customer_id"):
         raise HTTPException(status_code=503, detail="billing portal not available yet")
-    stripe_mod = _stripe()
-    session = stripe_mod.billing_portal.Session.create(
+    session = _stripe().billing_portal.Session.create(
         api_key=config.STRIPE_SECRET_KEY,
         customer=tenant["stripe_customer_id"],
-        return_url=tenant_url(tenant["slug"], "/admin/billing"),
+        return_url=return_url,
     )
-    return RedirectResponse(session.url, status_code=303)
+    return session.url
+
+
+@router.get("/admin/account", response_class=HTMLResponse)
+async def account(request: Request):
+    security.require_admin(request)
+    tenant = current_tenant()
+    if not tenant:
+        raise HTTPException(status_code=404)
+    return templates.TemplateResponse(
+        request,
+        "admin/saas_account.html",
+        {
+            "tenant": tenant,
+            "error": None,
+            "saved": request.query_params.get("saved") == "1",
+            "root_domain": _root_domain(),
+        },
+    )
+
+
+@router.post("/admin/account", response_class=HTMLResponse)
+async def update_account(
+    request: Request,
+    studio_name: str = Form(...),
+    owner_email: str = Form(...),
+    custom_domain: str = Form(""),
+    brand_accent: str = Form(_DEFAULT_BRAND_ACCENT),
+):
+    security.require_admin(request)
+    tenant = current_tenant()
+    if not tenant:
+        raise HTTPException(status_code=404)
+    try:
+        update_tenant_account(
+            tenant["id"],
+            studio_name=studio_name,
+            owner_email=owner_email,
+            custom_domain=custom_domain,
+            brand_accent=brand_accent,
+        )
+    except ValueError as exc:
+        values = dict(tenant)
+        values.update(
+            {
+                "studio_name": studio_name,
+                "owner_email": owner_email,
+                "custom_domain": custom_domain,
+                "brand_accent": brand_accent,
+            }
+        )
+        return templates.TemplateResponse(
+            request,
+            "admin/saas_account.html",
+            {
+                "tenant": values,
+                "error": str(exc),
+                "saved": False,
+                "root_domain": _root_domain(),
+            },
+            status_code=400,
+        )
+    return RedirectResponse("/admin/account?saved=1", status_code=303)
 
 
 @router.get("/admin/onboarding", response_class=HTMLResponse)
