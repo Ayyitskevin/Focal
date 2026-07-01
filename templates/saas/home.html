@@ -9,6 +9,7 @@
   .ms-nav { height:64px; display:flex; align-items:center; justify-content:space-between; padding:0 clamp(18px,4vw,56px); border-bottom:1px solid var(--line); }
   .ms-brand { font-weight:800; letter-spacing:0; font-size:1.1rem; }
   .ms-nav a { color:var(--ink); text-decoration:none; font-weight:700; }
+  .ms-navlinks { display:flex; align-items:center; gap:18px; }
   .ms-hero { flex:1; display:grid; grid-template-columns:minmax(0,1.1fr) minmax(300px,.9fr); gap:40px; align-items:center; padding:clamp(34px,7vw,86px) clamp(18px,4vw,56px); }
   .ms-copy { max-width:720px; }
   .ms-kicker { color:var(--leaf); font-weight:800; text-transform:uppercase; font-size:.78rem; letter-spacing:0; }
@@ -43,7 +44,10 @@
 <main class="ms-wrap">
   <header class="ms-nav">
     <div class="ms-brand">Mise</div>
-    <a href="/pricing">$20/month</a>
+    <nav class="ms-navlinks" aria-label="Mise">
+      <a href="/demo">Demo</a>
+      <a href="/pricing">$20/month</a>
+    </nav>
   </header>
   <section class="ms-hero">
     <div class="ms-copy">
@@ -52,7 +56,7 @@
       <p class="ms-lede">PIN-gated galleries, proposals, contracts, invoices, and client portals in one quiet workspace. No setup, no plugin stack, no tier maze. Just $20/month after a 14-day trial.</p>
       <div class="ms-actions">
         <a class="ms-btn" href="/pricing">Start free trial</a>
-        <a class="ms-btn secondary" href="#included">See included tools</a>
+        <a class="ms-btn secondary" href="/demo">View demo tour</a>
       </div>
       <div class="ms-proof">
         <div><strong>Flat price.</strong><br>$20/month, cancel anytime.</div>

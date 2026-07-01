@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block robots %}<meta name="robots" content="index, follow">{% endblock %}
+{% block title %}Mise Demo - F&B and Wedding Client Studio{% endblock %}
+{% block head %}
+<style>
+  :root { --ink:#171717; --muted:#62645f; --line:#d8d4ca; --paper:#faf7f0; --leaf:#2f5c45; --gold:#b98225; }
+  body { margin:0; background:var(--paper); color:var(--ink); font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .dm-nav { height:64px; display:flex; align-items:center; justify-content:space-between; gap:18px; padding:0 clamp(18px,4vw,56px); border-bottom:1px solid var(--line); }
+  .dm-nav a { color:var(--ink); text-decoration:none; font-weight:800; }
+  .dm-wrap { padding:clamp(28px,6vw,74px) clamp(18px,4vw,56px); }
+  .dm-hero { max-width:860px; margin-bottom:34px; }
+  .dm-kicker { color:var(--leaf); text-transform:uppercase; font-weight:900; font-size:.78rem; }
+  h1 { font-size:clamp(2.2rem,5vw,4.6rem); line-height:1; margin:.6rem 0 1rem; letter-spacing:0; }
+  .dm-lede { color:var(--muted); font-size:1.15rem; line-height:1.55; max-width:720px; }
+  .dm-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; }
+  .dm-card { background:#fffdf7; border:1px solid var(--line); border-radius:8px; padding:22px; box-shadow:0 16px 44px rgba(35,28,18,.08); }
+  .dm-card h2 { margin:.2rem 0 .7rem; font-size:1.45rem; }
+  .dm-card p { color:var(--muted); line-height:1.5; }
+  .dm-flow { display:grid; gap:10px; margin-top:18px; }
+  .dm-step { display:flex; gap:10px; align-items:flex-start; border:1px solid #e6dfcf; background:white; border-radius:8px; padding:11px; }
+  .dm-num { width:26px; height:26px; flex:none; display:grid; place-items:center; border-radius:999px; background:var(--leaf); color:white; font-weight:900; font-size:.78rem; }
+  .dm-step b { display:block; margin-bottom:2px; }
+  .dm-step span { color:var(--muted); }
+  .dm-actions { display:flex; gap:12px; flex-wrap:wrap; margin-top:28px; }
+  .dm-btn { min-height:46px; display:inline-flex; align-items:center; justify-content:center; padding:0 18px; border-radius:8px; background:var(--leaf); color:white; text-decoration:none; font-weight:900; }
+  .dm-btn.secondary { background:transparent; color:var(--ink); border:1px solid var(--line); }
+  @media (max-width: 820px) { .dm-grid { grid-template-columns:1fr; } }
+</style>
+{% endblock %}
+{% block content %}
+<header class="dm-nav">
+  <a href="/">Mise</a>
+  <a href="/pricing">$20/month</a>
+</header>
+<main class="dm-wrap">
+  <section class="dm-hero">
+    <div class="dm-kicker">Demo tour</div>
+    <h1>Two real solo-creative workflows, ready on day one.</h1>
+    <p class="dm-lede">Mise starts with simple F&B and wedding workflows so a new trial immediately feels like a working studio, not an empty database.</p>
+    <div class="dm-actions">
+      <a class="dm-btn" href="/pricing">Start 14-day trial</a>
+      <a class="dm-btn secondary" href="/">Back to overview</a>
+    </div>
+  </section>
+  <section class="dm-grid">
+    <article class="dm-card">
+      <div class="dm-kicker">Food & Beverage</div>
+      <h2>Restaurant content day</h2>
+      <p>For chefs, restaurants, bars, and product shoots where the work moves from package inquiry to usage-aware delivery.</p>
+      <div class="dm-flow">
+        <div class="dm-step"><span class="dm-num">1</span><div><b>Package inquiry</b><span>Public content-day offer creates a lead with budget and shoot notes.</span></div></div>
+        <div class="dm-step"><span class="dm-num">2</span><div><b>Proposal and invoice</b><span>Quote, contract, and Stripe invoice stay attached to the project.</span></div></div>
+        <div class="dm-step"><span class="dm-num">3</span><div><b>Usage-ready delivery</b><span>Private gallery, download access, and portal notes keep client assets organized.</span></div></div>
+      </div>
+    </article>
+    <article class="dm-card">
+      <div class="dm-kicker">Wedding</div>
+      <h2>Wedding story collection</h2>
+      <p>For wedding photographers who need a calm sales path and a polished delivery experience without a heavyweight CRM.</p>
+      <div class="dm-flow">
+        <div class="dm-step"><span class="dm-num">1</span><div><b>Inquiry to proposal</b><span>Preset forms capture date, venue, coverage, and collection preference.</span></div></div>
+        <div class="dm-step"><span class="dm-num">2</span><div><b>Contract and retainer</b><span>Signed agreement, retainer invoice, and project timeline sit together.</span></div></div>
+        <div class="dm-step"><span class="dm-num">3</span><div><b>Proofing gallery</b><span>PIN-gated gallery, favorites, comments, and delivery status are client-ready.</span></div></div>
+      </div>
+    </article>
+  </section>
+</main>
+{% endblock %}

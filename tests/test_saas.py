@@ -58,6 +58,7 @@ def test_tenant_slug_from_host(monkeypatch):
     assert saas.tenant_slug_from_host("too.deep.mise.test") is None
     assert saas._platform_path("/webhooks/stripe")
     assert saas._platform_path("/webhooks/stripe/saas")
+    assert saas._platform_path("/demo")
     assert saas._platform_path("/admin/login")
     assert saas._platform_path("/admin/saas")
 
