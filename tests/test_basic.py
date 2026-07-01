@@ -30,17 +30,25 @@ def test_healthz(client):
 
 
 @pytest.mark.unit
-def test_security_headers(client):
+def test_security_headers(client, monkeypatch):
+    from app import config
+
     # clickjacking + MIME-sniffing protection on every response (R18)
     r = client.get("/healthz")
     assert r.headers["x-frame-options"] == "DENY"
     assert r.headers["x-content-type-options"] == "nosniff"
     assert r.headers["referrer-policy"] == "same-origin"
+    assert r.headers["permissions-policy"] == "camera=(), microphone=(), geolocation=(), payment=()"
     assert r.headers["x-robots-tag"] == "noindex, nofollow"
     # marketing home stays indexable but keeps the hardening headers
     home = client.get("/")
     assert "x-robots-tag" not in home.headers
     assert home.headers["x-frame-options"] == "DENY"
+    assert "strict-transport-security" not in r.headers
+
+    monkeypatch.setattr(config, "COOKIE_SECURE", True)
+    secure = client.get("/healthz")
+    assert secure.headers["strict-transport-security"] == "max-age=31536000; includeSubDomains"
 
 
 @pytest.mark.unit

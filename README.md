@@ -91,6 +91,8 @@ python scripts/smoke-saas-hosted.py
 Detailed deployment notes live in [docs/SAAS-DEPLOYMENT.md](docs/SAAS-DEPLOYMENT.md).
 Launch copy, the 5-post X thread, and the 7-day launch checklist live in
 [docs/LAUNCH-KIT.md](docs/LAUNCH-KIT.md).
+The beta invite email and security checklist live in
+[docs/BETA-LAUNCH.md](docs/BETA-LAUNCH.md).
 
 ## Operator Workflow
 
@@ -146,5 +148,7 @@ Public launch assets:
 
 - landing-page offer and value proof in this README
 - one-command hosted deployment shape in `docs/SAAS-DEPLOYMENT.md`
+- production launch helper in `scripts/launch-hosted-production.sh`
 - 5-post X launch thread in `docs/LAUNCH-KIT.md`
 - prioritized 7-day launch checklist in `docs/LAUNCH-KIT.md`
+- beta invitation email in `docs/BETA-LAUNCH.md`

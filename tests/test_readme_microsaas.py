@@ -12,6 +12,8 @@ def test_readme_keeps_flat_hosted_positioning():
         "/admin/saas",
         "/demo",
         "docs/LAUNCH-KIT.md",
+        "docs/BETA-LAUNCH.md",
+        "scripts/launch-hosted-production.sh",
         "MISE_SAAS_MODE=true",
         "2000",
     ]
@@ -30,6 +32,25 @@ def test_launch_kit_keeps_public_launch_assets():
         "5-Post X Launch Thread",
         "Prioritized 7-Day Launch Checklist",
         "python scripts/hosted-preflight.py",
+        "scripts/launch-hosted-production.sh",
     ]
     for phrase in required:
         assert phrase in text
+
+
+def test_beta_launch_docs_keep_invite_and_security_checklist():
+    text = Path("docs/BETA-LAUNCH.md").read_text()
+    script = Path("scripts/launch-hosted-production.sh").read_text()
+
+    required = [
+        "Security & Pre-Launch Checklist",
+        "Beta Invitation Email",
+        "5-10 trusted photographers",
+        "MISE_COOKIE_SECURE=true",
+        "exactly `$20/month`",
+        "python scripts/hosted-preflight.py",
+    ]
+    for phrase in required:
+        assert phrase in text
+    assert "docker compose" in script
+    assert "python scripts/hosted-preflight.py" in script

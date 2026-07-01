@@ -2,6 +2,31 @@
 {% block robots %}<meta name="robots" content="index, follow">{% endblock %}
 {% block title %}Mise - Hosted client studio for solo creatives{% endblock %}
 {% block head %}
+<meta name="description" content="Hosted client studio for solo photographers and videographers: galleries, proposals, contracts, invoices, portals, and workflow reminders for exactly $20/month.">
+<link rel="canonical" href="{{ canonical_url }}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Mise">
+<meta property="og:title" content="Mise - Hosted client studio for solo creatives">
+<meta property="og:description" content="Professional client studio, hosted and maintained for you, only $20/month after a 14-day trial.">
+<meta property="og:url" content="{{ canonical_url }}">
+<meta name="twitter:card" content="summary">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Mise",
+  "applicationCategory": "BusinessApplication",
+  "operatingSystem": "Web",
+  "description": "Hosted client studio for solo photographers and videographers.",
+  "offers": {
+    "@type": "Offer",
+    "price": "20",
+    "priceCurrency": "USD",
+    "availability": "https://schema.org/InStock",
+    "url": "{{ pricing_url }}"
+  }
+}
+</script>
 <style>
   :root { --ink:#171717; --muted:#5f625d; --line:#d8d4ca; --paper:#faf7f0; --leaf:#2f5c45; --gold:#b98225; }
   body { margin:0; background:var(--paper); color:var(--ink); font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }

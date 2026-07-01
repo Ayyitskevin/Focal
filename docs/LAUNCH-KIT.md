@@ -42,7 +42,7 @@ After `.env` contains the hosted values from `.env.example`, launch the hosted
 instance with:
 
 ```bash
-MISE_CADDY_SITE_ADDRESS='mise.example.com, *.mise.example.com' docker compose up --build -d
+MISE_CADDY_SITE_ADDRESS='mise.example.com, *.mise.example.com' bash scripts/launch-hosted-production.sh
 ```
 
 Then run the launch gate:
@@ -55,6 +55,8 @@ python scripts/smoke-saas-hosted.py
 The preflight should return `READY` with `0 fail`. A warning for outbound email
 is acceptable only before public launch; configure SMTP before inviting real
 customers.
+
+The beta invite email and security checklist live in [docs/BETA-LAUNCH.md](BETA-LAUNCH.md).
 
 ## 5-Post X Launch Thread
 
