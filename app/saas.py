@@ -258,6 +258,9 @@ def migrate_control() -> None:
         # the operator's only usage signal (updated_at tracks billing writes and the
         # launch score tracks setup completeness; neither says "gone quiet").
         _ensure_column(con, "tenants", "last_login_at", "last_login_at TEXT")
+        # Operator notes (Batch A4): free-text per studio, operator-only — feedback
+        # that arrives by email/DM finally has a home against the tenant it came from.
+        _ensure_column(con, "tenants", "notes", "notes TEXT")
         # Offboarding tombstone (ADR 0051): set when the owner deletes the studio; the
         # slug is renamed so the address frees up, and the row keeps billing linkage.
         _ensure_column(con, "tenants", "deleted_at", "deleted_at TEXT")
@@ -724,6 +727,7 @@ def operator_tenant_export_csv(overview: dict | None = None) -> str:
         "created_at",
         "updated_at",
         "last_login_at",
+        "notes",
     ]
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
@@ -758,6 +762,7 @@ def operator_tenant_export_csv(overview: dict | None = None) -> str:
                 "created_at": tenant["created_at"],
                 "updated_at": tenant.get("updated_at") or "",
                 "last_login_at": tenant.get("last_login_at") or "",
+                "notes": tenant.get("notes") or "",
             }
         )
     return output.getvalue()
@@ -2061,6 +2066,24 @@ async def operator_billing_status(request: Request, tenant_id: int, plan_status:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return RedirectResponse("/admin/saas?billing=1", status_code=303)
+
+
+NOTES_MAX_CHARS = 4000
+
+
+@router.post("/admin/saas/{tenant_id}/notes")
+async def operator_tenant_notes(request: Request, tenant_id: int, notes: str = Form("")):
+    """Operator-only per-studio notes (Batch A4) — where emailed/DM'd feedback and
+    support context get recorded against the tenant. Empty clears."""
+    require_platform_admin(request)
+    with control_connect() as con:
+        cur = con.execute(
+            "UPDATE tenants SET notes=? WHERE id=?",
+            (notes.strip()[:NOTES_MAX_CHARS] or None, tenant_id),
+        )
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404)
+    return RedirectResponse("/admin/saas#tenants", status_code=303)
 
 
 @router.post("/admin/saas/{tenant_id}/domain/verify")
