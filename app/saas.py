@@ -237,6 +237,9 @@ def migrate_control() -> None:
             "client_stripe_webhook_secret_prev",
             "client_stripe_webhook_secret_prev TEXT",
         )
+        # One-shot trial-ending reminder stamp (ADR 0060): set when the platform has
+        # emailed the owner that a card-less trial is about to end.
+        _ensure_column(con, "tenants", "trial_reminder_sent_at", "trial_reminder_sent_at TEXT")
         # Offboarding tombstone (ADR 0051): set when the owner deletes the studio; the
         # slug is renamed so the address frees up, and the row keeps billing linkage.
         _ensure_column(con, "tenants", "deleted_at", "deleted_at TEXT")
@@ -368,6 +371,8 @@ def operator_tenant_overview() -> dict:
         "trials_at_risk": 0,
         "launch_score_total": 0,
         "average_launch_score": 0,
+        "card_on_file": 0,
+        "no_card_trials": 0,
     }
     attention_statuses = {
         "past_due",
@@ -389,9 +394,16 @@ def operator_tenant_overview() -> dict:
         source_counts[source] = source_counts.get(source, 0) + 1
         if launch["complete"]:
             counts["launch_ready"] += 1
+        has_card = bool(tenant.get("stripe_customer_id"))
+        if has_card:
+            counts["card_on_file"] += 1
         if tenant["plan_status"] == "trialing":
             counts["trialing"] += 1
             counts["trial_pipeline_cents"] += config.SAAS_PRICE_CENTS
+            if not has_card:
+                # Abandoned-checkout trials: they look healthy until day 14, then
+                # hit the paywall — the single biggest conversion leak (ADR 0056/0060).
+                counts["no_card_trials"] += 1
             if not launch["complete"] and (
                 billing["tone"] == "block"
                 or billing["trial_days_left"] is None
@@ -417,6 +429,7 @@ def operator_tenant_overview() -> dict:
                 "account_url": tenant_url(tenant["slug"], "/admin/account"),
                 "data_path": str(tenant_data_path(tenant["slug"])),
                 "db_exists": tenant_db_path(tenant["slug"]).exists(),
+                "card_on_file": bool(tenant.get("stripe_customer_id")),
             }
         )
     counts["support_queue"] = counts["attention"] + counts["custom_domains_pending"]
@@ -1435,6 +1448,68 @@ async def start_trial(
         return RedirectResponse(session.url, status_code=303, background=welcome)
 
     return RedirectResponse(success_url, status_code=303, background=welcome)
+
+
+TRIAL_REMINDER_DAYS = 3
+
+
+def trial_reminder_sweep() -> int:
+    """Email owners whose CARD-LESS trial ends within TRIAL_REMINDER_DAYS — once.
+
+    Platform transactional mail to the OWNER (same class as welcome/reset, ADR 0053)
+    — deliberately sent OUTSIDE tenant_runtime so it carries platform identity, and
+    deliberately NOT client-facing, so the no-auto-send doctrine is untouched. Targets
+    only tenants with no stripe_customer_id: trials with a card convert on their own;
+    card-less ones hit the day-14 paywall (ADR 0056) and this is their nudge toward it.
+    The stamp is written only after a successful send; a failed send retries next sweep.
+    """
+    if not (config.SAAS_MODE and mailer.configured()):
+        return 0
+    with control_connect() as con:
+        rows = [
+            dict(r)
+            for r in con.execute(
+                """SELECT * FROM tenants
+                   WHERE plan_status='trialing' AND deleted_at IS NULL
+                     AND stripe_customer_id IS NULL
+                     AND trial_reminder_sent_at IS NULL"""
+            ).fetchall()
+        ]
+    sent = 0
+    now = _now()
+    for tenant in rows:
+        ends = _parse_iso(tenant.get("trial_ends_at"))
+        if not ends or ends < now or (ends - now).days > TRIAL_REMINDER_DAYS:
+            continue
+        days_left = max(1, (ends - now).days)
+        billing_url = tenant_url(tenant["slug"], "/admin/billing")
+        body = (
+            f"Your {tenant['studio_name']} trial ends in about {days_left} "
+            f"day{'s' if days_left != 1 else ''}.\n\n"
+            f"To keep the studio live at $20/month, start the subscription here:\n"
+            f"{billing_url}\n\n"
+            "Not ready? You can export your entire studio from the same page anytime "
+            "- it's your data either way.\n\n"
+            f"Questions? {platform_url('/support')}\n"
+        )
+        try:
+            mailer.send(
+                tenant["owner_email"],
+                f"Your {tenant['studio_name']} trial ends soon",
+                body,
+            )
+        except Exception:
+            log.exception("trial reminder failed for %s (will retry next sweep)", tenant["slug"])
+            continue
+        with control_connect() as con:
+            con.execute(
+                "UPDATE tenants SET trial_reminder_sent_at=? WHERE id=?",
+                (_iso(now), tenant["id"]),
+            )
+        sent += 1
+    if sent:
+        log.info("trial reminders sent: %d", sent)
+    return sent
 
 
 def _remaining_trial_days(tenant: dict) -> int:

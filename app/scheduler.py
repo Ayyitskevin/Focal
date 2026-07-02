@@ -39,6 +39,12 @@ def _loop() -> None:
         if config.SAAS_MODE:
             from . import saas
 
+            try:
+                # Platform-level lifecycle mail (ADR 0060) — outside tenant_runtime
+                # on purpose: it must carry platform identity, not a studio's.
+                saas.trial_reminder_sweep()
+            except Exception:
+                log.exception("trial reminder sweep failed")
             for tenant in saas.list_tenants(billable_only=True):
                 try:
                     with saas.tenant_runtime(tenant):

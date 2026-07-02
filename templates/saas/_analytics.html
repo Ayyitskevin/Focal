@@ -1,0 +1,5 @@
+{# Funnel analytics for the SaaS marketing pages ONLY (ADR 0060) — never included
+   on tenant admin or client-facing surfaces (no tracking inside studios). #}
+{% if plausible_domain %}
+<script defer src="https://plausible.io/js/script.js" data-domain="{{ plausible_domain }}"></script>
+{% endif %}

@@ -64,6 +64,7 @@ states context, the decision, consequences, measured reopen criteria, and altern
 | [0057](0057-hosted-backups-and-ci-hosted-suite.md) | Hosted backups (compose sidecar: integrity-checked per-tenant DB snapshots + retention + optional rclone off-site of snapshots and media + heartbeat marker wired to the ops alarm + restore drill) and the hosted test suite joins the CI unit gate | Accepted |
 | [0058](0058-proxy-aware-client-ip.md) | Proxy-aware client IP: forwarded headers trusted only from our own ingress (MISE_TRUSTED_PROXY_CIDRS; CF-Connecting-IP, then Caddy's rightmost XFF) — fixes globally-shared rate limits/PIN lockout behind the compose proxy without reintroducing spoofing | Accepted |
 | [0059](0059-cloudflare-fronted-tls.md) | Wildcard TLS via Cloudflare fronting (operator's choice): CF edge holds the *.domain cert, origin serves Full-strict on a 15-year Origin CA cert (Caddyfile.cloudflare + certs mount); custom tenant domains deferred to Cloudflare for SaaS post-beta | Accepted |
+| [0060](0060-launch-playbook-and-beta-instrumentation.md) | Launch playbook + beta instrumentation: the lifecycle rehearsal as a CI test, agent-executable Phase 3–5 playbook (LAUNCH-PLAYBOOK.md), marketing-only funnel analytics, card-on-file visibility, one-shot card-less trial-ending reminder | Accepted |
 
 See also the operator runbook [`../MISE-SOLO-STUDIO-OS-RUNBOOK.md`](../MISE-SOLO-STUDIO-OS-RUNBOOK.md)
 (how to run it day to day), [`../MISE-SOLO-STUDIO-OS.md`](../MISE-SOLO-STUDIO-OS.md),

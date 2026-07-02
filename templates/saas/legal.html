@@ -2,6 +2,7 @@
 {% block robots %}<meta name="robots" content="index, follow">{% endblock %}
 {% block title %}{{ doc_title }} · Mise{% endblock %}
 {% block head %}
+{% include "saas/_analytics.html" %}
 <meta name="description" content="{{ doc_title }} for Mise, the hosted client studio for solo photographers and videographers.">
 {% endblock %}
 {% block content %}
