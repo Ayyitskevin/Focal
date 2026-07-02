@@ -9,6 +9,9 @@ from starlette.requests import Request
 
 from app import config, db, features, passwords, saas, saas_demo, saas_preflight, security
 
+# Fast, hermetic (tmp-path DBs, no network): run in the CI unit gate.
+pytestmark = pytest.mark.unit
+
 
 def _configure_saas(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "SAAS_MODE", True)

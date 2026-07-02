@@ -7,7 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     MISE_DATA_DIR=/data
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl ffmpeg \
+    && apt-get install -y --no-install-recommends curl ffmpeg rclone \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -13,6 +13,24 @@ services:
     volumes:
       - mise-data:/data
 
+  backup:
+    # Hosted backups (ADR 0057): daily consistent snapshots of every tenant DB +
+    # the control DB, optional rclone off-site sync of snapshots + media. Reuses
+    # the app image (Python sqlite3 backup API + rclone are in it).
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MISE_DATA_DIR: /data
+      MISE_SAAS_CONTROL_DB_PATH: /data/saas-control.db
+      MISE_SAAS_TENANT_DATA_DIR: /data/tenants
+    volumes:
+      - mise-data:/data
+    entrypoint: ["python", "scripts/hosted-backup.py", "--loop"]
+    healthcheck:
+      disable: true
+
   caddy:
     image: caddy:2.8
     restart: unless-stopped
