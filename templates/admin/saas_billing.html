@@ -79,6 +79,9 @@
     <input id="del-slug" type="text" name="confirm_slug" required autocomplete="off" placeholder="{{ tenant.slug }}">
     <label for="del-pw">Your password</label>
     <input id="del-pw" type="password" name="password" required autocomplete="current-password">
+    <label for="del-reason">What made you leave? <span class="muted">(optional — read by a person)</span></label>
+    <textarea id="del-reason" name="reason" rows="2" maxlength="2000"
+              placeholder="Missing feature, price, switched tools, just trying it out&hellip;"></textarea>
     <button type="submit" class="danger">Delete studio &amp; cancel billing</button>
   </form>
 </section>

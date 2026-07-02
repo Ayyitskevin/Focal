@@ -2144,7 +2144,12 @@ async def export_studio(request: Request):
 
 
 @router.post("/admin/delete-studio")
-async def delete_studio(request: Request, confirm_slug: str = Form(...), password: str = Form(...)):
+async def delete_studio(
+    request: Request,
+    confirm_slug: str = Form(...),
+    password: str = Form(...),
+    reason: str = Form(""),
+):
     security.require_admin(request)
     tenant = current_tenant()
     if not tenant:
@@ -2153,6 +2158,18 @@ async def delete_studio(request: Request, confirm_slug: str = Form(...), passwor
         return RedirectResponse("/admin/billing?delete_error=slug", status_code=303)
     if not security.check_admin_password(password):
         return RedirectResponse("/admin/billing?delete_error=password", status_code=303)
+    if reason.strip():
+        # Exit note (Batch C4): the single most valuable feedback a beta produces —
+        # why someone left — used to evaporate with the studio. Recorded BEFORE the
+        # tombstone (the tenants row survives deletion, so the feedback join holds),
+        # landing in the operator console's feedback panel like any other note.
+        record_tenant_feedback(tenant["id"], "studio-delete", reason)
+        from . import alerts  # lazy: alerts→features would cycle at import time
+
+        preview = reason.strip()[:300]
+        alerts.notify(
+            f"Studio deleted: {tenant['studio_name']} ({tenant['slug']}) — why: {preview}"
+        )
     delete_tenant_studio(tenant)
     resp = RedirectResponse(platform_url("/pricing?deleted=1"), status_code=303)
     security.delete_session_cookie(resp, security.ADMIN_COOKIE)
