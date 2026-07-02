@@ -90,9 +90,15 @@ def _parse_iso(value: str | None) -> datetime | None:
     if not value:
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
+    # Two writers share these columns: _iso() emits offset-aware "…Z", but SQLite's
+    # datetime('now') DEFAULTs (created_at, updated_at) emit NAIVE UTC strings.
+    # Comparing a naive parse against the aware _now() raises TypeError, so treat
+    # naive as the UTC it actually is (Batch C1 — the win-back sweep reads
+    # updated_at and would have crashed on every canceled tenant without this).
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def _row_to_dict(row) -> dict | None:
@@ -261,6 +267,9 @@ def migrate_control() -> None:
         # Operator notes (Batch A4): free-text per studio, operator-only — feedback
         # that arrives by email/DM finally has a home against the tenant it came from.
         _ensure_column(con, "tenants", "notes", "notes TEXT")
+        # One-shot win-back stamp (Batch C1): set when the platform has emailed a
+        # lapsed-trial or canceled owner their single come-back note.
+        _ensure_column(con, "tenants", "winback_sent_at", "winback_sent_at TEXT")
         # Offboarding tombstone (ADR 0051): set when the owner deletes the studio; the
         # slug is renamed so the address frees up, and the row keeps billing linkage.
         _ensure_column(con, "tenants", "deleted_at", "deleted_at TEXT")
@@ -1658,6 +1667,78 @@ def trial_reminder_sweep() -> int:
         sent += 1
     if sent:
         log.info("trial reminders sent: %d", sent)
+    return sent
+
+
+# Days after a trial lapses (or a cancel lands) before the single win-back email —
+# far enough from the paywall moment to not read as a dunning notice (Batch C1).
+WINBACK_DELAY_DAYS = 3
+
+
+def winback_sweep() -> int:
+    """One respectful come-back email to lapsed trials and canceled tenants — once.
+
+    The trial reminder fires only PRE-expiry (and is itself one-shot), so before
+    this sweep a tenant whose trial lapsed got no follow-up ever, and canceled
+    subscribers got none at all (launch-gap audit, conversion dimension). Same
+    doctrine as trial_reminder_sweep: platform lifecycle mail to the OWNER,
+    outside tenant_runtime, never client-facing, stamped only after a successful
+    send so failures retry next sweep. One email per tenant, ever — this is a
+    door held open, not a drip campaign.
+    """
+    if not (config.SAAS_MODE and mailer.configured()):
+        return 0
+    with control_connect() as con:
+        rows = [
+            dict(r)
+            for r in con.execute(
+                """SELECT * FROM tenants
+                   WHERE plan_status IN ('trialing','canceled')
+                     AND deleted_at IS NULL AND winback_sent_at IS NULL"""
+            ).fetchall()
+        ]
+    sent = 0
+    now = _now()
+    for tenant in rows:
+        if tenant["plan_status"] == "trialing":
+            # Only trials that actually LAPSED (paywall reached, never converted).
+            ends = _parse_iso(tenant.get("trial_ends_at"))
+            if not ends or (now - ends).days < WINBACK_DELAY_DAYS:
+                continue
+            what = "trial ended"
+        else:
+            # Canceled: measured from the status flip (updated_at moves on it).
+            flipped = _parse_iso(tenant.get("updated_at")) or _parse_iso(tenant["created_at"])
+            if not flipped or (now - flipped).days < WINBACK_DELAY_DAYS:
+                continue
+            what = "subscription ended"
+        billing_url = tenant_url(tenant["slug"], "/admin/billing")
+        body = (
+            f"Your {tenant['studio_name']} {what} a few days ago — the studio is still "
+            "here, data intact, exactly as you left it.\n\n"
+            f"Pick it back up anytime ($20/month, restart in one click):\n{billing_url}\n\n"
+            "Rather take your work with you? The same page exports your entire studio — "
+            "every gallery, contract, and invoice. It's your data either way.\n\n"
+            "And if something was missing or confusing, reply to this email — during the "
+            "beta every note gets read and answered by a person.\n\n"
+            f"Questions? {platform_url('/support')}\n"
+        )
+        try:
+            mailer.send(
+                tenant["owner_email"],
+                f"Your {tenant['studio_name']} studio is still here",
+                body,
+            )
+        except Exception:
+            log.exception("win-back failed for %s (will retry next sweep)", tenant["slug"])
+            continue
+        with control_connect() as con:
+            con.execute(
+                "UPDATE tenants SET winback_sent_at=? WHERE id=?", (_iso(now), tenant["id"])
+            )
+        sent += 1
+    if sent:
+        log.info("win-back emails sent: %d", sent)
     return sent
 
 
