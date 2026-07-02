@@ -38,7 +38,12 @@
   .dm-actions { display:flex; gap:12px; flex-wrap:wrap; margin-top:28px; }
   .dm-btn { min-height:46px; display:inline-flex; align-items:center; justify-content:center; padding:0 18px; border-radius:8px; background:var(--leaf); color:white; text-decoration:none; font-weight:900; }
   .dm-btn.secondary { background:transparent; color:var(--ink); border:1px solid var(--line); }
-  @media (max-width: 820px) { .dm-grid { grid-template-columns:1fr; } }
+  .dm-shots { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:18px; margin-top:18px; }
+  .dm-shot img { width:100%; height:auto; display:block; border:1px solid var(--line); border-radius:8px; box-shadow:0 16px 44px rgba(35,28,18,.10); }
+  .dm-shot figcaption { color:var(--muted); font-size:.92rem; margin-top:10px; line-height:1.45; }
+  .dm-shot figcaption b { color:var(--ink); }
+  .dm-section-head { margin:44px 0 6px; }
+  @media (max-width: 820px) { .dm-grid { grid-template-columns:1fr; } .dm-shots { grid-template-columns:1fr; } }
 </style>
 {% endblock %}
 {% block content %}
@@ -77,6 +82,29 @@
         <div class="dm-step"><span class="dm-num">3</span><div><b>Proofing gallery</b><span>PIN-gated gallery, favorites, comments, and delivery status are client-ready.</span></div></div>
       </div>
     </article>
+  </section>
+  <section aria-label="Product screenshots">
+    <div class="dm-hero dm-section-head">
+      <div class="dm-kicker">See it for real</div>
+      <h2>The screens your clients and your mornings actually get.</h2>
+    </div>
+    <div class="dm-shots">
+      <figure class="dm-shot">
+        <img src="/static/demo/gallery.webp" alt="A PIN-gated client gallery in Mise: hero cover photo, download-all button, and a grid of selects" width="1280" height="860" loading="lazy">
+        <figcaption><b>Client gallery.</b> PIN-gated, favorites and comments on, download-all one tap away.</figcaption>
+      </figure>
+      <figure class="dm-shot">
+        <img src="/static/demo/invoice.webp" alt="A client-facing Mise invoice under the studio's own name, with line items, deposit split, and amount due" width="1280" height="860" loading="lazy">
+        <figcaption><b>Invoice your clients trust.</b> The studio's own name on it, deposit split, Stripe-payable when connected.</figcaption>
+      </figure>
+      <figure class="dm-shot">
+        <img src="/static/demo/onboarding.webp" alt="The Mise onboarding checklist showing a launch-ready studio with presets, demo data, and setup steps complete" width="1280" height="860" loading="lazy">
+        <figcaption><b>Day-one checklist.</b> Install a preset, publish a lead path, deliver — the score keeps you honest.</figcaption>
+      </figure>
+    </div>
+    <div class="dm-actions">
+      <a class="dm-btn" href="/pricing">Start 14-day trial</a>
+    </div>
   </section>
 </main>
 {% endblock %}
