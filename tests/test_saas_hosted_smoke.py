@@ -378,3 +378,85 @@ def test_lead_notifications_route_to_tenant_owner(tmp_path, monkeypatch):
     with saas.tenant_runtime("alpha"):
         assert mailer.studio_inbox() == "alpha@example.com"
     assert mailer.studio_inbox() == "operator@gmail.test"
+
+
+def test_trial_reminder_targets_only_cardless_expiring_trials(tmp_path, monkeypatch):
+    from datetime import timedelta
+
+    _configure_saas(tmp_path, monkeypatch)
+    sent = []
+    monkeypatch.setattr(saas.mailer, "configured", lambda: True)
+    monkeypatch.setattr(saas.mailer, "send", lambda *a, **k: sent.append(a))
+
+    ending = saas.create_tenant("ending", "Ending Studio", "ending@example.com", "secret123")
+    fresh = saas.create_tenant("fresh", "Fresh Studio", "fresh@example.com", "secret123")
+    carded = saas.create_tenant("carded", "Carded Studio", "carded@example.com", "secret123")
+    with saas.control_connect() as con:
+        soon = saas._iso(saas._now() + timedelta(days=2))
+        con.execute("UPDATE tenants SET trial_ends_at=? WHERE id=?", (soon, ending["id"]))
+        con.execute(
+            "UPDATE tenants SET trial_ends_at=?, stripe_customer_id='cus_1' WHERE id=?",
+            (soon, carded["id"]),
+        )
+        con.execute(
+            "UPDATE tenants SET trial_ends_at=? WHERE id=?",
+            (saas._iso(saas._now() + timedelta(days=10)), fresh["id"]),
+        )
+
+    assert saas.trial_reminder_sweep() == 1  # only the card-less, expiring one
+    (args,) = sent
+    assert args[0] == "ending@example.com"
+    assert "https://ending.mise.test/admin/billing" in args[2]
+    # One-shot: the stamp prevents a resend on the next sweep.
+    assert saas.trial_reminder_sweep() == 0
+    assert saas.tenant_by_slug("ending")["trial_reminder_sent_at"]
+    assert saas.tenant_by_slug("carded")["trial_reminder_sent_at"] is None
+
+
+def test_trial_reminder_retries_after_send_failure(tmp_path, monkeypatch):
+    from datetime import timedelta
+
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(saas.mailer, "configured", lambda: True)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    with saas.control_connect() as con:
+        con.execute(
+            "UPDATE tenants SET trial_ends_at=? WHERE id=?",
+            (saas._iso(saas._now() + timedelta(days=1)), tenant["id"]),
+        )
+
+    def boom(*a, **k):
+        raise RuntimeError("smtp down")
+
+    monkeypatch.setattr(saas.mailer, "send", boom)
+    assert saas.trial_reminder_sweep() == 0
+    assert saas.tenant_by_slug("alpha")["trial_reminder_sent_at"] is None  # not stamped
+    sent = []
+    monkeypatch.setattr(saas.mailer, "send", lambda *a, **k: sent.append(a))
+    assert saas.trial_reminder_sweep() == 1  # retried on the next sweep
+
+
+def test_operator_overview_surfaces_card_on_file(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    nocard = saas.create_tenant("nocard", "NoCard Studio", "nocard@example.com", "secret123")
+    carded = saas.create_tenant("carded", "Carded Studio", "carded@example.com", "secret123")
+    saas.update_tenant_billing(carded["id"], stripe_customer_id="cus_1")
+    assert nocard  # both trialing; only one has a card
+    overview = saas.operator_tenant_overview()
+    assert overview["counts"]["card_on_file"] == 1
+    assert overview["counts"]["no_card_trials"] == 1
+    by_slug = {r["tenant"]["slug"]: r for r in overview["rows"]}
+    assert by_slug["carded"]["card_on_file"] is True
+    assert by_slug["nocard"]["card_on_file"] is False
+
+
+def test_marketing_pages_carry_funnel_analytics_only_when_configured(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    from app.render import templates as tpl
+
+    monkeypatch.setitem(tpl.env.globals, "plausible_domain", "mise.example.com")
+    pricing = asyncio.run(saas.pricing(_request("/pricing", "mise.test"))).body.decode()
+    assert 'data-domain="mise.example.com"' in pricing
+    monkeypatch.setitem(tpl.env.globals, "plausible_domain", "")
+    pricing = asyncio.run(saas.pricing(_request("/pricing", "mise.test"))).body.decode()
+    assert "plausible.io" not in pricing

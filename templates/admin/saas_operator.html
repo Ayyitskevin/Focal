@@ -22,6 +22,7 @@
   <div class="panel">
     <p class="muted">Trial pipeline</p>
     <h2>${{ '%.0f'|format(overview.counts.trial_pipeline_cents / 100) }}</h2>
+    <span class="muted">{{ overview.counts.no_card_trials }} trial{{ 's' if overview.counts.no_card_trials != 1 else '' }} without a card</span>
   </div>
   <div class="panel">
     <p class="muted">Studios</p>
@@ -168,7 +169,8 @@
         <span class="muted">{{ tenant.owner_email }}</span>
       </td>
       <td>
-        <span class="badge {{ 'is-active' if row.billing.tone == 'ok' else 'is-declined' if row.billing.tone == 'block' else 'is-sent' }}">{{ tenant.plan_status }}</span><br>
+        <span class="badge {{ 'is-active' if row.billing.tone == 'ok' else 'is-declined' if row.billing.tone == 'block' else 'is-sent' }}">{{ tenant.plan_status }}</span>
+        <span class="badge {{ 'is-active' if row.card_on_file else 'is-draft' }}">{{ 'card' if row.card_on_file else 'no card' }}</span><br>
         <span class="muted">{{ row.billing.message }}</span>
         <form method="post" action="/admin/saas/{{ tenant.id }}/billing" class="inline-form">
           <select name="plan_status" aria-label="Billing status for {{ tenant.slug }}">
