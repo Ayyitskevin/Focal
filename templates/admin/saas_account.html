@@ -16,6 +16,12 @@
 {% if saved %}
 <section class="notice">Studio settings saved.</section>
 {% endif %}
+{% if payments_saved %}
+<section class="notice">Stripe connected — the Pay button is now live on your invoices.</section>
+{% endif %}
+{% if payments_off %}
+<section class="notice">Stripe disconnected — online payment is off; invoices fall back to "reply to pay".</section>
+{% endif %}
 {% if error %}
 <section class="error">{{ error }}</section>
 {% endif %}
@@ -46,5 +52,38 @@
     {% endif %}
     <button type="submit">Save studio settings</button>
   </form>
+</section>
+
+<section class="panel">
+  <h2>Client payments</h2>
+  {% if payments.connected %}
+  <p>Connected — <code>{{ payments.masked_key }}</code>{% if payments.mode %} ({{ payments.mode }} mode){% endif %} ·
+     webhook secret {{ "set" if payments.webhook_set else "missing" }}.
+     Your clients pay <strong>you</strong> directly; Mise never touches the money.</p>
+  {% else %}
+  <p class="muted">Connect your own Stripe account and the Pay button goes live on your invoices.
+     Clients pay <strong>you</strong> directly — money never routes through Mise.</p>
+  {% endif %}
+  <form method="post" action="/admin/account/payments">
+    <div class="grid two">
+      <label>Stripe secret key
+        <input name="stripe_secret_key" placeholder="sk_live_…" autocomplete="off" required>
+      </label>
+      <label>Webhook signing secret
+        <input name="stripe_webhook_secret" placeholder="whsec_…" autocomplete="off" required>
+      </label>
+    </div>
+    <p class="muted">Secret key: Stripe → Developers → API keys. Restricted keys (rk_) work if they
+      include at least <em>Account read</em> and <em>Checkout Sessions write</em>. Webhook secret: add an
+      endpoint for <code>{{ client_webhook_url }}</code> listening to <code>checkout.session.completed</code>
+      and <code>checkout.session.async_payment_succeeded</code>, then paste its signing secret here —
+      it's how Mise marks your invoice paid after the charge.</p>
+    <button type="submit">{{ "Update Stripe connection" if payments.connected else "Connect Stripe" }}</button>
+  </form>
+  {% if payments.connected %}
+  <form method="post" action="/admin/account/payments/disconnect" style="margin-top:.75rem">
+    <button type="submit" class="danger">Disconnect — turns online payment off</button>
+  </form>
+  {% endif %}
 </section>
 {% endblock %}

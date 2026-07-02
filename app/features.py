@@ -49,12 +49,32 @@ def client_stripe_webhook_secret() -> str:
     return config.STRIPE_WEBHOOK_SECRET
 
 
+def client_stripe_webhook_secrets() -> list[str]:
+    """Accept-list for verifying the client-payment webhook: current secret first,
+    then the previous one (ADR 0054 rotation grace).
+
+    A checkout link stays payable for ~24h and Stripe retries deliveries for days;
+    without the grace, rotating or disconnecting Stripe mid-flight would make an
+    already-paid session unverifiable forever — client charged, invoice never
+    marked paid. Single-tenant mode has no rotation store and returns at most the
+    one global secret (unchanged behavior).
+    """
+    secrets = [client_stripe_webhook_secret()]
+    if config.SAAS_MODE:
+        from . import saas
+
+        tenant = saas.current_tenant()
+        if tenant:
+            secrets.append((tenant.get("client_stripe_webhook_secret_prev") or "").strip())
+    return [s for s in secrets if s]
+
+
 def stripe_enabled() -> bool:
     return bool(client_stripe_secret_key())
 
 
 def stripe_webhook_enabled() -> bool:
-    return bool(client_stripe_webhook_secret())
+    return bool(client_stripe_webhook_secrets())
 
 
 def odysseus_caption_enabled() -> bool:
