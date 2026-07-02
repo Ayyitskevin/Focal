@@ -31,6 +31,31 @@ The hosted promise is simple:
 One customer can run the full inquiry -> booking -> paperwork -> payment ->
 delivery loop without graduating into a more expensive tier.
 
+## Quickstart (Self-Hosted)
+
+From a fresh clone to a running studio in three commands:
+
+```bash
+pip install -r requirements.txt
+cp .env.example .env   # set MISE_SECRET_KEY and MISE_ADMIN_PASSWORD
+python -m uvicorn app.main:app --port 8400
+```
+
+Open `http://localhost:8400/admin/login` (a LAN IP or server address works
+too) and sign in with your `MISE_ADMIN_PASSWORD`. Then your first gallery:
+
+1. **Studio → Automation** — install a niche preset (F&B, wedding, or
+   portrait) so packages, lead forms, and workflow reminders aren't blank.
+2. **Galleries → New gallery** — name it, upload photos (thumbnails and web
+   sizes derive automatically).
+3. **Publish with a 4-digit PIN** and send the client their `/g/<slug>` link
+   and PIN. That's the whole delivery loop.
+
+For production, run the Docker stack (`docker compose up --build`) — it adds
+Caddy TLS ingress and daily backups; set `MISE_BASE_URL` to your public URL so
+emailed links and copy-link buttons carry the right address. Full deploy notes:
+[docs/SAAS-DEPLOYMENT.md](docs/SAAS-DEPLOYMENT.md) and the operator runbook.
+
 ## Hosted SaaS Mode
 
 Hosted mode is dormant by default. Self-hosted installs keep the original
@@ -96,6 +121,13 @@ python scripts/hosted-preflight.py
 python scripts/smoke-saas-hosted.py
 ```
 
+For a trial user the first ten minutes look like: open `/pricing`, start the
+14-day trial (invite code required while the beta gate is on), get the welcome
+email with your studio's own subdomain, sign in, and follow the onboarding
+checklist — install a preset, publish a lead path, add a project, publish a
+delivery surface. The checklist is derived from real studio state, so it
+completes itself as you work.
+
 Detailed deployment notes live in [docs/SAAS-DEPLOYMENT.md](docs/SAAS-DEPLOYMENT.md).
 Launch copy, the 5-post X thread, and the 7-day launch checklist live in
 [docs/LAUNCH-KIT.md](docs/LAUNCH-KIT.md).
@@ -141,18 +173,23 @@ Do not deploy SaaS conversion work to `flow:/opt/mise` or
 
 ## Development
 
+The CI gate, locally:
+
 ```bash
-python -m pytest tests/test_saas.py tests/test_saas_preflight.py tests/test_saas_hosted_smoke.py -q
+python -m pytest -m unit -q     # fast hermetic suite (includes the hosted product)
 ruff check .
 ruff format --check .
 ```
 
-Full smoke:
+Full smoke (needs ffmpeg for the video-pipeline tests):
 
 ```bash
 MISE_DATA_DIR=$(mktemp -d) MISE_SECRET_KEY=test MISE_ADMIN_PASSWORD=pw \
   python -m pytest tests/test_smoke.py -q
 ```
+
+CI also runs `pip-audit` against the pinned dependency tree; a finding there
+means "bump the pin" (see `docs/SECURITY.md`).
 
 ## Launch Copy
 

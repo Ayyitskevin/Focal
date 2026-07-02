@@ -26,6 +26,13 @@ def _load_env_file(path: str) -> None:
 
 
 _load_env_file(_ENV_FILE)
+# A fresh clone's `cp .env.example .env` + `uvicorn app.main:app` must actually
+# work: when the bare-metal default above doesn't exist and no explicit
+# MISE_ENV_FILE was given, read the working directory's .env. Real environment
+# variables always win (values load via setdefault), and docker compose injects
+# env_file itself, so deployed containers never depend on this fallback.
+if "MISE_ENV_FILE" not in os.environ and not Path(_ENV_FILE).is_file():
+    _load_env_file(".env")
 
 
 def _b(name: str, default: str = "false") -> bool:
