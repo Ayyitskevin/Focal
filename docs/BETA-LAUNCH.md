@@ -6,6 +6,9 @@ into the hosted `$20/month` beta.
 ## Security & Pre-Launch Checklist
 
 - `MISE_SAAS_MODE=true` is set only on the hosted beta instance.
+- `MISE_SAAS_INVITE_CODE` is set — while it is set, `/start-trial` refuses
+  signups without the exact code, which is what makes the private beta private.
+  Going public later is unsetting this one variable.
 - `MISE_COOKIE_SECURE=true` is set because the hosted product must run behind
   HTTPS.
 - `MISE_SECRET_KEY` and `MISE_ADMIN_PASSWORD` are unique production values, not
@@ -15,12 +18,17 @@ into the hosted `$20/month` beta.
 - Stripe test-mode Checkout, `/webhooks/stripe/saas`, and the billing portal
   have been rehearsed before live keys are used.
 - Outbound email is configured with `MISE_GMAIL_USER` and
-  `MISE_GMAIL_APP_PASSWORD` before inviting real customers.
+  `MISE_GMAIL_APP_PASSWORD` before inviting real customers — signup sends the
+  welcome email carrying each studio's own URL, and the day-11 trial reminder
+  depends on it too.
 - `python scripts/hosted-preflight.py` returns `READY` with `0 fail`.
+- CI is green, including the `dependency-audit` job (see `docs/SECURITY.md`).
 - `/admin/saas` launch checklist is clear or every remaining item has an owner.
 - A test F&B studio and a test wedding studio can log in, load demo data, open
   billing, and reach account settings.
-- Data volume backups are configured for the Docker host before public launch.
+- The compose `backup` sidecar heartbeat is fresh, `MISE_BACKUP_RCLONE_REMOTE`
+  points off-site, and the restore drill from the runbook (§10) has been done
+  once for real.
 
 ## Beta Acquisition Links
 
@@ -76,12 +84,18 @@ the public launch. The beta ask is simple:
 - tell me where the product feels clear, confusing, or missing something
 
 Trial link: {{ trial_link }}
+Invite code: {{ invite_code }} (the signup form asks for it — beta is
+invite-only)
 
 If you try it, reply with the first thing that made you think "this saves me
 time" and the first thing that felt unclear.
 
 Thanks,
 Kevin
+
+When something breaks or confuses a beta user, answer from
+[SUPPORT-PLAYBOOK.md](SUPPORT-PLAYBOOK.md) — it has the exact URL or fix for
+the questions beta users actually ask.
 
 ## Beta Success Criteria
 
