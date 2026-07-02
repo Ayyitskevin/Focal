@@ -236,6 +236,13 @@
           </select>
           <button type="submit">Save</button>
         </form>
+        {% if tenant.plan_status == 'trialing' %}
+        <form method="post" action="/admin/saas/{{ tenant.id }}/extend-trial" class="inline-form">
+          <input type="number" name="days" value="7" min="1" max="30" style="width:4em"
+                 aria-label="Extension days for {{ tenant.slug }}">
+          <button type="submit">Extend trial</button>
+        </form>
+        {% endif %}
       </td>
       <td>
         <span class="badge {{ 'is-active' if row.launch.complete else 'is-sent' if row.launch.score >= 50 else 'is-draft' }}">{{ row.launch.score }}%</span><br>

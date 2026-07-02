@@ -2251,6 +2251,40 @@ async def operator_tenant_notes(request: Request, tenant_id: int, notes: str = F
     return RedirectResponse("/admin/saas#tenants", status_code=303)
 
 
+TRIAL_EXTEND_MAX_DAYS = 30
+
+
+@router.post("/admin/saas/{tenant_id}/extend-trial")
+async def operator_extend_trial(request: Request, tenant_id: int, days: int = Form(7)):
+    """Give a promising trial more runway (Batch C3) — the audit's gap: the only
+    recovery for an expired trial was immediate payment. Trialing tenants only;
+    extends from now or the current end, whichever is later. Clears the trial-
+    reminder and win-back stamps so the lifecycle emails work for the NEW window,
+    and appends an audit line to the tenant's notes."""
+    require_platform_admin(request)
+    days = max(1, min(int(days), TRIAL_EXTEND_MAX_DAYS))
+    with control_connect() as con:
+        row = con.execute("SELECT * FROM tenants WHERE id=?", (tenant_id,)).fetchone()
+        if row is None or row["deleted_at"]:
+            raise HTTPException(status_code=404)
+        tenant = dict(row)
+        if tenant["plan_status"] != "trialing":
+            raise HTTPException(status_code=400, detail="only trialing studios can be extended")
+        now = _now()
+        current_end = _parse_iso(tenant.get("trial_ends_at"))
+        base = current_end if current_end and current_end > now else now
+        new_end = base + timedelta(days=days)
+        stamp = f"[{now.date().isoformat()}] trial extended {days}d by operator"
+        notes = f"{tenant['notes']}\n{stamp}" if tenant.get("notes") else stamp
+        con.execute(
+            """UPDATE tenants SET trial_ends_at=?, trial_reminder_sent_at=NULL,
+                  winback_sent_at=NULL, notes=? WHERE id=?""",
+            (_iso(new_end), notes[:NOTES_MAX_CHARS], tenant_id),
+        )
+    log.info("trial extended %dd for tenant %s", days, tenant["slug"])
+    return RedirectResponse("/admin/saas#tenants", status_code=303)
+
+
 @router.post("/admin/saas/{tenant_id}/domain/verify")
 async def operator_verify_domain(request: Request, tenant_id: int):
     require_platform_admin(request)
