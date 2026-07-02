@@ -202,6 +202,13 @@ def migrate_control() -> None:
                 type TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
+            CREATE TABLE IF NOT EXISTS tenant_feedback (
+                id INTEGER PRIMARY KEY,
+                tenant_id INTEGER NOT NULL REFERENCES tenants(id),
+                page TEXT,
+                message TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
             """
         )
         _ensure_column(con, "tenants", "custom_domain", "custom_domain TEXT")
@@ -579,6 +586,37 @@ def operator_trial_nudges(overview: dict | None = None) -> list[dict]:
             item["tenant"]["created_at"],
         ),
     )
+
+
+FEEDBACK_MAX_CHARS = 2000
+
+
+def record_tenant_feedback(tenant_id: int, page: str, message: str) -> None:
+    """One row per submission from the in-admin Help & feedback form (Batch A1).
+
+    The beta promise is 'every confusion becomes copy, onboarding, or a blocker' —
+    that needs a capture path INSIDE the product; before this the only route from a
+    confused tenant to the operator was finding the support email on the public
+    marketing pages. Length caps here, not in the route, so every caller is bounded.
+    """
+    with control_connect() as con:
+        con.execute(
+            "INSERT INTO tenant_feedback (tenant_id, page, message) VALUES (?,?,?)",
+            (tenant_id, (page or "").strip()[:200], message.strip()[:FEEDBACK_MAX_CHARS]),
+        )
+
+
+def recent_tenant_feedback(limit: int = 50) -> list[dict]:
+    """Newest feedback first, tenant-attributed, for the operator console panel."""
+    with control_connect() as con:
+        rows = con.execute(
+            """SELECT f.id, f.page, f.message, f.created_at,
+                      t.slug, t.studio_name, t.owner_email
+               FROM tenant_feedback f JOIN tenants t ON t.id = f.tenant_id
+               ORDER BY f.id DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def operator_tenant_export_csv(overview: dict | None = None) -> str:
@@ -1713,7 +1751,9 @@ async def forgot_password_form(request: Request):
     if not current_tenant():
         raise HTTPException(status_code=404)
     return templates.TemplateResponse(
-        request, "admin/forgot.html", {"sent": False, "email_on": mailer.configured()}
+        request,
+        "admin/forgot.html",
+        {"sent": False, "email_on": mailer.configured(), "support_url": platform_url("/support")},
     )
 
 
@@ -1878,6 +1918,7 @@ async def operator_console(request: Request):
             "preflight": preflight,
             "launch": operator_launch_checklist(overview, preflight),
             "trial_nudges": operator_trial_nudges(overview),
+            "feedback": recent_tenant_feedback(30),
             "root_domain": _root_domain(),
             "platform_url": platform_url("/pricing"),
             "price_cents": config.SAAS_PRICE_CENTS,
@@ -2080,3 +2121,46 @@ async def seed_demo(request: Request, preset: str = Form(...)):
     result = saas_demo.seed_preset(preset)
     suffix = result["preset"]
     return RedirectResponse(f"/admin/onboarding?seeded={suffix}", status_code=303)
+
+
+@router.get("/admin/help", response_class=HTMLResponse)
+async def tenant_help(request: Request):
+    """Help & feedback for the logged-in studio owner — the first support surface
+    reachable from INSIDE the admin (everything else lives on the public root host)."""
+    security.require_admin(request)
+    tenant = current_tenant()
+    if not tenant:
+        raise HTTPException(status_code=404)
+    return templates.TemplateResponse(
+        request,
+        "admin/saas_help.html",
+        {
+            "tenant": tenant,
+            "sent": request.query_params.get("sent"),
+            "support_email": config.SAAS_SUPPORT_EMAIL,
+            "support_url": platform_url("/support"),
+        },
+    )
+
+
+@router.post("/admin/help/feedback")
+async def tenant_feedback_submit(request: Request, message: str = Form(...), page: str = Form("")):
+    security.require_admin(request)
+    tenant = current_tenant()
+    if not tenant:
+        raise HTTPException(status_code=404)
+    if not message.strip():
+        return RedirectResponse("/admin/help?sent=", status_code=303)
+    record_tenant_feedback(tenant["id"], page, message)
+    # Ids only in the log (content is user-authored); the content goes to the
+    # operator's own Telegram, which is the point — a caller-deduped business
+    # event, fire-and-forget, never blocks the response (see alerts.notify).
+    log.info("tenant feedback recorded%s", security.tenant_log_label())
+    from . import alerts  # lazy: alerts→features would cycle at import time
+
+    preview = message.strip()[:300]
+    suffix = "…" if len(message.strip()) > 300 else ""
+    alerts.notify(
+        f"Beta feedback from {tenant['studio_name']} ({tenant['slug']}): {preview}{suffix}"
+    )
+    return RedirectResponse("/admin/help?sent=1", status_code=303)
