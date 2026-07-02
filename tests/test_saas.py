@@ -948,12 +948,18 @@ def test_delete_studio_route_requires_exact_confirmation(tmp_path, monkeypatch):
     cookie = _tenant_cookie(tenant)
     with saas.tenant_runtime("alpha"):
         req = _request("/admin/delete-studio", "alpha.mise.test", cookie=cookie)
-        wrong_slug = asyncio.run(saas.delete_studio(req, confirm_slug="beta", password="secret123"))
+        wrong_slug = asyncio.run(
+            saas.delete_studio(req, reason="", confirm_slug="beta", password="secret123")
+        )
         assert "delete_error=slug" in wrong_slug.headers["location"]
-        wrong_pw = asyncio.run(saas.delete_studio(req, confirm_slug="alpha", password="nope"))
+        wrong_pw = asyncio.run(
+            saas.delete_studio(req, reason="", confirm_slug="alpha", password="nope")
+        )
         assert "delete_error=password" in wrong_pw.headers["location"]
         assert saas.tenant_by_slug("alpha") is not None  # still alive
-        done = asyncio.run(saas.delete_studio(req, confirm_slug="alpha", password="secret123"))
+        done = asyncio.run(
+            saas.delete_studio(req, reason="", confirm_slug="alpha", password="secret123")
+        )
         assert done.status_code == 303 and "deleted=1" in done.headers["location"]
     assert saas.tenant_by_slug("alpha") is None
 
