@@ -209,6 +209,13 @@ def migrate_control() -> None:
                 message TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
+            CREATE TABLE IF NOT EXISTS waitlist (
+                id INTEGER PRIMARY KEY,
+                email TEXT UNIQUE NOT NULL,
+                source TEXT,
+                campaign TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
             """
         )
         _ensure_column(con, "tenants", "custom_domain", "custom_domain TEXT")
@@ -623,6 +630,43 @@ def _days_since(stamp: str | None) -> int | None:
     except ValueError:
         return None
     return max((datetime.now(UTC).replace(tzinfo=None) - then).days, 0)
+
+
+def join_waitlist(email: str, source: str | None = None, campaign: str | None = None) -> str:
+    """Record an invite-gate rejection's email (Batch A3) — 'new', 'repeat', or 'invalid'.
+
+    Before this, a launch-buzz visitor without an invite code was a DISCARDED
+    email: the 403 told them to reply to an invite they don't have. Lower-cased
+    and unique so repeat joins are silent no-ops; the caller shows the same
+    success either way (never leaks whether an address was already on the list).
+    """
+    email = (email or "").strip().lower()[:200]
+    if "@" not in email or "." not in email.rsplit("@", 1)[-1] or len(email) < 6:
+        return "invalid"
+    with control_connect() as con:
+        cur = con.execute(
+            "INSERT OR IGNORE INTO waitlist (email, source, campaign) VALUES (?,?,?)",
+            (email, (source or "").strip()[:80] or None, (campaign or "").strip()[:80] or None),
+        )
+        return "new" if cur.rowcount else "repeat"
+
+
+def waitlist_entries(limit: int = 200) -> list[dict]:
+    with control_connect() as con:
+        rows = con.execute(
+            "SELECT email, source, campaign, created_at FROM waitlist ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def waitlist_export_csv() -> str:
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=["email", "source", "campaign", "created_at"])
+    writer.writeheader()
+    for row in waitlist_entries(limit=100000):
+        writer.writerow(row)
+    return output.getvalue()
 
 
 FEEDBACK_MAX_CHARS = 2000
@@ -1299,6 +1343,7 @@ def _platform_path(path: str) -> bool:
             "/pricing",
             "/demo",
             "/start-trial",
+            "/waitlist",
             "/terms",
             "/privacy",
             "/support",
@@ -1471,17 +1516,16 @@ async def start_trial(
     if config.SAAS_INVITE_CODE and not secrets.compare_digest(
         (invite_code or "").strip(), config.SAAS_INVITE_CODE
     ):
-        return templates.TemplateResponse(
-            request,
-            "saas/pricing.html",
-            _pricing_context(
-                "Mise is in private beta — that invite code isn't valid. "
-                "Reply to your invite email if you need one.",
-                values,
-                path="/pricing",
-            ),
-            status_code=403,
+        ctx = _pricing_context(
+            "Mise is in private beta — that invite code isn't valid. "
+            "Reply to your invite email if you need one.",
+            values,
+            path="/pricing",
         )
+        # Batch A3: don't discard the visitor — offer the waitlist right here,
+        # with the email they already typed pre-filled.
+        ctx["waitlist_offer"] = True
+        return templates.TemplateResponse(request, "saas/pricing.html", ctx, status_code=403)
     try:
         tenant = create_tenant(
             slug,
@@ -1525,6 +1569,29 @@ async def start_trial(
         return RedirectResponse(session.url, status_code=303, background=welcome)
 
     return RedirectResponse(success_url, status_code=303, background=welcome)
+
+
+@router.post("/waitlist")
+async def waitlist_join(
+    request: Request,
+    email: str = Form(...),
+    signup_source: str | None = Form(None),
+    signup_campaign: str | None = Form(None),
+):
+    """Invite-gate consolation path (Batch A3): the pricing page offers this form
+    when a signup is refused for lacking the beta code."""
+    if not config.SAAS_MODE:
+        raise HTTPException(status_code=404)
+    outcome = join_waitlist(email, signup_source, signup_campaign)
+    log.info("waitlist join: %s", outcome)  # outcome only — never the address
+    ctx = _pricing_context(None, {"owner_email": email}, path="/pricing", request=request)
+    if outcome == "invalid":
+        ctx["error"] = "That email doesn't look right — double-check it and try again."
+        ctx["waitlist_offer"] = True
+        return templates.TemplateResponse(request, "saas/pricing.html", ctx, status_code=400)
+    # 'new' and 'repeat' read identically: idempotent, and never leaks list membership.
+    ctx["waitlisted"] = True
+    return templates.TemplateResponse(request, "saas/pricing.html", ctx)
 
 
 TRIAL_REMINDER_DAYS = 3
@@ -1958,6 +2025,7 @@ async def operator_console(request: Request):
             "launch": operator_launch_checklist(overview, preflight),
             "trial_nudges": operator_trial_nudges(overview),
             "feedback": recent_tenant_feedback(30),
+            "waitlist": waitlist_entries(50),
             "root_domain": _root_domain(),
             "platform_url": platform_url("/pricing"),
             "price_cents": config.SAAS_PRICE_CENTS,
@@ -1972,6 +2040,16 @@ async def operator_tenants_export(request: Request):
         operator_tenant_export_csv(),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="mise_hosted_tenants.csv"'},
+    )
+
+
+@router.get("/admin/saas/waitlist.csv")
+async def operator_waitlist_export(request: Request):
+    require_platform_admin(request)
+    return PlainTextResponse(
+        waitlist_export_csv(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="mise_waitlist.csv"'},
     )
 
 

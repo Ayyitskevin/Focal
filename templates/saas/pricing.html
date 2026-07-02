@@ -37,6 +37,9 @@
   .pr-domain { color:var(--muted); font-size:.9rem; padding-bottom:12px; }
   button { min-height:48px; border:0; border-radius:8px; background:var(--leaf); color:white; font-weight:900; font:inherit; cursor:pointer; }
   .pr-error { color:var(--danger); background:#fff3ef; border:1px solid #efc6bd; border-radius:8px; padding:10px 12px; }
+  .pr-ok { color:var(--leaf); background:#f0f7f1; border:1px solid #cfe3d4; margin-top:16px; }
+  .pr-waitlist { margin-top:16px; }
+  .pr-waitlist h2 { margin-top:0; }
   .pr-note { font-size:.86rem; color:var(--muted); text-align:center; margin-top:12px; }
   .pr-back { color:var(--ink); font-weight:800; text-decoration:none; width:max-content; }
   .pr-proof { display:grid; gap:10px; margin-top:24px; max-width:560px; }
@@ -107,6 +110,24 @@
       <div class="pr-note">By starting a trial you agree to the
         <a href="/terms">Terms</a> and <a href="/privacy">Privacy Policy</a>.</div>
     </form>
+    {% if waitlisted %}
+    <div class="pr-card pr-ok" role="status">
+      <strong>You're on the list.</strong> We'll email your invite as the beta widens — no
+      spam, just the one invite.
+    </div>
+    {% elif waitlist_offer %}
+    <form method="post" action="/waitlist" class="pr-card pr-waitlist">
+      <h2>No invite yet?</h2>
+      <p>Leave your email and we'll send you one as the beta widens.</p>
+      <label>Email
+        <input type="email" name="email" value="{{ values.owner_email or '' }}"
+               placeholder="you@example.com" required>
+      </label>
+      <input type="hidden" name="signup_source" value="{{ values.signup_source or '' }}">
+      <input type="hidden" name="signup_campaign" value="{{ values.signup_campaign or '' }}">
+      <button type="submit">Join the waitlist</button>
+    </form>
+    {% endif %}
   </section>
 </main>
 <footer class="pr-footer" style="text-align:center;padding:2rem 1rem;font-size:.85rem;opacity:.75">

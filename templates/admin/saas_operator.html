@@ -137,6 +137,30 @@
 
 <section class="panel">
   <div class="panel-head">
+    <div>
+      <p class="pgtop-eyebrow">Beta pipeline</p>
+      <h2>Waitlist</h2>
+    </div>
+    <span class="badge {{ 'is-active' if waitlist else 'is-sent' }}">{{ waitlist|length }}</span>
+  </div>
+  <p class="muted">Visitors who hit the invite gate and left their email — your invite queue when
+     the beta widens. <a href="/admin/saas/waitlist.csv">Download CSV</a></p>
+  <table class="list">
+    <tr><th>Email</th><th>Source</th><th>When</th></tr>
+    {% for w in waitlist %}
+    <tr>
+      <td><a href="mailto:{{ w.email }}?subject=Your Mise beta invite">{{ w.email }}</a></td>
+      <td class="muted">{{ w.source or 'direct' }}{% if w.campaign %} · {{ w.campaign }}{% endif %}</td>
+      <td class="muted">{{ w.created_at }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="3" class="muted">No waitlist joins yet.</td></tr>
+    {% endfor %}
+  </table>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
     <h2>Acquisition sources</h2>
     <span class="muted">Captured from trial links like <code>?utm_source=newsletter</code></span>
   </div>
