@@ -265,7 +265,12 @@
       <td>
         <a href="{{ row.account_url }}">Open account</a><br>
         {% if tenant.stripe_customer_id %}<span class="muted">Customer {{ tenant.stripe_customer_id }}</span><br>{% endif %}
-        {% if tenant.stripe_subscription_id %}<span class="muted">Subscription {{ tenant.stripe_subscription_id }}</span>{% endif %}
+        {% if tenant.stripe_subscription_id %}<span class="muted">Subscription {{ tenant.stripe_subscription_id }}</span><br>{% endif %}
+        <form method="post" action="/admin/saas/{{ tenant.id }}/notes" class="inline-form">
+          <textarea name="notes" rows="2" maxlength="4000" placeholder="Operator notes — feedback, promises, context"
+                    aria-label="Notes for {{ tenant.slug }}">{{ tenant.notes or '' }}</textarea>
+          <button type="submit">Save note</button>
+        </form>
       </td>
     </tr>
     {% else %}
