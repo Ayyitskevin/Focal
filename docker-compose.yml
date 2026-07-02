@@ -43,6 +43,7 @@ services:
       MISE_CADDY_SITE_ADDRESS: ${MISE_CADDY_SITE_ADDRESS:-localhost}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
       - caddy-data:/data
       - caddy-config:/config
 
