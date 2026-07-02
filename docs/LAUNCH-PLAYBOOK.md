@@ -116,6 +116,9 @@ Checklist (details in `docs/SAAS-DEPLOYMENT.md`):
 
 - [ ] Legal: counsel skim of `/terms` + `/privacy` (ADR 0052 flags this).
 - [ ] Set `MISE_PLAUSIBLE_DOMAIN` → funnel analytics go live on the marketing pages
+- [ ] In the Plausible dashboard, add the three custom-event goals the pages fire:
+      `Trial Submit`, `Invite Gate Rejected`, `Waitlist Joined` — the funnel becomes
+      measurable in Plausible, not just in the control DB
       (marketing pages ONLY — studios are never tracked, ADR 0060).
 - [ ] Send invites (template in the transformation launch kit): personal note + invite
       code + `/pricing` link. Batch of 5 first, then 10 more after a week of quiet.

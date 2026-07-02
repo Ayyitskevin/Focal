@@ -81,7 +81,8 @@
     <p class="pr-note" style="text-align:left"><a href="/demo">Preview the F&B and wedding demo tour</a></p>
   </section>
   <section class="pr-form-wrap">
-    <form method="post" action="/start-trial" class="pr-card">
+    <form method="post" action="/start-trial" class="pr-card"
+          {% if plausible_domain %}onsubmit="window.plausible && plausible('Trial Submit')"{% endif %}>
       <h2>Start your free trial</h2>
       <p>Choose your studio URL and admin password. Stripe starts the $20/month plan after the trial when configured.</p>
       {% if error %}<div class="pr-error">{{ error }}</div>{% endif %}
@@ -120,6 +121,7 @@
       <strong>You're on the list.</strong> We'll email your invite as the beta widens — no
       spam, just the one invite.
     </div>
+    {% if plausible_domain %}<script>window.plausible && plausible('Waitlist Joined');</script>{% endif %}
     {% elif waitlist_offer %}
     <form method="post" action="/waitlist" class="pr-card pr-waitlist">
       <h2>No invite yet?</h2>
@@ -132,6 +134,7 @@
       <input type="hidden" name="signup_campaign" value="{{ values.signup_campaign or '' }}">
       <button type="submit">Join the waitlist</button>
     </form>
+    {% if plausible_domain %}<script>window.plausible && plausible('Invite Gate Rejected');</script>{% endif %}
     {% endif %}
   </section>
 </main>
