@@ -14,13 +14,14 @@ Deductible % and the IRS mileage rate are honest operator inputs.
 """
 
 import datetime as dt
+import shutil
 import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 
-from .. import config, db, security
+from .. import config, db, security, upload_guard
 from ..render import templates
 from . import common
 
@@ -580,14 +581,13 @@ async def receipt_upload(file: UploadFile = File(...), expense_id: int | None = 
         raise HTTPException(status_code=400, detail="receipt must be an image or PDF")
     if expense_id and not db.one("SELECT id FROM expenses WHERE id=?", (expense_id,)):
         raise HTTPException(status_code=400, detail="unknown expense")
+    # Disk-floor check (was missing here — ADR 0061) matches the gallery-upload guard.
+    if shutil.disk_usage(config.DATA_DIR).free / 1e9 < config.MIN_FREE_GB:
+        raise HTTPException(status_code=507, detail="low disk space — upload refused")
     config.RECEIPTS_DIR.mkdir(parents=True, exist_ok=True)
     stored = f"{uuid.uuid4().hex}{ext}"
     dest = config.RECEIPTS_DIR / stored
-    size = 0
-    with dest.open("wb") as out:
-        while chunk := await file.read(1 << 20):
-            out.write(chunk)
-            size += len(chunk)
+    size = await upload_guard.save_capped(file, dest, ext, config.MAX_RECEIPT_MB * (1 << 20))
     db.run(
         """INSERT INTO receipts (filename, stored, content_type, size_bytes, expense_id)
               VALUES (?,?,?,?,?)""",

@@ -424,6 +424,11 @@ TELEGRAM_CHAT_ID = os.environ.get("MISE_TELEGRAM_CHAT_ID", "")
 
 # Refuse uploads when free disk drops below this (GB) — fail loud, not full.
 MIN_FREE_GB = int(os.environ.get("MISE_MIN_FREE_GB", "10"))
+# Per-file upload ceilings (security Slice 1 / ADR 0061). Generous by default so
+# real RAW/video work is never blocked; the point is to bound a SINGLE file so a
+# hostile or buggy client can't stream unbounded bytes into the shared volume.
+MAX_UPLOAD_MB = int(os.environ.get("MISE_MAX_UPLOAD_MB", "2048"))  # gallery media
+MAX_RECEIPT_MB = int(os.environ.get("MISE_MAX_RECEIPT_MB", "25"))  # bookkeeping receipts
 
 # IRS standard mileage rate (cents per mile) stamped onto NEW trip rows. Frozen
 # per-row at creation so prior trips keep the rate they were logged at. 2026 = 70¢/mi.
