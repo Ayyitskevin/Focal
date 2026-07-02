@@ -27,9 +27,10 @@ def _bucket_for(path: str, method: str = "GET") -> str | None:
     """Bucket name to charge, or None to skip (exempt)."""
     if path == "/healthz" or path.startswith(("/static/", "/media/", "/site/img/", "/work/")):
         return None  # static + media grid: legit bursts, never limited
-    if path in ("/start-trial", "/admin/forgot"):
-        # Tenant provisioning / reset-email sends: tight hourly bucket (ADR 0050/0051)
-        # — but only the POST costs anything; viewing the form must not spend it.
+    if path in ("/start-trial", "/admin/forgot", "/waitlist"):
+        # Tenant provisioning / reset-email sends / waitlist joins: tight hourly
+        # bucket (ADR 0050/0051) — only the POST costs anything; viewing the form
+        # must not spend it.
         if method == "POST":
             return "signup"
         return "admin" if path.startswith("/admin") else None
