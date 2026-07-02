@@ -1826,7 +1826,10 @@ a.tk-chip:hover { color: var(--ink); background: #e7e0d0; }
 .admin-shell .inv-email-card .stack-form { max-width: none !important; }
 
 @media (max-width: 1080px) {
-  .admin-shell .inv-layout { grid-template-columns: 1fr; }
+  /* minmax(0,…), not bare 1fr: a bare 1fr means minmax(auto,1fr), and the line
+     table's 560px min-width would win over the viewport, forcing the whole page
+     to scroll sideways on a phone instead of the table scrolling in its wrap. */
+  .admin-shell .inv-layout { grid-template-columns: minmax(0, 1fr); }
   .admin-shell .inv-rail { position: static; }
 }
 @media (max-width: 640px) {

@@ -116,7 +116,10 @@ async def check_pin(request: Request, slug: str, pin: str = Form(...)):
     if not security.pin_matches(pin, p["workspace_pin"]):
         security.pin_fail(ip, key)
         return templates.TemplateResponse(
-            request, "public/workspace_pin.html", {"p": p, "error": "Wrong PIN."}, status_code=401
+            request,
+            "public/workspace_pin.html",
+            {"p": p, "error": "That PIN doesn't match — double-check the email we sent you."},
+            status_code=401,
         )
     security.pin_clear(ip, key)
     resp = RedirectResponse(f"/w/{slug}", status_code=303)

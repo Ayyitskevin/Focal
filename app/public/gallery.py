@@ -111,7 +111,10 @@ async def check_pin(request: Request, slug: str, pin: str = Form(...)):
     if not security.pin_matches(pin, g["pin"]):
         security.pin_fail(ip, g["id"])
         return templates.TemplateResponse(
-            request, "public/pin.html", {"g": g, "error": "Wrong PIN."}, status_code=401
+            request,
+            "public/pin.html",
+            {"g": g, "error": "That PIN doesn't match — double-check the email we sent you."},
+            status_code=401,
         )
     security.pin_clear(ip, g["id"])
     _, cookie_val = security.create_visitor(g["id"])

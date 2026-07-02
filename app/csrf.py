@@ -49,8 +49,17 @@ def check(request: Request) -> JSONResponse | None:
     ours = urls.origin_from_url(
         urls.public_base_url(request) if config.SAAS_MODE else config.BASE_URL
     )
+    # The origin the request actually ARRIVED on (Host + forwarded proto) is
+    # same-origin in every sense that matters: the browser's Origin header names
+    # the URL in its address bar, and a cross-site attacker's page can never make
+    # that equal our own Host. Without this, single-tenant compared against
+    # BASE_URL alone, so a browser reaching the app any other way — LAN IP,
+    # 127.0.0.1, a fresh Docker boot before MISE_BASE_URL is set — had EVERY form
+    # POST rejected: admin login included, client PIN entry included. curl and
+    # the test client send no Origin, which is why no test ever saw it.
+    arrived = urls.origin_from_url(urls.request_origin(request))
     sent = _origin(request.headers.get("origin", "")) or _origin(request.headers.get("referer", ""))
-    if sent is None or sent == ours:
+    if sent is None or sent == ours or sent == arrived:
         return None
     log.warning(
         "cross-origin %s %s blocked: origin=%s expected=%s",
