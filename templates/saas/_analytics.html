@@ -2,4 +2,8 @@
    on tenant admin or client-facing surfaces (no tracking inside studios). #}
 {% if plausible_domain %}
 <script defer src="https://plausible.io/js/script.js" data-domain="{{ plausible_domain }}"></script>
+{# Queue stub so goal events fired before the deferred script loads are kept
+   (Batch B4). Goals to mark in the Plausible dashboard: "Trial Submit",
+   "Invite Gate Rejected", "Waitlist Joined". #}
+<script>window.plausible = window.plausible || function(){ (window.plausible.q = window.plausible.q || []).push(arguments) };</script>
 {% endif %}
