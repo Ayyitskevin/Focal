@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block robots %}<meta name="robots" content="index, follow">{% endblock %}
+{% block title %}{{ doc_title }} · Mise{% endblock %}
+{% block head %}
+<meta name="description" content="{{ doc_title }} for Mise, the hosted client studio for solo photographers and videographers.">
+{% endblock %}
+{% block content %}
+<main class="legal-wrap" style="max-width:52rem;margin:0 auto;padding:2.5rem 1.25rem;line-height:1.6">
+  <p><a class="pr-back" href="/">Mise</a></p>
+  <h1>{{ doc_title }}</h1>
+  <p class="muted">Last updated 2 July 2026.</p>
+
+  {% if doc == "terms" %}
+  <p>These terms cover the <strong>Mise</strong> hosted service ("Mise", "we"). By starting a
+     trial or using a hosted studio you agree to them. If you self-host Mise, these hosted terms
+     don't apply — you run your own instance under its open-source licence.</p>
+
+  <h2>The plan</h2>
+  <p>Mise is one flat plan: <strong>$20/month</strong> after a 14-day free trial. No tiers, no
+     setup fee, no per-seat charge. You can cancel anytime from your billing page; cancellation
+     stops future charges and we don't bill partial months back.</p>
+
+  <h2>Your studio, your data</h2>
+  <p>Each studio runs in its <strong>own isolated database and file store</strong> — not shared
+     rows in a common table. You own the content you upload and create (photos, videos, client
+     records, invoices). You can export a complete archive of your studio, or delete it, at any
+     time from your billing page. Deleting cancels billing and takes the studio offline; we keep
+     a short recoverable copy in case of mistakes, then remove it.</p>
+
+  <h2>Acceptable use</h2>
+  <p>Don't use Mise to store unlawful content, infringe others' rights, or attempt to access
+     another studio's data. Each studio is isolated by design; probing that isolation is a
+     breach of these terms. We may suspend a studio that puts the service or other customers at
+     risk, and will tell you why.</p>
+
+  <h2>Payments</h2>
+  <p>Billing is handled by <strong>Stripe</strong>; we don't store your card number. Client
+     payments you collect through your own connected payment account are between you and your
+     clients — Mise is not a party to them and never charges your clients on its own account.</p>
+
+  <h2>Availability &amp; liability</h2>
+  <p>We work to keep Mise available and backed up, but it's provided "as is" without warranty.
+     To the extent the law allows, our liability is limited to the fees you paid in the prior
+     three months. You're responsible for keeping your own export archives for anything you
+     can't afford to lose.</p>
+
+  <h2>Changes</h2>
+  <p>We may update these terms; material changes will be announced in-app before they take
+     effect. Continued use after that means you accept the update.</p>
+
+  {% elif doc == "privacy" %}
+  <p>This policy explains what the <strong>Mise</strong> hosted service collects and how it's
+     used. Self-hosted installs are governed by whoever runs them, not this policy.</p>
+
+  <h2>What we hold</h2>
+  <ul>
+    <li><strong>Account data</strong> — your studio name, owner email, and a hashed password.</li>
+    <li><strong>Billing data</strong> — a Stripe customer/subscription reference. Card details
+        live with Stripe, not with us.</li>
+    <li><strong>Studio content</strong> — everything you put into your studio (clients, projects,
+        galleries, invoices, uploaded media), stored in your studio's own isolated database and
+        file store.</li>
+  </ul>
+
+  <h2>How it's used</h2>
+  <p>To run your studio, take payment for the subscription, and provide support. We do
+     <strong>not</strong> sell your data, and we do <strong>not</strong> use your client media or
+     studio content to train AI models. AI features act only on your own content, at your
+     request, and every AI output is a draft you approve before anything is sent or published.</p>
+
+  <h2>Isolation &amp; access</h2>
+  <p>Studios are physically isolated (separate database + file store per customer). Operator
+     access to your content is limited to what's needed to run the service and respond to your
+     support requests.</p>
+
+  <h2>Sharing</h2>
+  <p>We share data only with the processors that run the service — currently <strong>Stripe</strong>
+     (billing) and email delivery for transactional mail (e.g. password resets) — and only as
+     needed. We disclose data if legally required, and will tell you unless prohibited.</p>
+
+  <h2>Your rights</h2>
+  <p>You can export your full studio or delete it at any time from your billing page — no request
+     needed. For anything else, contact us at
+     {% if support_email %}<a href="mailto:{{ support_email }}">{{ support_email }}</a>{% else %}the support address below{% endif %}.</p>
+
+  {% else %}
+  <p>Support for the <strong>Mise</strong> hosted service.</p>
+
+  <h2>Get in touch</h2>
+  {% if support_email %}
+  <p>Email <a href="mailto:{{ support_email }}">{{ support_email }}</a> and we'll get back to you.
+     Include your studio address (the <code>&lt;name&gt;</code> in <code>&lt;name&gt;.mise…</code>)
+     so we can find your account quickly.</p>
+  {% else %}
+  <p>Reply to any email from your studio and it reaches us.</p>
+  {% endif %}
+
+  <h2>Common things you can do yourself</h2>
+  <ul>
+    <li><strong>Forgot your password?</strong> Use the "Forgot password?" link on your studio's
+        sign-in page — a reset link goes to your owner email.</li>
+    <li><strong>Update billing or cancel?</strong> Your <em>Billing</em> page has the Stripe
+        portal and the cancel/delete controls.</li>
+    <li><strong>Leaving?</strong> Download a complete archive of your studio from the <em>Billing</em>
+        page first — it includes your database and all media.</li>
+  </ul>
+
+  <h2>Trouble signing in</h2>
+  <p>If a payment lapses, your studio stays reachable through a short grace period so you can
+     update billing before anything is locked. If you're fully locked out, the sign-in and
+     billing pages still work so you can recover.</p>
+  {% endif %}
+
+  <p class="muted" style="margin-top:2rem">
+    <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> · <a href="/support">Support</a> ·
+    <a href="/pricing">Pricing</a>
+  </p>
+</main>
+{% endblock %}
