@@ -1425,17 +1425,9 @@ async def start_trial(
                 ),
                 status_code=503,
             )
-        stripe_mod = _stripe()
-        session = stripe_mod.checkout.Session.create(
-            api_key=config.STRIPE_SECRET_KEY,
-            mode="subscription",
-            customer_email=tenant["owner_email"],
-            line_items=[{"price": config.SAAS_STRIPE_PRICE_ID, "quantity": 1}],
-            metadata={"tenant_id": str(tenant["id"]), "slug": tenant["slug"]},
-            subscription_data={
-                "trial_period_days": config.SAAS_TRIAL_DAYS,
-                "metadata": {"tenant_id": str(tenant["id"]), "slug": tenant["slug"]},
-            },
+        session = create_subscription_checkout(
+            tenant,
+            trial_days=config.SAAS_TRIAL_DAYS,
             success_url=success_url,
             cancel_url=cancel_url,
         )
@@ -1443,6 +1435,68 @@ async def start_trial(
         return RedirectResponse(session.url, status_code=303, background=welcome)
 
     return RedirectResponse(success_url, status_code=303, background=welcome)
+
+
+def _remaining_trial_days(tenant: dict) -> int:
+    ends = _parse_iso(tenant.get("trial_ends_at"))
+    if not ends:
+        return 0
+    return max(0, (ends - _now()).days)
+
+
+def create_subscription_checkout(
+    tenant: dict, *, trial_days: int, success_url: str, cancel_url: str
+):
+    """One $20/month subscription Checkout session (signup and recovery share it).
+
+    ``trial_days`` <= 0 omits the trial entirely — Stripe bills immediately, which is
+    exactly right for a tenant recovering an abandoned checkout after their trial ran out.
+    """
+    subscription_data: dict = {"metadata": {"tenant_id": str(tenant["id"]), "slug": tenant["slug"]}}
+    if trial_days > 0:
+        subscription_data["trial_period_days"] = trial_days
+    return _stripe().checkout.Session.create(
+        api_key=config.STRIPE_SECRET_KEY,
+        mode="subscription",
+        customer_email=tenant["owner_email"],
+        line_items=[{"price": config.SAAS_STRIPE_PRICE_ID, "quantity": 1}],
+        metadata={"tenant_id": str(tenant["id"]), "slug": tenant["slug"]},
+        subscription_data=subscription_data,
+        success_url=success_url,
+        cancel_url=cancel_url,
+    )
+
+
+@router.post("/admin/billing/checkout")
+async def billing_checkout(request: Request):
+    """Start (or restart) the $20/month subscription from inside the studio.
+
+    This is the recovery path for the audit's biggest funnel leak: a trial that
+    abandoned the signup checkout used to hit the day-14 paywall with NO pay button —
+    a conversion dead-end only the operator could fix. Reachable while locked out
+    because _billing_allowed_path admits /admin/billing*.
+    """
+    security.require_admin(request)
+    tenant = current_tenant()
+    if not tenant:
+        raise HTTPException(status_code=404)
+    if not (config.STRIPE_SECRET_KEY and config.SAAS_STRIPE_PRICE_ID):
+        raise HTTPException(status_code=503, detail="hosted billing is not configured")
+    # A live/attached subscription manages itself in the Stripe portal; checkout is
+    # only for no-subscription (abandoned signup) or terminally-canceled tenants.
+    if tenant.get("stripe_subscription_id") and tenant["plan_status"] not in {
+        "canceled",
+        "incomplete_expired",
+    }:
+        return RedirectResponse("/admin/billing?already=1", status_code=303)
+    session = create_subscription_checkout(
+        tenant,
+        trial_days=_remaining_trial_days(tenant),
+        success_url=tenant_url(tenant["slug"], "/admin/billing?subscribed=1"),
+        cancel_url=tenant_url(tenant["slug"], "/admin/billing"),
+    )
+    log.info("tenant %s recovery checkout session %s created", tenant["slug"], session.id)
+    return RedirectResponse(session.url, status_code=303)
 
 
 def _welcome_email_task(tenant: dict) -> BackgroundTask | None:
@@ -1550,6 +1604,10 @@ async def billing(request: Request):
         "slug": "Type the studio address exactly to confirm deletion.",
         "password": "Wrong password — the studio was not deleted.",
     }
+    checkout_available = bool(config.STRIPE_SECRET_KEY and config.SAAS_STRIPE_PRICE_ID) and (
+        not tenant.get("stripe_subscription_id")
+        or tenant["plan_status"] in {"canceled", "incomplete_expired"}
+    )
     return templates.TemplateResponse(
         request,
         "admin/saas_billing.html",
@@ -1559,6 +1617,9 @@ async def billing(request: Request):
             "access_ok": tenant_has_access(tenant),
             "billing_status": tenant_billing_context(tenant),
             "delete_error": delete_errors.get(request.query_params.get("delete_error", "")),
+            "checkout_available": checkout_available,
+            "subscribed_notice": request.query_params.get("subscribed") == "1",
+            "already_notice": request.query_params.get("already") == "1",
         },
     )
 

@@ -60,6 +60,7 @@ states context, the decision, consequences, measured reopen criteria, and altern
 | [0053](0053-hosted-beta-gate-and-welcome-email.md) | Hosted beta gate + welcome email: MISE_SAAS_INVITE_CODE gates signup (constant-time, pre-provisioning; unset = public), deferred welcome email carries the studio URL on both checkout exits, login honors ?trial=1 confirmation | Accepted |
 | [0054](0054-tenant-self-serve-stripe-connection.md) | Tenant self-serve Stripe connection (BYO keys): Account panel writes the ADR 0049 fail-closed columns — both key + webhook secret required, live-verified before save, masked render, one-click fail-closed disconnect; Connect remains the later upgrade | Accepted |
 | [0055](0055-tenant-email-identity-and-integration-isolation.md) | Tenant email identity + integration isolation: studio-name From + owner Reply-To via one mailer seam, leads/booking copies route to the tenant owner, tenant-host booking links, and operator Notion/GCal/SMS fail closed in tenant contexts | Accepted |
+| [0056](0056-hosted-checkout-recovery.md) | Hosted checkout recovery: POST /admin/billing/checkout (re)starts the $20 subscription for no-sub or canceled tenants — remaining trial days carry over, spent trials bill at once, live subs refused; shared session helper with signup | Accepted |
 
 See also the operator runbook [`../MISE-SOLO-STUDIO-OS-RUNBOOK.md`](../MISE-SOLO-STUDIO-OS-RUNBOOK.md)
 (how to run it day to day), [`../MISE-SOLO-STUDIO-OS.md`](../MISE-SOLO-STUDIO-OS.md),
