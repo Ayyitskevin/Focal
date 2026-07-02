@@ -187,3 +187,103 @@ def test_legal_support_falls_back_without_configured_email(tmp_path, monkeypatch
     support = asyncio.run(saas.legal_support(_request("/support", "mise.test"))).body.decode()
     # No dead-end: without a configured address it still tells the user how to reach support.
     assert "Reply to any email from your studio" in support
+
+
+def test_invite_gate_blocks_signup_without_valid_code(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "SAAS_INVITE_CODE", "beta-2026")
+
+    def _signup(code):
+        return asyncio.run(
+            saas.start_trial(
+                _request("/start-trial", "mise.test", method="POST"),
+                studio_name="Gated Studio",
+                owner_email="gated@example.com",
+                slug="gated",
+                password="secret123",
+                invite_code=code,
+            )
+        )
+
+    # Missing and wrong codes are rejected BEFORE any provisioning.
+    for bad in (None, "", "wrong-code"):
+        resp = _signup(bad)
+        assert resp.status_code == 403
+        assert "private beta" in resp.body.decode()
+        assert saas.tenant_by_slug("gated") is None
+        assert not (tmp_path / "tenants" / "gated").exists()
+    # The right code (whitespace-tolerant) signs up normally.
+    ok = _signup("  beta-2026 ")
+    assert ok.status_code == 303
+    assert saas.tenant_by_slug("gated") is not None
+
+
+def test_signup_stays_open_when_no_invite_code_configured(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "SAAS_INVITE_CODE", "")
+    resp = asyncio.run(
+        saas.start_trial(
+            _request("/start-trial", "mise.test", method="POST"),
+            studio_name="Open Studio",
+            owner_email="open@example.com",
+            slug="openstudio",
+            password="secret123",
+        )
+    )
+    assert resp.status_code == 303
+    # And the pricing form doesn't ask for a code it doesn't need.
+    pricing = asyncio.run(saas.pricing(_request("/pricing", "mise.test"))).body.decode()
+    assert "invite_code" not in pricing
+
+
+def test_pricing_form_shows_invite_field_when_gated(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "SAAS_INVITE_CODE", "beta-2026")
+    pricing = asyncio.run(saas.pricing(_request("/pricing", "mise.test"))).body.decode()
+    assert 'name="invite_code"' in pricing
+
+
+def test_welcome_email_carries_studio_url_on_signup(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    sent = []
+    monkeypatch.setattr(saas.mailer, "configured", lambda: True)
+    monkeypatch.setattr(saas.mailer, "send", lambda *a, **k: sent.append(a))
+    resp = asyncio.run(
+        saas.start_trial(
+            _request("/start-trial", "mise.test", method="POST"),
+            studio_name="Welcome Studio",
+            owner_email="welcome@example.com",
+            slug="welcomestudio",
+            password="secret123",
+        )
+    )
+    assert resp.status_code == 303
+    # Deferred, not synchronous — same non-blocking pattern as the reset email.
+    assert sent == []
+    assert resp.background is not None
+    asyncio.run(resp.background())
+    assert len(sent) == 1
+    to, subject, body = sent[0][0], sent[0][1], sent[0][2]
+    assert to == "welcome@example.com"
+    assert "https://welcomestudio.mise.test/admin/login" in body
+    assert "Welcome Studio" in subject
+
+
+def test_login_confirms_trial_after_checkout_redirect(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    with saas.tenant_runtime(tenant):
+        request = Request(
+            {
+                "type": "http",
+                "method": "GET",
+                "path": "/admin/login",
+                "query_string": b"trial=1",
+                "headers": [(b"host", b"alpha.mise.test"), (b"accept", b"text/html")],
+                "scheme": "https",
+                "server": ("alpha.mise.test", 443),
+                "client": ("127.0.0.1", 50000),
+            }
+        )
+        body = asyncio.run(auth.login_form(request)).body.decode()
+    assert "your free trial is active" in body

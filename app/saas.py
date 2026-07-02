@@ -12,6 +12,7 @@ import hashlib
 import io
 import logging
 import re
+import secrets
 import sqlite3
 import tempfile
 import zipfile
@@ -1222,6 +1223,7 @@ def _pricing_context(
         "home_url": platform_url("/"),
         "pricing_url": platform_url("/pricing"),
         "demo_url": platform_url("/demo"),
+        "invite_required": bool(config.SAAS_INVITE_CODE),
     }
 
 
@@ -1282,6 +1284,7 @@ async def start_trial(
     signup_source: str | None = Form(None),
     signup_campaign: str | None = Form(None),
     signup_referrer: str | None = Form(None),
+    invite_code: str | None = Form(None),
 ):
     values = {
         "studio_name": studio_name,
@@ -1290,7 +1293,23 @@ async def start_trial(
         "signup_source": signup_source,
         "signup_campaign": signup_campaign,
         "signup_referrer": signup_referrer,
+        "invite_code": invite_code,
     }
+    # Private-beta gate (ADR 0053): checked before any provisioning happens.
+    if config.SAAS_INVITE_CODE and not secrets.compare_digest(
+        (invite_code or "").strip(), config.SAAS_INVITE_CODE
+    ):
+        return templates.TemplateResponse(
+            request,
+            "saas/pricing.html",
+            _pricing_context(
+                "Mise is in private beta — that invite code isn't valid. "
+                "Reply to your invite email if you need one.",
+                values,
+                path="/pricing",
+            ),
+            status_code=403,
+        )
     try:
         tenant = create_tenant(
             slug,
@@ -1311,6 +1330,9 @@ async def start_trial(
 
     success_url = tenant_url(tenant["slug"], "/admin/login?trial=1")
     cancel_url = platform_url("/pricing")
+    # The welcome email rides on BOTH exits (checkout and no-Stripe): it is the only
+    # durable record of the studio URL for someone who abandons checkout (ADR 0053).
+    welcome = _welcome_email_task(tenant)
     if config.STRIPE_SECRET_KEY or config.SAAS_STRIPE_PRICE_ID:
         if not (config.STRIPE_SECRET_KEY and config.SAAS_STRIPE_PRICE_ID):
             return templates.TemplateResponse(
@@ -1336,9 +1358,39 @@ async def start_trial(
             cancel_url=cancel_url,
         )
         log.info("tenant %s checkout session %s created", tenant["slug"], session.id)
-        return RedirectResponse(session.url, status_code=303)
+        return RedirectResponse(session.url, status_code=303, background=welcome)
 
-    return RedirectResponse(success_url, status_code=303)
+    return RedirectResponse(success_url, status_code=303, background=welcome)
+
+
+def _welcome_email_task(tenant: dict) -> BackgroundTask | None:
+    """Deferred signup welcome — sent after the response, same pattern as the
+    password-reset mail (never blocks the event loop; failures only log)."""
+    if not mailer.configured():
+        return None
+    owner_email = tenant["owner_email"]
+    studio_name = tenant["studio_name"]
+    slug = tenant["slug"]
+    login_url = tenant_url(slug, "/admin/login")
+    body = (
+        f"Welcome to Mise — {studio_name} is ready.\n\n"
+        f"Your studio lives at:\n{tenant_url(slug)}\n\n"
+        f"Sign in here (bookmark this):\n{login_url}\n\n"
+        f"Your {config.SAAS_TRIAL_DAYS}-day free trial is active. A good first step: sign in "
+        "and install a niche preset from the onboarding checklist — it seeds packages, lead "
+        "forms, and a demo client so nothing starts blank.\n\n"
+        "Your studio is its own isolated database. You can export all of it — or delete it — "
+        "anytime from the Billing page.\n\n"
+        f"Questions? {platform_url('/support')}\n"
+    )
+
+    def _send() -> None:
+        try:
+            mailer.send(owner_email, f"Your {studio_name} studio is ready", body)
+        except Exception:
+            log.exception("welcome email failed for %s", slug)
+
+    return BackgroundTask(_send)
 
 
 @router.post("/webhooks/stripe/saas")

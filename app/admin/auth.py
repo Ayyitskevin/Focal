@@ -15,6 +15,9 @@ async def login_form(request: Request):
     notice = None
     if request.query_params.get("reset"):
         notice = "Password updated — sign in with your new password."
+    elif request.query_params.get("trial"):
+        # Stripe checkout success_url and the no-Stripe signup both land here.
+        notice = "You're all set — your free trial is active. Sign in to set up your studio."
     return templates.TemplateResponse(
         request, "admin/login.html", {"error": None, "notice": notice}
     )
