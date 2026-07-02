@@ -33,3 +33,4 @@ __pycache__/
 
 # Cloudflare Origin CA certificate for the hosted deploy (ADR 0059) - never commit
 certs/
+node_modules
