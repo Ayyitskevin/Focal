@@ -40,6 +40,22 @@ def unsign(token: str) -> str | None:
         return None
 
 
+def sign_scoped(purpose: str, value: str) -> str:
+    """Purpose-scoped signed token (e.g. "pwreset") — same key, distinct namespace,
+    so a session cookie can never be replayed as a reset token or vice versa."""
+    return _serializer().dumps(f"{purpose}:{value}")
+
+
+def unsign_scoped(purpose: str, token: str, *, max_age: int) -> str | None:
+    """Verify a scoped token with its own expiry; None on bad/expired/wrong scope."""
+    try:
+        payload = _serializer().loads(token, max_age=max_age)
+    except BadSignature:  # SignatureExpired subclasses BadSignature
+        return None
+    prefix = f"{purpose}:"
+    return payload[len(prefix) :] if payload.startswith(prefix) else None
+
+
 def client_ip(request: Request) -> str:
     """Peer IP, or CF-Connecting-IP ONLY when the peer is local (cloudflared)."""
     peer = request.client.host if request.client else "?"
@@ -195,7 +211,10 @@ def admin_principal(request: Request) -> str:
 
     - Single-tenant (default): the legacy ``"admin"`` — unchanged, so existing self-hosted
       sessions keep working byte-for-byte after this ships.
-    - Hosted: ``"tenant:<slug>"`` on a tenant host, ``"operator"`` on the platform/root host.
+    - Hosted: ``"tenant:<id>:<slug>"`` on a tenant host, ``"operator"`` on the platform/root
+      host. The tenant **id** is in the payload because slugs are reusable after a studio is
+      deleted (ADR 0051): a cookie minted for the old "alpha" must not authenticate against a
+      NEW tenant that later registers "alpha" — same slug, different id, different principal.
 
     A tenant's own cookie replayed at another tenant subdomain or the operator console therefore
     no longer authenticates: the payload won't equal the target context's principal, and it can't
@@ -207,7 +226,7 @@ def admin_principal(request: Request) -> str:
     from . import saas
 
     tenant = saas.current_tenant()
-    return f"tenant:{tenant['slug']}" if tenant else "operator"
+    return f"tenant:{tenant['id']}:{tenant['slug']}" if tenant else "operator"
 
 
 def is_admin(request: Request) -> bool:

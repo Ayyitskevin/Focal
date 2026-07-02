@@ -12,7 +12,12 @@ router = APIRouter(prefix="/admin")
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_form(request: Request):
-    return templates.TemplateResponse(request, "admin/login.html", {"error": None})
+    notice = None
+    if request.query_params.get("reset"):
+        notice = "Password updated — sign in with your new password."
+    return templates.TemplateResponse(
+        request, "admin/login.html", {"error": None, "notice": notice}
+    )
 
 
 @router.post("/login")

@@ -1,0 +1,38 @@
+{% extends "base_cream.html" %}
+{% block title %}Reset password · {{ site_name }}{% endblock %}
+{% block cream_head %}
+<link rel="stylesheet" href="/static/fonts.css?v={{ static_rev }}">
+{% endblock %}
+{% block content %}
+<main class="login-wrap">
+  <div class="login-stack">
+    <div class="login-brand">
+      <span class="login-crest">{{ (saas_tenant.studio_name[:1] if saas_tenant else "M") }}</span>
+      <div class="login-word">
+        <div class="login-name">{{ saas_tenant.studio_name if saas_tenant else site_name }}</div>
+        <div class="login-eyebrow">Choose a new password</div>
+      </div>
+    </div>
+
+    {% if not valid %}
+    <div class="login-card">
+      <p class="error">{{ error or "This reset link is invalid or has expired." }}</p>
+      <p class="login-note"><a href="/admin/forgot" class="link">Request a new link</a></p>
+    </div>
+    {% else %}
+    <form method="post" action="/admin/reset" class="login-card">
+      <input type="hidden" name="token" value="{{ token }}">
+      <label for="reset-pw">New password</label>
+      <input id="reset-pw" type="password" name="password" autofocus required
+             minlength="8" autocomplete="new-password" placeholder="••••••••••">
+      <label for="reset-pw2">Repeat it</label>
+      <input id="reset-pw2" type="password" name="password_confirm" required
+             minlength="8" autocomplete="new-password" placeholder="••••••••••">
+      {% if error %}<p class="error">{{ error }}</p>{% endif %}
+      <button type="submit">Set new password</button>
+      <p class="login-note">At least 8 characters.</p>
+    </form>
+    {% endif %}
+  </div>
+</main>
+{% endblock %}
