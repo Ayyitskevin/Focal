@@ -28,17 +28,29 @@
     {% endif %}
   </table>
 
+  {% if subscribed_notice %}
+  <p class="notice">Checkout complete — Stripe will confirm your subscription here shortly.</p>
+  {% endif %}
+  {% if already_notice %}
+  <p class="notice">Your subscription is already active — manage it in the Stripe portal below.</p>
+  {% endif %}
   {% if not access_ok %}
   <p class="error">Your trial or subscription needs attention before the studio can be used again.</p>
   {% elif billing_status and billing_status.tone == "warn" %}
   <p class="notice">{{ billing_status.message }}</p>
   {% endif %}
 
+  {% if checkout_available %}
+  <form method="post" action="/admin/billing/checkout">
+    <button type="submit">{{ "Restart subscription" if tenant.stripe_subscription_id else "Start subscription" }} — ${{ (price_cents / 100)|round(0, 'floor')|int }}/month</button>
+  </form>
+  <p class="muted">Any unused trial days carry over; after the trial, billing starts right away.</p>
+  {% endif %}
   {% if tenant.stripe_customer_id %}
   <form method="post" action="/admin/billing/portal">
     <button type="submit">Open Stripe billing portal</button>
   </form>
-  {% else %}
+  {% elif not checkout_available %}
   <p class="muted">Stripe will attach to this account when the hosted billing checkout is completed.</p>
   {% endif %}
 </section>

@@ -1190,3 +1190,145 @@ def test_client_webhook_accepts_delivery_signed_with_previous_secret(tmp_path, m
     with saas.tenant_runtime("alpha"):
         result = asyncio.run(_post())
     assert result == {"ok": True, "ignored": "ping.ignored"}  # verified via the grace secret
+
+
+# ── Checkout recovery (ADR 0056) ──────────────────────────────────────────────
+
+
+def _fake_checkout_stripe():
+    import types
+
+    calls: list[dict] = []
+
+    def create(**kwargs):
+        calls.append(kwargs)
+        return types.SimpleNamespace(id="cs_1", url="https://checkout.stripe.test/cs_1")
+
+    fake = types.SimpleNamespace(
+        checkout=types.SimpleNamespace(Session=types.SimpleNamespace(create=create))
+    )
+    return fake, calls
+
+
+def _configure_platform_stripe(monkeypatch):
+    monkeypatch.setattr(config, "STRIPE_SECRET_KEY", "sk_test_platform")
+    monkeypatch.setattr(config, "SAAS_STRIPE_PRICE_ID", "price_20")
+
+
+def test_expired_trial_can_restart_checkout_and_pays_immediately(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    _configure_platform_stripe(monkeypatch)
+    monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    with saas.control_connect() as con:
+        con.execute(
+            "UPDATE tenants SET trial_ends_at=? WHERE id=?",
+            (saas._iso(saas._now() - timedelta(days=2)), tenant["id"]),
+        )
+    fake, calls = _fake_checkout_stripe()
+    monkeypatch.setattr(saas, "_stripe", lambda: fake)
+    with saas.tenant_runtime("alpha"):
+        resp = asyncio.run(
+            saas.billing_checkout(
+                _request(
+                    "/admin/billing/checkout",
+                    "alpha.mise.test",
+                    cookie=_tenant_cookie(tenant),
+                    method="POST",
+                )
+            )
+        )
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "https://checkout.stripe.test/cs_1"
+    (kwargs,) = calls
+    # Trial is spent -> Stripe bills immediately; no free-trial re-grant.
+    assert "trial_period_days" not in kwargs["subscription_data"]
+    assert kwargs["metadata"]["tenant_id"] == str(tenant["id"])
+    assert kwargs["success_url"].endswith("/admin/billing?subscribed=1")
+
+
+def test_mid_trial_checkout_carries_remaining_days_only(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    _configure_platform_stripe(monkeypatch)
+    monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    with saas.control_connect() as con:
+        con.execute(
+            "UPDATE tenants SET trial_ends_at=? WHERE id=?",
+            (saas._iso(saas._now() + timedelta(days=7, hours=5)), tenant["id"]),
+        )
+    fake, calls = _fake_checkout_stripe()
+    monkeypatch.setattr(saas, "_stripe", lambda: fake)
+    with saas.tenant_runtime("alpha"):
+        resp = asyncio.run(
+            saas.billing_checkout(
+                _request(
+                    "/admin/billing/checkout",
+                    "alpha.mise.test",
+                    cookie=_tenant_cookie(tenant),
+                    method="POST",
+                )
+            )
+        )
+    assert resp.status_code == 303
+    assert calls[0]["subscription_data"]["trial_period_days"] == 7  # not another full 14
+
+
+def test_checkout_recovery_refuses_when_subscription_is_live(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    _configure_platform_stripe(monkeypatch)
+    monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    saas.update_tenant_billing(tenant["id"], plan_status="active", stripe_subscription_id="sub_1")
+    fake, calls = _fake_checkout_stripe()
+    monkeypatch.setattr(saas, "_stripe", lambda: fake)
+    with saas.tenant_runtime("alpha"):
+        resp = asyncio.run(
+            saas.billing_checkout(
+                _request(
+                    "/admin/billing/checkout",
+                    "alpha.mise.test",
+                    cookie=_tenant_cookie(tenant),
+                    method="POST",
+                )
+            )
+        )
+    assert resp.status_code == 303 and "already=1" in resp.headers["location"]
+    assert calls == []  # no session was created
+    # …but a CANCELED subscription may restart via checkout.
+    saas.update_tenant_billing(tenant["id"], plan_status="canceled")
+    with saas.tenant_runtime("alpha"):
+        resp = asyncio.run(
+            saas.billing_checkout(
+                _request(
+                    "/admin/billing/checkout",
+                    "alpha.mise.test",
+                    cookie=_tenant_cookie(tenant),
+                    method="POST",
+                )
+            )
+        )
+    assert resp.headers["location"] == "https://checkout.stripe.test/cs_1"
+
+
+def test_billing_page_offers_checkout_only_when_recoverable(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    _configure_platform_stripe(monkeypatch)
+    monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    with saas.tenant_runtime("alpha"):
+        page = asyncio.run(
+            saas.billing(
+                _request("/admin/billing", "alpha.mise.test", cookie=_tenant_cookie(tenant))
+            )
+        ).body.decode()
+    assert "/admin/billing/checkout" in page  # abandoned-checkout trial can pay
+    assert "Start subscription" in page
+    saas.update_tenant_billing(tenant["id"], plan_status="active", stripe_subscription_id="sub_1")
+    with saas.tenant_runtime("alpha"):
+        page = asyncio.run(
+            saas.billing(
+                _request("/admin/billing", "alpha.mise.test", cookie=_tenant_cookie(tenant))
+            )
+        ).body.decode()
+    assert "/admin/billing/checkout" not in page  # live sub manages via the portal
