@@ -44,14 +44,25 @@ def _default_reply_to() -> str:
     return tenant["owner_email"] if tenant else ""
 
 
+def _hdr(value: str) -> str:
+    """Strip CR/LF (and other control chars) from a value bound for an email header.
+
+    Reply-To and To can carry attacker-supplied addresses (public contact/lead forms
+    → reply_to=<their email>). A newline there is the classic SMTP header-injection
+    vector (smuggling Bcc/extra headers). The modern EmailMessage policy already
+    rejects most of this at send time; stripping first is defense in depth and turns
+    a hard 500 into a clean send (ADR 0061)."""
+    return "".join(ch for ch in (value or "") if ch not in "\r\n" and ch >= " ")[:998]
+
+
 def _build_message(
     to: str, subject: str, body: str, reply_to: str = "", ics: dict | None = None
 ) -> EmailMessage:
     msg = EmailMessage()
     msg["From"] = f"{sender_name()} <{config.GMAIL_USER}>"
-    msg["To"] = to
-    msg["Subject"] = subject
-    reply_to = reply_to or _default_reply_to()
+    msg["To"] = _hdr(to)
+    msg["Subject"] = _hdr(subject)
+    reply_to = _hdr(reply_to or _default_reply_to())
     if reply_to:
         msg["Reply-To"] = reply_to
     msg.set_content(body)

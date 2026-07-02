@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 
-from .. import config, db, jobs, security
+from .. import config, db, jobs, security, upload_guard
 from ..imaging import PHOTO_EXTS, VIDEO_EXTS
 
 log = logging.getLogger("mise.admin.uploads")
@@ -54,11 +54,14 @@ async def upload(gallery_id: int, files: list[UploadFile], section_id: int | Non
             continue
         stored = f"{uuid.uuid4().hex}{ext}"
         dest = base / "original" / stored
-        size = 0
-        with dest.open("wb") as out:
-            while chunk := await f.read(1 << 20):
-                out.write(chunk)
-                size += len(chunk)
+        try:
+            # Per-file cap + content-disguise reject; one bad file is skipped, not
+            # allowed to abort a 200-photo batch (ADR 0061).
+            size = await upload_guard.save_capped(f, dest, ext, config.MAX_UPLOAD_MB * (1 << 20))
+        except HTTPException as exc:
+            log.warning("gallery %s: file %s rejected (%s)", gallery_id, name, exc.detail)
+            rejected.append(name)
+            continue
         asset_id = db.run(
             "INSERT INTO assets (gallery_id, section_id, kind, filename, stored, bytes) "
             "VALUES (?,?,?,?,?,?)",

@@ -102,6 +102,20 @@ def client_ip(request: Request) -> str:
 # ── PIN lockout ────────────────────────────────────────────────────────────
 
 
+def pin_matches(supplied: str, actual: str | None) -> bool:
+    """Constant-time gallery-PIN comparison (ADR 0061) — no early-exit timing leak.
+
+    `!=` on strings short-circuits at the first differing byte, leaking PIN length
+    and prefix through response timing. compare_digest is fixed-time over equal-
+    length inputs; the length pre-check only rejects (never accepts) and is not the
+    secret-dependent branch."""
+    supplied = (supplied or "").strip()
+    actual = (actual or "").strip()
+    if not actual or len(supplied) != len(actual):
+        return False
+    return secrets.compare_digest(supplied, actual)
+
+
 def pin_locked(ip: str, gallery_id: int) -> bool:
     cutoff = time.time() - config.PIN_LOCKOUT_MIN * 60
     row = db.one(
