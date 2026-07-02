@@ -110,6 +110,12 @@ SAAS_STRIPE_WEBHOOK_SECRET = os.environ.get("MISE_SAAS_STRIPE_WEBHOOK_SECRET", "
 SAAS_PAST_DUE_GRACE_DAYS = int(os.environ.get("MISE_SAAS_PAST_DUE_GRACE_DAYS", "10"))
 SAAS_ANNOUNCEMENT = os.environ.get("MISE_SAAS_ANNOUNCEMENT", "").strip()
 SAAS_ANNOUNCEMENT_URL = os.environ.get("MISE_SAAS_ANNOUNCEMENT_URL", "").strip()
+# Public support contact shown on the /support and legal pages. Falls back to the
+# operator's Gmail sender if unset so the pages are never dead-ended.
+SAAS_SUPPORT_EMAIL = (
+    os.environ.get("MISE_SAAS_SUPPORT_EMAIL", "").strip()
+    or os.environ.get("MISE_GMAIL_USER", "").strip()
+)
 
 SECRET_KEY = os.environ.get("MISE_SECRET_KEY", "")  # required in prod
 ADMIN_PASSWORD = os.environ.get("MISE_ADMIN_PASSWORD", "")  # required in prod

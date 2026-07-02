@@ -152,3 +152,38 @@ def test_platform_marketing_pages_render_share_metadata(tmp_path, monkeypatch):
     assert '<link rel="canonical" href="https://mise.test/pricing">' in pricing
     assert 'property="og:title" content="Mise Demo - F&B and Wedding Client Studio"' in demo
     assert '<link rel="canonical" href="https://mise.test/demo">' in demo
+
+
+def test_legal_pages_render_and_are_platform_paths(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "SAAS_SUPPORT_EMAIL", "help@mise.test")
+
+    terms = asyncio.run(saas.legal_terms(_request("/terms", "mise.test")))
+    privacy = asyncio.run(saas.legal_privacy(_request("/privacy", "mise.test")))
+    support = asyncio.run(saas.legal_support(_request("/support", "mise.test")))
+
+    assert terms.status_code == privacy.status_code == support.status_code == 200
+    terms_body, privacy_body, support_body = (
+        terms.body.decode(),
+        privacy.body.decode(),
+        support.body.decode(),
+    )
+    # Each doc renders its own distinct content, not a shared stub.
+    assert "Terms of Service" in terms_body and "$20/month" in terms_body
+    assert "Privacy Policy" in privacy_body
+    assert "train AI models" in privacy_body  # the no-AI-training promise
+    assert "help@mise.test" in support_body  # support email surfaces
+    # The three routes must be servable at the root host (not redirected to /pricing).
+    for path in ("/terms", "/privacy", "/support"):
+        assert saas._platform_path(path)
+    # Pricing carries the legal consent line + footer links.
+    pricing_body = asyncio.run(saas.pricing(_request("/pricing", "mise.test"))).body.decode()
+    assert 'href="/terms"' in pricing_body and 'href="/privacy"' in pricing_body
+
+
+def test_legal_support_falls_back_without_configured_email(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "SAAS_SUPPORT_EMAIL", "")
+    support = asyncio.run(saas.legal_support(_request("/support", "mise.test"))).body.decode()
+    # No dead-end: without a configured address it still tells the user how to reach support.
+    assert "Reply to any email from your studio" in support

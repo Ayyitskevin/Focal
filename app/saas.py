@@ -1120,7 +1120,18 @@ def tenant_billing_context(tenant: dict | None) -> dict | None:
 
 def _platform_path(path: str) -> bool:
     return (
-        path in {"/", "/pricing", "/demo", "/start-trial", "/healthz", "/favicon.ico"}
+        path
+        in {
+            "/",
+            "/pricing",
+            "/demo",
+            "/start-trial",
+            "/terms",
+            "/privacy",
+            "/support",
+            "/healthz",
+            "/favicon.ico",
+        }
         or path.startswith("/static/")
         or path in {"/admin/login", "/admin/logout", "/admin/saas"}
         or path.startswith("/admin/saas/")
@@ -1229,6 +1240,36 @@ async def pricing(request: Request):
 @router.get("/demo", response_class=HTMLResponse)
 async def demo(request: Request):
     return templates.TemplateResponse(request, "saas/demo.html", _pricing_context(path="/demo"))
+
+
+_LEGAL_DOCS = {
+    "terms": "Terms of Service",
+    "privacy": "Privacy Policy",
+    "support": "Support",
+}
+
+
+@router.get("/terms", response_class=HTMLResponse)
+async def legal_terms(request: Request):
+    return _legal_page(request, "terms")
+
+
+@router.get("/privacy", response_class=HTMLResponse)
+async def legal_privacy(request: Request):
+    return _legal_page(request, "privacy")
+
+
+@router.get("/support", response_class=HTMLResponse)
+async def legal_support(request: Request):
+    return _legal_page(request, "support")
+
+
+def _legal_page(request: Request, doc: str) -> HTMLResponse:
+    ctx = _pricing_context(path=f"/{doc}")
+    ctx.update(
+        {"doc": doc, "doc_title": _LEGAL_DOCS[doc], "support_email": config.SAAS_SUPPORT_EMAIL}
+    )
+    return templates.TemplateResponse(request, "saas/legal.html", ctx)
 
 
 @router.post("/start-trial")
