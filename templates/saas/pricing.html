@@ -92,6 +92,11 @@
         <label>Admin password
           <input type="password" name="password" minlength="8" autocomplete="new-password" required>
         </label>
+        {% if invite_required %}
+        <label>Invite code
+          <input name="invite_code" value="{{ values.invite_code or '' }}" placeholder="from your beta invite" autocomplete="off" required>
+        </label>
+        {% endif %}
         <input type="hidden" name="signup_source" value="{{ values.signup_source or '' }}">
         <input type="hidden" name="signup_campaign" value="{{ values.signup_campaign or '' }}">
         <input type="hidden" name="signup_referrer" value="{{ values.signup_referrer or '' }}">

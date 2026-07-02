@@ -57,6 +57,7 @@ states context, the decision, consequences, measured reopen criteria, and altern
 | [0050](0050-hosted-billing-lifecycle-integrity.md) | Hosted billing-lifecycle integrity: exactly-once SaaS webhooks (marker + effect in one transaction), past_due dunning grace instead of instant lockout, per-IP signup throttle | Accepted |
 | [0051](0051-hosted-recovery-and-ownership.md) | Hosted recovery & ownership: stateless single-use password reset, one-click full-studio export (consistent DB snapshot + media), self-serve delete (cancels billing, tombstones slug, trash-parks data) | Accepted |
 | [0052](0052-hosted-trust-pages.md) | Hosted trust pages: public /terms, /privacy, /support at the platform root (one template, product-accurate copy incl. no-AI-training promise), footer + signup consent links; content-only, no red-light surface | Accepted |
+| [0053](0053-hosted-beta-gate-and-welcome-email.md) | Hosted beta gate + welcome email: MISE_SAAS_INVITE_CODE gates signup (constant-time, pre-provisioning; unset = public), deferred welcome email carries the studio URL on both checkout exits, login honors ?trial=1 confirmation | Accepted |
 
 See also the operator runbook [`../MISE-SOLO-STUDIO-OS-RUNBOOK.md`](../MISE-SOLO-STUDIO-OS-RUNBOOK.md)
 (how to run it day to day), [`../MISE-SOLO-STUDIO-OS.md`](../MISE-SOLO-STUDIO-OS.md),

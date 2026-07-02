@@ -116,6 +116,9 @@ SAAS_SUPPORT_EMAIL = (
     os.environ.get("MISE_SAAS_SUPPORT_EMAIL", "").strip()
     or os.environ.get("MISE_GMAIL_USER", "").strip()
 )
+# Private-beta gate (ADR 0053): when set, /start-trial requires this exact code;
+# empty = signup is open to the public. One env flip takes beta -> launch.
+SAAS_INVITE_CODE = os.environ.get("MISE_SAAS_INVITE_CODE", "").strip()
 
 SECRET_KEY = os.environ.get("MISE_SECRET_KEY", "")  # required in prod
 ADMIN_PASSWORD = os.environ.get("MISE_ADMIN_PASSWORD", "")  # required in prod
