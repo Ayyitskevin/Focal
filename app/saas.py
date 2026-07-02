@@ -247,6 +247,10 @@ def migrate_control() -> None:
         # One-shot trial-ending reminder stamp (ADR 0060): set when the platform has
         # emailed the owner that a card-less trial is about to end.
         _ensure_column(con, "tenants", "trial_reminder_sent_at", "trial_reminder_sent_at TEXT")
+        # Tenant pulse (Batch A2): stamped on every successful tenant admin login —
+        # the operator's only usage signal (updated_at tracks billing writes and the
+        # launch score tracks setup completeness; neither says "gone quiet").
+        _ensure_column(con, "tenants", "last_login_at", "last_login_at TEXT")
         # Offboarding tombstone (ADR 0051): set when the owner deletes the studio; the
         # slug is renamed so the address frees up, and the row keeps billing linkage.
         _ensure_column(con, "tenants", "deleted_at", "deleted_at TEXT")
@@ -404,6 +408,10 @@ def operator_tenant_overview() -> dict:
         has_card = bool(tenant.get("stripe_customer_id"))
         if has_card:
             counts["card_on_file"] += 1
+        # Silence = days since the owner last logged in (falling back to signup for
+        # a tenant who provisioned and never came back — that IS silence). The only
+        # usage pulse the operator has; launch score measures setup, not presence.
+        silent_days = _days_since(tenant.get("last_login_at") or tenant.get("created_at"))
         if tenant["plan_status"] == "trialing":
             counts["trialing"] += 1
             counts["trial_pipeline_cents"] += config.SAAS_PRICE_CENTS
@@ -411,11 +419,17 @@ def operator_tenant_overview() -> dict:
                 # Abandoned-checkout trials: they look healthy until day 14, then
                 # hit the paywall — the single biggest conversion leak (ADR 0056/0060).
                 counts["no_card_trials"] += 1
-            if not launch["complete"] and (
-                billing["tone"] == "block"
-                or billing["trial_days_left"] is None
-                or billing["trial_days_left"] <= 3
+            silent = silent_days is not None and silent_days >= SILENT_TRIAL_DAYS
+            if silent or (
+                not launch["complete"]
+                and (
+                    billing["tone"] == "block"
+                    or billing["trial_days_left"] is None
+                    or billing["trial_days_left"] <= 3
+                )
             ):
+                # A silent trial is at-risk even when launch-ready: setup done and
+                # gone quiet converts no better than never-set-up (Batch A2).
                 counts["trials_at_risk"] += 1
         if tenant["plan_status"] == "active":
             counts["active"] += 1
@@ -437,6 +451,8 @@ def operator_tenant_overview() -> dict:
                 "data_path": str(tenant_data_path(tenant["slug"])),
                 "db_exists": tenant_db_path(tenant["slug"]).exists(),
                 "card_on_file": bool(tenant.get("stripe_customer_id")),
+                "last_login_at": tenant.get("last_login_at"),
+                "silent_days": silent_days,
             }
         )
     counts["support_queue"] = counts["attention"] + counts["custom_domains_pending"]
@@ -588,6 +604,27 @@ def operator_trial_nudges(overview: dict | None = None) -> list[dict]:
     )
 
 
+# Days of owner silence before a trialing studio counts as at-risk (Batch A2).
+SILENT_TRIAL_DAYS = 5
+
+
+def touch_tenant_login(tenant_id: int) -> None:
+    """Stamp last_login_at on a successful tenant admin login (Batch A2)."""
+    with control_connect() as con:
+        con.execute("UPDATE tenants SET last_login_at=datetime('now') WHERE id=?", (tenant_id,))
+
+
+def _days_since(stamp: str | None) -> int | None:
+    """Whole days since a control-DB datetime('now') stamp (UTC, naive) — None if unset."""
+    if not stamp:
+        return None
+    try:
+        then = datetime.fromisoformat(stamp)
+    except ValueError:
+        return None
+    return max((datetime.now(UTC).replace(tzinfo=None) - then).days, 0)
+
+
 FEEDBACK_MAX_CHARS = 2000
 
 
@@ -642,6 +679,7 @@ def operator_tenant_export_csv(overview: dict | None = None) -> str:
         "data_path",
         "created_at",
         "updated_at",
+        "last_login_at",
     ]
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
@@ -675,6 +713,7 @@ def operator_tenant_export_csv(overview: dict | None = None) -> str:
                 "data_path": row["data_path"],
                 "created_at": tenant["created_at"],
                 "updated_at": tenant.get("updated_at") or "",
+                "last_login_at": tenant.get("last_login_at") or "",
             }
         )
     return output.getvalue()

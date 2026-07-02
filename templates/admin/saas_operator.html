@@ -191,7 +191,14 @@
       <td>
         <strong>{{ tenant.studio_name }}</strong><br>
         <a href="{{ row.tenant_url }}">{{ tenant.slug }}.{{ root_domain }}</a><br>
-        <span class="muted">{{ tenant.owner_email }}</span>
+        <span class="muted">{{ tenant.owner_email }}</span><br>
+        {% if not tenant.last_login_at %}
+        <span class="badge is-draft">never signed in</span>
+        {% elif row.silent_days and row.silent_days >= 5 %}
+        <span class="badge is-declined">quiet {{ row.silent_days }}d</span>
+        {% else %}
+        <span class="muted">seen {{ 'today' if not row.silent_days else row.silent_days ~ 'd ago' }}</span>
+        {% endif %}
       </td>
       <td>
         <span class="badge {{ 'is-active' if row.billing.tone == 'ok' else 'is-declined' if row.billing.tone == 'block' else 'is-sent' }}">{{ tenant.plan_status }}</span>
