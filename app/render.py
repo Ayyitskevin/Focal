@@ -20,10 +20,25 @@ def _static_rev() -> int:
     )
 
 
+def _site_name() -> str:
+    """The studio's own name in a hosted tenant context, else the operator's
+    SITE_NAME — the template twin of mailer.sender_name() (ADR 0055). Without
+    this every tenant's admin topbar, PIN-page titles, error pages, and receipts
+    rendered the OPERATOR's studio name to another studio's clients."""
+    if config.SAAS_MODE:
+        from . import saas  # lazy: saas imports render
+
+        tenant = saas.current_tenant()
+        if tenant:
+            return tenant["studio_name"]
+    return config.SITE_NAME
+
+
 def _context(request) -> dict:
     return {
         "static_rev": _static_rev(),
         "base_url": urls.public_base_url(request),
+        "site_name": _site_name(),
         "saas_mode": config.SAAS_MODE,
         "saas_tenant": getattr(request.state, "tenant", None),
         "saas_billing": getattr(request.state, "saas_billing", None),
