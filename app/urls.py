@@ -7,7 +7,7 @@ from fastapi import Request
 from . import config
 
 
-def _request_origin(request: Request) -> str:
+def request_origin(request: Request) -> str:
     proto = request.headers.get("x-forwarded-proto") or request.url.scheme or "https"
     host = request.headers.get("host") or request.url.netloc
     return f"{proto}://{host}".rstrip("/")
@@ -16,7 +16,7 @@ def _request_origin(request: Request) -> str:
 def public_base_url(request: Request | None = None) -> str:
     if config.SAAS_MODE:
         if request is not None:
-            return _request_origin(request)
+            return request_origin(request)
         from . import saas
 
         tenant = saas.current_tenant()

@@ -12,7 +12,7 @@ import logging
 import time
 from collections import defaultdict, deque
 
-from fastapi import Request
+from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 
 from . import config, security
@@ -52,7 +52,7 @@ def _gc(now: float) -> None:
         _hits.pop(key, None)
 
 
-def check(request: Request, path: str) -> JSONResponse | None:
+def check(request: Request, path: str) -> Response | None:
     """Return a 429 response if over limit, else None (and record the hit)."""
     bucket = _bucket_for(path, request.method)
     if bucket is None or security.is_admin(request):
@@ -68,10 +68,23 @@ def check(request: Request, path: str) -> JSONResponse | None:
     if len(dq) >= limit:
         retry = int(dq[0] + window - now) + 1
         log.warning("rate limit hit: %s bucket=%s ip=%s", path, bucket, ip)
+        headers = {"Retry-After": str(retry)}
+        if "text/html" in request.headers.get("accept", ""):
+            # A person in a browser (a client on their gallery, not a script)
+            # deserves the branded page, not a JSON blob at their worst moment.
+            from .render import templates  # lazy: render pulls in db/urls
+
+            return templates.TemplateResponse(
+                request,
+                "public/error.html",
+                {"message": "That was a little too fast — give it a few seconds, then try again."},
+                status_code=429,
+                headers=headers,
+            )
         return JSONResponse(
             {"detail": "Too many requests — slow down."},
             status_code=429,
-            headers={"Retry-After": str(retry)},
+            headers=headers,
         )
     dq.append(now)
     return None

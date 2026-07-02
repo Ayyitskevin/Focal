@@ -4,6 +4,7 @@
 <main class="center-card">
   <h1>{{ g.title }}</h1>
   {% if g.client_name %}<p class="muted">for {{ g.client_name }}</p>{% endif %}
+  <p class="muted">Your photos are ready — enter the PIN from your email to view them.</p>
   <form method="post" action="/g/{{ g.slug }}/pin" class="pin-form">
     <input type="text" name="pin" inputmode="numeric" pattern="[0-9]{4}" maxlength="4"
            placeholder="4-digit PIN" autofocus required>

@@ -194,7 +194,8 @@ async def view(request: Request, slug: str):
             delta = now - last
             secs = delta.total_seconds()
             if secs < 3600:
-                when = f"{max(int(secs // 60), 1)} minutes ago"
+                mins = max(int(secs // 60), 1)
+                when = f"{mins} minute" + ("s" if mins != 1 else "") + " ago"
             elif secs < 86400:
                 hrs = int(secs // 3600)
                 when = f"{hrs} hour" + ("s" if hrs != 1 else "") + " ago"
@@ -250,7 +251,10 @@ async def check_pin(request: Request, slug: str, pin: str = Form(...)):
     if not security.pin_matches(pin, p["pin"]):
         security.pin_fail(ip, -p["id"])
         return templates.TemplateResponse(
-            request, "public/portal_pin.html", {"p": p, "error": "Wrong PIN."}, status_code=401
+            request,
+            "public/portal_pin.html",
+            {"p": p, "error": "That PIN doesn't match — double-check the email we sent you."},
+            status_code=401,
         )
     security.pin_clear(ip, -p["id"])
     resp = RedirectResponse(f"/portal/{slug}", status_code=303)
