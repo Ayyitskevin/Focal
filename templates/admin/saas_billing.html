@@ -42,4 +42,26 @@
   <p class="muted">Stripe will attach to this account when the hosted billing checkout is completed.</p>
   {% endif %}
 </section>
+
+<section class="panel">
+  <h2>Your data</h2>
+  <p class="muted">Your studio is its own database — not rows in someone else's. Take all of it whenever you like.</p>
+  <p><a class="pgtop-link" href="/admin/export-studio">Download studio archive (.zip)</a></p>
+  <p class="muted">One file: your full database plus every uploaded photo and video.</p>
+</section>
+
+<section class="panel">
+  <h2>Delete this studio</h2>
+  <p class="muted">Cancels the subscription and takes <strong>{{ tenant.slug }}</strong> offline immediately.
+     Export your archive first — this is the leave-anytime promise, not a pause.</p>
+  {% if delete_error %}<p class="error">{{ delete_error }}</p>{% endif %}
+  <form method="post" action="/admin/delete-studio"
+        onsubmit="return confirm('Delete {{ tenant.slug }} and cancel billing? This takes the studio offline immediately.');">
+    <label for="del-slug">Type the studio address to confirm ({{ tenant.slug }})</label>
+    <input id="del-slug" type="text" name="confirm_slug" required autocomplete="off" placeholder="{{ tenant.slug }}">
+    <label for="del-pw">Your password</label>
+    <input id="del-pw" type="password" name="password" required autocomplete="current-password">
+    <button type="submit" class="danger">Delete studio &amp; cancel billing</button>
+  </form>
+</section>
 {% endblock %}

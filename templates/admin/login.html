@@ -23,10 +23,11 @@
       <label for="login-pw">Password</label>
       <input id="login-pw" type="password" name="password" autofocus required
              autocomplete="current-password" placeholder="••••••••••">
+      {% if notice %}<p class="notice">{{ notice }}</p>{% endif %}
       {% if error %}<p class="error">{{ error }}</p>{% endif %}
       <button type="submit">Sign in</button>
       <p class="login-note">
-        {% if saas_mode %}14-day trial · $20/month after trial · cancel anytime{% else %}Also gated by Cloudflare Access · per-IP lockout after 5 tries{% endif %}
+        {% if saas_mode %}14-day trial · $20/month after trial · cancel anytime{% if saas_tenant %} · <a href="/admin/forgot" class="link">Forgot password?</a>{% endif %}{% else %}Also gated by Cloudflare Access · per-IP lockout after 5 tries{% endif %}
       </p>
     </form>
 

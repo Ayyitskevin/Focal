@@ -8,10 +8,13 @@ SQLite database and file-storage root.
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import logging
 import re
 import sqlite3
+import tempfile
+import zipfile
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
@@ -19,9 +22,17 @@ from pathlib import Path
 from urllib.parse import quote, urlsplit
 
 from fastapi import APIRouter, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+)
+from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
-from . import config, db, passwords, security, urls
+from . import config, db, mailer, passwords, security, urls
 from .render import templates
 
 log = logging.getLogger("mise.saas")
@@ -216,6 +227,9 @@ def migrate_control() -> None:
         _ensure_column(
             con, "tenants", "client_stripe_webhook_secret", "client_stripe_webhook_secret TEXT"
         )
+        # Offboarding tombstone (ADR 0051): set when the owner deletes the studio; the
+        # slug is renamed so the address frees up, and the row keeps billing linkage.
+        _ensure_column(con, "tenants", "deleted_at", "deleted_at TEXT")
         con.execute(
             """CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_custom_domain
                ON tenants(custom_domain) WHERE custom_domain IS NOT NULL"""
@@ -792,6 +806,149 @@ def update_tenant_billing(
         fresh.execute(sql, params)
 
 
+def set_tenant_password(tenant_id: int, password: str) -> None:
+    if len(password or "") < 8:
+        raise ValueError("Use at least 8 characters for the admin password.")
+    # Deliberately does NOT stamp updated_at — that column doubles as the
+    # past_due dunning clock (ADR 0050) and a password change must not extend it.
+    with control_connect() as con:
+        con.execute(
+            "UPDATE tenants SET admin_password_hash=? WHERE id=?",
+            (passwords.hash_password(password), tenant_id),
+        )
+
+
+# ── Password reset (ADR 0051) — stateless, single-use, 2-hour tokens ──────────
+
+_PWRESET_MAX_AGE = 2 * 3600
+
+
+def _pwreset_fingerprint(tenant: dict) -> str:
+    # Binding the token to a digest of the CURRENT hash makes it single-use:
+    # once the password changes (by this token or any other means), every
+    # outstanding reset link dies, with no server-side token table.
+    return hashlib.sha256((tenant["admin_password_hash"] or "").encode()).hexdigest()[:16]
+
+
+def make_password_reset_token(tenant: dict) -> str:
+    return security.sign_scoped("pwreset", f"{tenant['id']}:{_pwreset_fingerprint(tenant)}")
+
+
+def redeem_password_reset_token(token: str) -> dict | None:
+    """Tenant for a valid, unexpired, still-unused reset token — else None."""
+    payload = security.unsign_scoped("pwreset", token, max_age=_PWRESET_MAX_AGE)
+    if not payload or ":" not in payload:
+        return None
+    tenant_id_s, fingerprint = payload.split(":", 1)
+    try:
+        tenant = tenant_by_id(int(tenant_id_s))
+    except ValueError:
+        return None
+    if not tenant or tenant.get("deleted_at"):
+        return None
+    if fingerprint != _pwreset_fingerprint(tenant):
+        return None  # password already changed → token spent
+    return tenant
+
+
+# ── Studio export + delete (ADR 0051) — the "your data, your call" promises ───
+
+
+def build_studio_export(tenant: dict) -> Path:
+    """Zip the WHOLE studio: a consistent DB snapshot plus every data/media file.
+
+    The DB goes in via sqlite3's backup API (point-in-time consistent under WAL);
+    the live db/-wal/-shm files are skipped in favor of that snapshot, and the
+    tenant's ``tmp``/``zips`` scratch dirs are excluded (scratch isn't studio data —
+    and the export zip itself is written into ``tmp``, on the same volume as the
+    data rather than a possibly-small system tmpfs). Blocking work — callers on the
+    event loop must offload (the route uses run_in_threadpool). Returns the temp
+    zip path; the caller owns deletion (FileResponse background task), and this
+    function unlinks it itself if the build fails.
+    """
+    slug = tenant["slug"]
+    data_dir = tenant_data_path(slug)
+    ensure_tenant_database(tenant)
+    scratch_dir = data_dir / "tmp"
+    scratch_dir.mkdir(parents=True, exist_ok=True)
+    tmp = tempfile.NamedTemporaryFile(
+        prefix=f"mise-export-{slug}-", suffix=".zip", dir=scratch_dir, delete=False
+    )
+    tmp.close()
+    tmp_zip = Path(tmp.name)
+    live_db_names = {"mise.db", "mise.db-wal", "mise.db-shm"}
+    skip_roots = {"tmp", "zips"}  # scratch: never studio data, and where this zip lives
+    try:
+        with tempfile.TemporaryDirectory() as snap_dir:
+            snapshot = Path(snap_dir) / "mise.db"
+            src = sqlite3.connect(tenant_db_path(slug))
+            try:
+                dst = sqlite3.connect(snapshot)
+                try:
+                    src.backup(dst)
+                finally:
+                    dst.close()
+            finally:
+                src.close()
+            with zipfile.ZipFile(tmp_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.write(snapshot, "mise.db")
+                for path in sorted(data_dir.rglob("*")):
+                    if not path.is_file():
+                        continue
+                    rel = path.relative_to(data_dir)
+                    if str(rel) in live_db_names or rel.parts[0] in skip_roots:
+                        continue
+                    zf.write(path, str(rel))
+    except BaseException:
+        tmp_zip.unlink(missing_ok=True)
+        raise
+    return tmp_zip
+
+
+def delete_tenant_studio(tenant: dict) -> None:
+    """Offboard a studio: tombstone the row, stop billing, park the data in trash.
+
+    Deliberately NOT a hard rm: the data dir moves to .trash/<tombstone> so an
+    accidental deletion stays operator-recoverable for the retention window
+    (runbook), while the slug frees up immediately. The control row keeps its
+    Stripe linkage so any final billing events land on the tombstone, not nowhere.
+
+    Order matters. The tombstone UPDATE commits FIRST (durable, reversible by the
+    operator); only then do we fire the *irreversible* Stripe cancel — so a control-DB
+    failure can never strand a canceled subscription against a still-live-looking row.
+    The tombstone slug carries the tenant id so it can never collide (unique index),
+    even on a same-second retry. Idempotent: a row already tombstoned is a no-op.
+    """
+    if tenant.get("deleted_at"):
+        return
+    slug = tenant["slug"]
+    tombstone = f"{slug}-deleted-{tenant['id']}-{_now().strftime('%Y%m%d%H%M%S')}"
+    now = _iso(_now())
+    with control_connect() as con:
+        con.execute(
+            "UPDATE tenants SET slug=?, plan_status='canceled', deleted_at=?, "
+            "custom_domain=NULL, updated_at=? WHERE id=? AND deleted_at IS NULL",
+            (tombstone, now, now, tenant["id"]),
+        )
+    # DB is now committed and the studio is logically gone. Deleting must stop the
+    # $20 charge — best-effort cancel; on failure the row is already canceled and the
+    # operator console surfaces it for manual follow-up (never a silent live charge).
+    if config.STRIPE_SECRET_KEY and tenant.get("stripe_subscription_id"):
+        try:
+            _stripe().Subscription.cancel(
+                tenant["stripe_subscription_id"], api_key=config.STRIPE_SECRET_KEY
+            )
+        except Exception:
+            log.exception("stripe cancel failed for %s (operator follow-up needed)", slug)
+    data_dir = tenant_data_path(slug)
+    if data_dir.exists():
+        trash = config.SAAS_TENANT_DATA_DIR / ".trash"
+        trash.mkdir(parents=True, exist_ok=True)
+        data_dir.rename(trash / tombstone)
+    _MIGRATED_TENANT_DBS.discard(str(tenant_db_path(slug)))
+    log.info("tenant %s deleted by owner (tombstone %s)", slug, tombstone)
+
+
 def operator_update_tenant_status(tenant_id: int, plan_status: str) -> dict:
     allowed = {
         "trialing",
@@ -975,7 +1132,11 @@ def _billing_allowed_path(path: str) -> bool:
     return (
         path.startswith("/admin/billing")
         or path.startswith("/admin/account")
-        or path in {"/admin/login", "/admin/logout", "/healthz"}
+        # A locked-out owner must still be able to reset their password (and pay) —
+        # and to take their data or leave: export/delete are exactly what an expired
+        # or canceling customer needs, and the billing page advertises both.
+        or path in {"/admin/login", "/admin/logout", "/admin/forgot", "/admin/reset", "/healthz"}
+        or path in {"/admin/export-studio", "/admin/delete-studio"}
         or path.startswith("/static/")
         or path in {"/webhooks/stripe", "/webhooks/stripe/saas"}
     )
@@ -992,7 +1153,10 @@ async def tenant_middleware(request: Request, call_next):
         return RedirectResponse("/pricing", status_code=303)
 
     tenant = tenant_by_slug(slug)
-    if not tenant:
+    # A deleted studio's tombstone slug must be as gone as a never-registered one:
+    # serving it would re-provision an empty data dir via ensure_tenant_database and
+    # let the old password log in to the husk (ADR 0051).
+    if not tenant or tenant.get("deleted_at"):
         if "text/html" in request.headers.get("accept", ""):
             return templates.TemplateResponse(
                 request,
@@ -1207,6 +1371,10 @@ async def billing(request: Request):
     tenant = current_tenant()
     if not tenant:
         raise HTTPException(status_code=404)
+    delete_errors = {
+        "slug": "Type the studio address exactly to confirm deletion.",
+        "password": "Wrong password — the studio was not deleted.",
+    }
     return templates.TemplateResponse(
         request,
         "admin/saas_billing.html",
@@ -1215,6 +1383,7 @@ async def billing(request: Request):
             "price_cents": config.SAAS_PRICE_CENTS,
             "access_ok": tenant_has_access(tenant),
             "billing_status": tenant_billing_context(tenant),
+            "delete_error": delete_errors.get(request.query_params.get("delete_error", "")),
         },
     )
 
@@ -1226,6 +1395,141 @@ async def billing_portal(request: Request):
     return_url = f"{urls.public_base_url(request)}/admin/billing"
     portal_url = create_billing_portal_url(tenant, return_url)
     return RedirectResponse(portal_url, status_code=303)
+
+
+@router.get("/admin/forgot", response_class=HTMLResponse)
+async def forgot_password_form(request: Request):
+    if not current_tenant():
+        raise HTTPException(status_code=404)
+    return templates.TemplateResponse(
+        request, "admin/forgot.html", {"sent": False, "email_on": mailer.configured()}
+    )
+
+
+@router.post("/admin/forgot")
+async def forgot_password(request: Request, email: str = Form(...)):
+    tenant = current_tenant()
+    if not tenant:
+        raise HTTPException(status_code=404)
+    # Same response whether or not the address matched — no account enumeration.
+    # The match path is deferred to a background task (AFTER the response is sent) so
+    # that (a) the blocking 20s-timeout SMTP send never stalls the single-worker event
+    # loop, and (b) match and miss return with identical latency, closing the timing
+    # oracle that would otherwise leak whether the address is the owner's.
+    background = None
+    if mailer.configured() and email.strip().lower() == (tenant["owner_email"] or "").lower():
+        token = make_password_reset_token(tenant)
+        link = tenant_url(tenant["slug"], f"/admin/reset?token={quote(token)}")
+        owner_email = tenant["owner_email"]
+        studio_name = tenant["studio_name"]
+        slug = tenant["slug"]
+
+        def _send_reset() -> None:
+            try:
+                mailer.send(
+                    owner_email,
+                    f"Reset your {studio_name} password",
+                    "Someone (hopefully you) asked to reset the admin password for "
+                    f"{studio_name}.\n\n"
+                    f"Reset it here (link valid for 2 hours):\n{link}\n\n"
+                    "If this wasn't you, ignore this email — the password is unchanged.",
+                )
+            except Exception:
+                log.exception("password reset email failed for %s", slug)
+
+        background = BackgroundTask(_send_reset)
+    return templates.TemplateResponse(
+        request,
+        "admin/forgot.html",
+        {"sent": True, "email_on": mailer.configured()},
+        background=background,
+    )
+
+
+@router.get("/admin/reset", response_class=HTMLResponse)
+async def reset_password_form(request: Request, token: str = ""):
+    host_tenant = current_tenant()
+    if not host_tenant:
+        raise HTTPException(status_code=404)
+    tenant = redeem_password_reset_token(token)
+    valid = tenant is not None and tenant["id"] == host_tenant["id"]
+    return templates.TemplateResponse(
+        request, "admin/reset.html", {"token": token, "valid": valid, "error": None}
+    )
+
+
+@router.post("/admin/reset")
+async def reset_password(
+    request: Request,
+    token: str = Form(...),
+    password: str = Form(...),
+    password_confirm: str = Form(...),
+):
+    host_tenant = current_tenant()
+    if not host_tenant:
+        raise HTTPException(status_code=404)
+    tenant = redeem_password_reset_token(token)
+    if not tenant or tenant["id"] != host_tenant["id"]:
+        return templates.TemplateResponse(
+            request,
+            "admin/reset.html",
+            {
+                "token": token,
+                "valid": False,
+                "error": "This reset link is invalid or has expired. Request a new one.",
+            },
+            status_code=400,
+        )
+    error = None
+    if len(password) < 8:
+        error = "Use at least 8 characters."
+    elif password != password_confirm:
+        error = "Passwords don't match."
+    if error:
+        return templates.TemplateResponse(
+            request,
+            "admin/reset.html",
+            {"token": token, "valid": True, "error": error},
+            status_code=400,
+        )
+    set_tenant_password(tenant["id"], password)
+    log.info("tenant %s admin password reset via emailed link", tenant["slug"])
+    return RedirectResponse("/admin/login?reset=1", status_code=303)
+
+
+@router.get("/admin/export-studio")
+async def export_studio(request: Request):
+    security.require_admin(request)
+    tenant = current_tenant()
+    if not tenant:
+        raise HTTPException(status_code=404)
+    # The zip build is minutes of blocking sqlite-backup + compression for a
+    # media-heavy studio; on the single-worker event loop that would stall every
+    # tenant, so run it off-thread.
+    tmp_zip = await run_in_threadpool(build_studio_export, tenant)
+    log.info("tenant %s exported their studio archive", tenant["slug"])
+    return FileResponse(
+        str(tmp_zip),
+        filename=f"{tenant['slug']}-studio-export.zip",
+        media_type="application/zip",
+        background=BackgroundTask(lambda: tmp_zip.unlink(missing_ok=True)),
+    )
+
+
+@router.post("/admin/delete-studio")
+async def delete_studio(request: Request, confirm_slug: str = Form(...), password: str = Form(...)):
+    security.require_admin(request)
+    tenant = current_tenant()
+    if not tenant:
+        raise HTTPException(status_code=404)
+    if confirm_slug.strip().lower() != tenant["slug"]:
+        return RedirectResponse("/admin/billing?delete_error=slug", status_code=303)
+    if not security.check_admin_password(password):
+        return RedirectResponse("/admin/billing?delete_error=password", status_code=303)
+    delete_tenant_studio(tenant)
+    resp = RedirectResponse(platform_url("/pricing?deleted=1"), status_code=303)
+    security.delete_session_cookie(resp, security.ADMIN_COOKIE)
+    return resp
 
 
 def create_billing_portal_url(tenant: dict | None, return_url: str) -> str:

@@ -22,14 +22,14 @@ def _configure_saas(tmp_path, monkeypatch):
     saas.migrate_control()
 
 
-def _request(path: str, host: str, *, cookie: str | None = None) -> Request:
+def _request(path: str, host: str, *, cookie: str | None = None, method: str = "GET") -> Request:
     headers = [(b"host", host.encode()), (b"accept", b"text/html")]
     if cookie:
         headers.append((b"cookie", cookie.encode()))
     return Request(
         {
             "type": "http",
-            "method": "GET",
+            "method": method,
             "path": path,
             "query_string": b"",
             "headers": headers,
@@ -429,7 +429,7 @@ def test_tenant_admin_shows_env_announcement_banner(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "SAAS_ANNOUNCEMENT", "New wedding starter pack is live.")
     monkeypatch.setattr(config, "SAAS_ANNOUNCEMENT_URL", "/admin/onboarding")
     tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
-    cookie = f"{security.ADMIN_COOKIE}={security.sign('tenant:alpha')}"
+    cookie = _tenant_cookie(tenant)
 
     with saas.tenant_runtime(tenant):
         request = _request("/admin/billing", "alpha.mise.test", cookie=cookie)
@@ -534,26 +534,34 @@ def test_onboarding_demo_seeds_project_flow(tmp_path, monkeypatch):
 # ── Tenant-bound admin sessions (ADR 0048) — cross-tenant isolation ──────────
 
 
+def _tenant_cookie(tenant: dict) -> str:
+    principal = f"tenant:{tenant['id']}:{tenant['slug']}"
+    return f"{security.ADMIN_COOKIE}={security.sign(principal)}"
+
+
 def test_admin_principal_is_context_bound(tmp_path, monkeypatch):
     # single-tenant: legacy "admin" (unchanged so existing self-hosted sessions survive)
     monkeypatch.setattr(config, "SAAS_MODE", False)
     assert security.admin_principal(_request("/admin/home", "studio.example")) == "admin"
-    # hosted: "operator" at the root host, "tenant:<slug>" inside a tenant runtime
+    # hosted: "operator" at the root host, "tenant:<id>:<slug>" inside a tenant runtime
     _configure_saas(tmp_path, monkeypatch)
     monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
     tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
     assert security.admin_principal(_request("/admin/saas", "mise.test")) == "operator"
     with saas.tenant_runtime(tenant):
-        assert security.admin_principal(_request("/admin", "alpha.mise.test")) == "tenant:alpha"
+        assert (
+            security.admin_principal(_request("/admin", "alpha.mise.test"))
+            == f"tenant:{tenant['id']}:alpha"
+        )
 
 
 def test_tenant_cookie_rejected_on_another_tenant(tmp_path, monkeypatch):
     _configure_saas(tmp_path, monkeypatch)
     monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
-    saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    alpha = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
     beta = saas.create_tenant("beta", "Beta Studio", "beta@example.com", "secret123")
     # Alpha's own valid cookie, replayed against Beta's subdomain.
-    cookie = f"{security.ADMIN_COOKIE}={security.sign('tenant:alpha')}"
+    cookie = _tenant_cookie(alpha)
     with saas.tenant_runtime(beta):
         request = _request("/admin/billing", "beta.mise.test", cookie=cookie)
         assert security.is_admin(request) is False
@@ -566,9 +574,9 @@ def test_tenant_cookie_rejected_at_operator_console(tmp_path, monkeypatch):
     _configure_saas(tmp_path, monkeypatch)
     monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
     monkeypatch.setattr(config, "ADMIN_PASSWORD", "operator-secret")
-    saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    alpha = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
     # A tenant cookie presented at the platform/root host must NOT reach the operator console.
-    cookie = f"{security.ADMIN_COOKIE}={security.sign('tenant:alpha')}"
+    cookie = _tenant_cookie(alpha)
     with pytest.raises(HTTPException) as exc:
         asyncio.run(saas.operator_console(_request("/admin/saas", "mise.test", cookie=cookie)))
     assert exc.value.status_code == 303
@@ -589,16 +597,28 @@ def test_matching_cookies_still_authenticate(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
     tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
     with saas.tenant_runtime(tenant):
-        req = _request(
-            "/admin",
-            "alpha.mise.test",
-            cookie=f"{security.ADMIN_COOKIE}={security.sign('tenant:alpha')}",
-        )
+        req = _request("/admin", "alpha.mise.test", cookie=_tenant_cookie(tenant))
         assert security.is_admin(req) is True
     op = _request(
         "/admin/saas", "mise.test", cookie=f"{security.ADMIN_COOKIE}={security.sign('operator')}"
     )
     assert security.is_admin(op) is True
+
+
+def test_reused_slug_after_delete_does_not_authenticate_old_cookie(tmp_path, monkeypatch):
+    # ADR 0051: slugs are reusable after delete, so the session principal carries the
+    # tenant id — an old "alpha" cookie must not admin the NEW "alpha".
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
+    old = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    old_cookie = _tenant_cookie(old)
+    saas.delete_tenant_studio(old)
+    new = saas.create_tenant("alpha", "New Alpha", "new@example.com", "secret123")
+    assert new["id"] != old["id"]
+    with saas.tenant_runtime(new):
+        req = _request("/admin", "alpha.mise.test", cookie=old_cookie)
+        assert security.is_admin(req) is False  # old id ≠ new id
+        assert security.is_admin(_request("/admin", "alpha.mise.test", cookie=_tenant_cookie(new)))
 
 
 # ── Hosted client-payment isolation (ADR 0049) — fail-closed, per-tenant Stripe ──
@@ -768,12 +788,179 @@ def test_past_due_gets_dunning_grace_then_blocks(tmp_path, monkeypatch):
 def test_signup_route_is_rate_limited(monkeypatch):
     from app import ratelimit
 
-    assert ratelimit._bucket_for("/start-trial") == "signup"
+    assert ratelimit._bucket_for("/start-trial", "POST") == "signup"
+    # Merely viewing the form never spends the tight signup budget.
+    assert ratelimit._bucket_for("/start-trial", "GET") is None
     monkeypatch.setattr(config, "SAAS_MODE", False)  # keep is_admin on the legacy path
     monkeypatch.setitem(config.RATE_LIMITS, "signup", (3, 3600))
     monkeypatch.setattr(ratelimit, "_hits", type(ratelimit._hits)(ratelimit._hits.default_factory))
-    request = _request("/start-trial", "mise.test")
+    request = _request("/start-trial", "mise.test", method="POST")
     for _ in range(3):
         assert ratelimit.check(request, "/start-trial") is None
     blocked = ratelimit.check(request, "/start-trial")
     assert blocked is not None and blocked.status_code == 429
+    # The GET form stays reachable even while POSTs are throttled.
+    assert ratelimit.check(_request("/start-trial", "mise.test"), "/start-trial") is None
+
+
+# ── Recovery & ownership (ADR 0051) — password reset, export, delete ──────────
+
+
+def test_password_reset_token_roundtrip_and_single_use(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    token = saas.make_password_reset_token(tenant)
+    redeemed = saas.redeem_password_reset_token(token)
+    assert redeemed is not None and redeemed["id"] == tenant["id"]
+    # A session cookie can never act as a reset token (purpose scoping) …
+    assert saas.redeem_password_reset_token(security.sign("tenant:alpha")) is None
+    # … a tampered token dies …
+    assert saas.redeem_password_reset_token(token[:-2] + "xx") is None
+    # … and changing the password spends every outstanding token.
+    saas.set_tenant_password(tenant["id"], "brand-new-password")
+    assert saas.redeem_password_reset_token(token) is None
+    assert passwords.verify_password(
+        "brand-new-password", saas.tenant_by_slug("alpha")["admin_password_hash"]
+    )
+
+
+def test_forgot_password_emails_owner_only(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
+    saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    sent: list[tuple] = []
+    monkeypatch.setattr(saas.mailer, "configured", lambda: True)
+    monkeypatch.setattr(saas.mailer, "send", lambda *a, **k: sent.append(a))
+    with saas.tenant_runtime("alpha"):
+        req = _request("/admin/forgot", "alpha.mise.test")
+        # Wrong address: same outward response, and NO background send (no enumeration,
+        # and identical latency because the send is deferred either way).
+        miss = asyncio.run(saas.forgot_password(req, email="stranger@example.com"))
+        assert miss.background is None
+        # Match: the send is deferred to a background task, fired after the response.
+        hit = asyncio.run(saas.forgot_password(req, email="Alpha@Example.com"))
+        assert sent == []  # not sent synchronously
+        assert hit.background is not None
+        asyncio.run(hit.background())
+    assert len(sent) == 1
+    to, _subject, body = sent[0][0], sent[0][1], sent[0][2]
+    assert to == "alpha@example.com"
+    assert "/admin/reset?token=" in body
+
+
+def test_reset_password_route_sets_new_password_once(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    token = saas.make_password_reset_token(tenant)
+    with saas.tenant_runtime("alpha"):
+        req = _request("/admin/reset", "alpha.mise.test")
+        resp = asyncio.run(
+            saas.reset_password(
+                req, token=token, password="newpass123", password_confirm="newpass123"
+            )
+        )
+        assert resp.status_code == 303 and "reset=1" in resp.headers["location"]
+        # The same link is spent now.
+        again = asyncio.run(
+            saas.reset_password(
+                req, token=token, password="another-pass", password_confirm="another-pass"
+            )
+        )
+        assert again.status_code == 400
+    assert passwords.verify_password(
+        "newpass123", saas.tenant_by_slug("alpha")["admin_password_hash"]
+    )
+
+
+def test_reset_token_rejected_on_another_tenant(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
+    alpha = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    saas.create_tenant("beta", "Beta Studio", "beta@example.com", "secret123")
+    token = saas.make_password_reset_token(alpha)
+    with saas.tenant_runtime("beta"):
+        resp = asyncio.run(
+            saas.reset_password(
+                _request("/admin/reset", "beta.mise.test"),
+                token=token,
+                password="newpass123",
+                password_confirm="newpass123",
+            )
+        )
+        assert resp.status_code == 400
+    # Alpha's password is untouched.
+    assert passwords.verify_password(
+        "secret123", saas.tenant_by_slug("alpha")["admin_password_hash"]
+    )
+
+
+def test_studio_export_zip_contains_db_and_media(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    saas.ensure_tenant_database(tenant)
+    media_dir = saas.tenant_data_path("alpha") / "galleries"
+    media_dir.mkdir(parents=True, exist_ok=True)
+    (media_dir / "photo.jpg").write_bytes(b"fake-jpeg-bytes")
+    tmp_zip = saas.build_studio_export(tenant)
+    try:
+        import zipfile
+
+        with zipfile.ZipFile(tmp_zip) as zf:
+            names = set(zf.namelist())
+            assert "mise.db" in names
+            assert "galleries/photo.jpg" in names
+            # The snapshot is a real SQLite database, not a torn copy.
+            assert zf.read("mise.db")[:16] == b"SQLite format 3\x00"
+    finally:
+        tmp_zip.unlink(missing_ok=True)
+
+
+def test_delete_studio_tombstones_and_parks_data(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    saas.ensure_tenant_database(tenant)
+    assert saas.tenant_data_path("alpha").exists()
+    saas.delete_tenant_studio(tenant)
+    # The address frees up; the row survives as a canceled tombstone.
+    assert saas.tenant_by_slug("alpha") is None
+    row = saas.tenant_by_id(tenant["id"])
+    assert row["slug"].startswith("alpha-deleted-")
+    assert row["plan_status"] == "canceled"
+    assert row["deleted_at"]
+    # The data moved to trash — recoverable, not destroyed.
+    assert not saas.tenant_data_path("alpha").exists()
+    trash = config.SAAS_TENANT_DATA_DIR / ".trash" / row["slug"]
+    assert (trash / "mise.db").exists()
+
+
+def test_delete_studio_route_requires_exact_confirmation(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    cookie = _tenant_cookie(tenant)
+    with saas.tenant_runtime("alpha"):
+        req = _request("/admin/delete-studio", "alpha.mise.test", cookie=cookie)
+        wrong_slug = asyncio.run(saas.delete_studio(req, confirm_slug="beta", password="secret123"))
+        assert "delete_error=slug" in wrong_slug.headers["location"]
+        wrong_pw = asyncio.run(saas.delete_studio(req, confirm_slug="alpha", password="nope"))
+        assert "delete_error=password" in wrong_pw.headers["location"]
+        assert saas.tenant_by_slug("alpha") is not None  # still alive
+        done = asyncio.run(saas.delete_studio(req, confirm_slug="alpha", password="secret123"))
+        assert done.status_code == 303 and "deleted=1" in done.headers["location"]
+    assert saas.tenant_by_slug("alpha") is None
+
+
+def test_reset_routes_reachable_when_locked_out():
+    # A past_due/expired owner must still reach forgot/reset (and billing) to recover.
+    assert saas._billing_allowed_path("/admin/forgot")
+    assert saas._billing_allowed_path("/admin/reset")
+
+
+def test_forgot_route_uses_tight_rate_bucket():
+    from app import ratelimit
+
+    # Sending the email is throttled hard; viewing the form only costs the admin bucket.
+    assert ratelimit._bucket_for("/admin/forgot", "POST") == "signup"
+    assert ratelimit._bucket_for("/admin/forgot", "GET") == "admin"

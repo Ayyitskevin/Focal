@@ -23,12 +23,16 @@ _hits: dict[tuple[str, str], deque] = defaultdict(deque)
 _last_gc = 0.0
 
 
-def _bucket_for(path: str) -> str | None:
+def _bucket_for(path: str, method: str = "GET") -> str | None:
     """Bucket name to charge, or None to skip (exempt)."""
     if path == "/healthz" or path.startswith(("/static/", "/media/", "/site/img/", "/work/")):
         return None  # static + media grid: legit bursts, never limited
-    if path == "/start-trial":
-        return "signup"  # hosted tenant provisioning: tight hourly bucket (ADR 0050)
+    if path in ("/start-trial", "/admin/forgot"):
+        # Tenant provisioning / reset-email sends: tight hourly bucket (ADR 0050/0051)
+        # — but only the POST costs anything; viewing the form must not spend it.
+        if method == "POST":
+            return "signup"
+        return "admin" if path.startswith("/admin") else None
     if "/download" in path:
         return "download"
     if path.startswith("/admin"):
@@ -50,7 +54,7 @@ def _gc(now: float) -> None:
 
 def check(request: Request, path: str) -> JSONResponse | None:
     """Return a 429 response if over limit, else None (and record the hit)."""
-    bucket = _bucket_for(path)
+    bucket = _bucket_for(path, request.method)
     if bucket is None or security.is_admin(request):
         return None
     limit, window = config.RATE_LIMITS[bucket]
