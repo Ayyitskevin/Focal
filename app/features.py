@@ -105,9 +105,25 @@ def telegram_enabled() -> bool:
     return bool(config.TELEGRAM_TOKEN and config.TELEGRAM_CHAT_ID)
 
 
+def operator_context() -> bool:
+    """True when global-credential integrations may act (ADR 0055).
+
+    Notion, Google Calendar, and SMS are the OPERATOR's personal accounts. In hosted
+    mode a tenant context must never ride them — a studio's bookings mirroring into
+    the operator's Notion/Calendar, or a studio's texts sending from the operator's
+    number, is a cross-tenant data leak. Fail-closed, same doctrine as the client
+    Stripe gate (ADR 0049). Single-tenant mode is always the operator's own context.
+    """
+    if config.SAAS_MODE:
+        from . import saas
+
+        return saas.current_tenant() is None
+    return True
+
+
 def sms_enabled() -> bool:
     """Quo / OpenPhone SMS."""
-    return bool(config.QUO_API_KEY and config.QUO_NUMBER)
+    return bool(config.QUO_API_KEY and config.QUO_NUMBER) and operator_context()
 
 
 def google_calendar_enabled() -> bool:
@@ -127,15 +143,15 @@ def shots_api_enabled() -> bool:
 
 
 def notion_enabled() -> bool:
-    return bool(config.NOTION_TOKEN)
+    return bool(config.NOTION_TOKEN) and operator_context()
 
 
 def notion_bookings_enabled() -> bool:
-    return bool(config.NOTION_TOKEN and config.NOTION_BOOKINGS_DB)
+    return bool(config.NOTION_TOKEN and config.NOTION_BOOKINGS_DB) and operator_context()
 
 
 def notion_sessions_enabled() -> bool:
-    return bool(config.NOTION_TOKEN and config.NOTION_SESSIONS_DB)
+    return bool(config.NOTION_TOKEN and config.NOTION_SESSIONS_DB) and operator_context()
 
 
 def plausible_enabled() -> bool:

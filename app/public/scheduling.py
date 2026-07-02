@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
-from .. import booking_notify, config, db, ics, scheduling, security
+from .. import booking_notify, config, db, ics, mailer, scheduling, security
 from ..render import templates
 
 log = logging.getLogger("mise.public.scheduling")
@@ -197,7 +197,7 @@ async def manage(request: Request, token: str):
         raise HTTPException(status_code=404)
     gcal = ""
     if b["status"] == "confirmed":
-        summary = f"{b['event_name']} · {config.SITE_NAME}"
+        summary = f"{b['event_name']} · {mailer.sender_name()}"
         gcal = ics.google_link(
             summary=summary,
             details=b["notes"] or "",
@@ -217,7 +217,7 @@ async def invite(token: str):
         raise HTTPException(status_code=404)
     content = ics.build(
         uid=ics.uid_for(b["id"]),
-        summary=f"{b['event_name']} · {config.SITE_NAME}",
+        summary=f"{b['event_name']} · {mailer.sender_name()}",
         description=b["notes"] or "",
         location=b["location"] or "",
         start_utc=b["start_utc"],

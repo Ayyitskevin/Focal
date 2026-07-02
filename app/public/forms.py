@@ -10,7 +10,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
-from .. import config, db, mailer, security
+from .. import db, mailer, security, urls
 from ..render import templates
 
 log = logging.getLogger("mise.public.forms")
@@ -134,11 +134,11 @@ async def submit_form(request: Request, slug: str):
         )
         if mailer.configured():
             body = (
-                f'New lead via form "{f["title"]}" on kleephotography.com\n\n'
+                f'New lead via form "{f["title"]}" on {urls.public_base_url()}\n\n'
                 f"Name: {name}\nEmail: {email}\n\n{answer_lines}\n"
             )
             try:
-                mailer.send(config.GMAIL_USER, f"New lead — {name}", body, reply_to=email)
+                mailer.send(mailer.studio_inbox(), f"New lead — {name}", body, reply_to=email)
                 db.run("UPDATE inquiries SET emailed=1 WHERE id=?", (inquiry_id,))
             except Exception:
                 log.exception("lead %s stored but email failed", inquiry_id)

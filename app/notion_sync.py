@@ -9,7 +9,7 @@ import json
 import logging
 import urllib.request
 
-from . import config, db, hermes_arm
+from . import config, db, features, hermes_arm
 
 log = logging.getLogger("mise.notion")
 
@@ -174,7 +174,7 @@ def sync_booking(booking_id: int) -> None:
     )
     if not b:
         raise ValueError(f"booking {booking_id} not found")
-    if not config.NOTION_TOKEN or not config.NOTION_BOOKINGS_DB:
+    if not features.notion_bookings_enabled():  # incl. hosted tenant guard (ADR 0055)
         log.info(
             "notion booking sync skipped for %s (token=%s db=%s)",
             booking_id,
@@ -229,7 +229,7 @@ def sync_session_for_booking(booking_id: int) -> None:
     )
     if not b:
         raise ValueError(f"booking {booking_id} not found")
-    if not config.NOTION_TOKEN or not config.NOTION_SESSIONS_DB:
+    if not features.notion_sessions_enabled():  # incl. hosted tenant guard (ADR 0055)
         log.info(
             "notion session sync skipped for booking %s (token=%s db=%s)",
             booking_id,
