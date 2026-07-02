@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Response
 
-from .. import config, db, mailer, security
+from .. import config, db, mailer, security, urls
 from ..render import templates
 
 log = logging.getLogger("mise.public.site")
@@ -544,12 +544,12 @@ async def submit_inquiry(
     )
     if mailer.configured():
         body = (
-            f"New inquiry via kleephotography.com\n\n"
+            f"New inquiry via {urls.public_base_url()}\n\n"
             f"Name: {name}\nEmail: {email}\n"
             f"Business: {business.strip() or '—'}\n\n{full_message}\n"
         )
         try:
-            mailer.send(config.GMAIL_USER, f"New inquiry — {name}", body, reply_to=email)
+            mailer.send(mailer.studio_inbox(), f"New inquiry — {name}", body, reply_to=email)
             db.run("UPDATE inquiries SET emailed=1 WHERE id=?", (iid,))
         except Exception as e:
             log.error("inquiry %s stored but email failed: %s", iid, e)

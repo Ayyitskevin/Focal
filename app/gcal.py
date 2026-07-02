@@ -24,7 +24,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from . import config, db
+from . import config, db, features
 
 log = logging.getLogger("mise.gcal")
 _UTC = dt.UTC
@@ -75,8 +75,16 @@ def _cal() -> str:
 
 
 def configured() -> bool:
-    """OAuth client creds present in .env — the feature is provisioned."""
-    return bool(config.GOOGLE_CLIENT_ID and config.GOOGLE_CLIENT_SECRET)
+    """OAuth client creds present in .env — the feature is provisioned.
+
+    Hosted tenant contexts are excluded (features.operator_context, ADR 0055): the
+    OAuth grant is the operator's personal calendar and must never receive a
+    tenant's bookings or hide a tenant's slots against the operator's busy times.
+    """
+    return (
+        bool(config.GOOGLE_CLIENT_ID and config.GOOGLE_CLIENT_SECRET)
+        and features.operator_context()
+    )
 
 
 def _row():

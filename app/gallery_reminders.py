@@ -88,7 +88,7 @@ def _send_expiry(g, days: int) -> None:
         f'A quick heads-up — your gallery "{g["title"]}" comes down {when}. '
         f"Make sure you've saved everything you'd like to keep before then:\n\n"
         f"  {url}\n\n"
-        f"— {config.SITE_NAME}\n"
+        f"— {mailer.sender_name()}\n"
     )
     mailer.send(
         g["client_email"],
@@ -105,7 +105,7 @@ def _send_proofing(g) -> None:
         f'Just a nudge — your gallery "{g["title"]}" is ready and a few sections '
         f"still need your picks. Tap the heart on the ones you'd like, here:\n\n"
         f"  {url}\n\n"
-        f"— {config.SITE_NAME}\n"
+        f"— {mailer.sender_name()}\n"
     )
     mailer.send(
         g["client_email"],

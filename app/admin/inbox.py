@@ -15,7 +15,7 @@ import logging
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from .. import config, db, mailer, security, sms
+from .. import db, mailer, security, sms
 from ..render import templates
 
 log = logging.getLogger("mise.admin.inbox")
@@ -97,7 +97,7 @@ def _thread_row(inq, active_id):
 
 def _reply_subject(inq) -> str:
     kind = "booking request" if inq["kind"] == "booking" else "inquiry"
-    return f"Re: your {kind} — {config.SITE_NAME}"
+    return f"Re: your {kind} — {mailer.sender_name()}"
 
 
 def _detail_rows(inq) -> list[dict]:

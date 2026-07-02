@@ -10,7 +10,7 @@ import datetime as dt
 import logging
 from zoneinfo import ZoneInfo
 
-from . import config, db, gcal, ics, mailer, notion_sync
+from . import config, db, gcal, ics, mailer, notion_sync, urls
 
 log = logging.getLogger("mise.booking")
 _UTC = dt.UTC
@@ -35,7 +35,8 @@ def _when(start_utc: str, tzname: str) -> str:
 
 
 def _manage_url(token: str) -> str:
-    return f"{config.BASE_URL}/booking/{token}"
+    # Tenant-host aware: a studio's client must land on the studio's own origin.
+    return f"{urls.public_base_url()}/booking/{token}"
 
 
 def _link_studio(booking_id: int, inquiry_id: int | None) -> None:
@@ -117,7 +118,7 @@ def confirm(booking_id: int) -> None:
     cli_when = _when(b["start_utc"], b["tz"])
     uid = ics.uid_for(booking_id)
     loc = b["location"] or "Details to follow"
-    summary = f"{b['event_name']} · {config.SITE_NAME}"
+    summary = f"{b['event_name']} · {mailer.sender_name()}"
     details = (
         f"{b['event_desc']}\n\n" if b["event_desc"] else ""
     ) + f"Manage this booking: {_manage_url(b['token'])}"
@@ -152,10 +153,10 @@ def confirm(booking_id: int) -> None:
             f"  {b['event_name']}\n  {cli_when}\n  {loc}\n\n"
             f"Add it to your calendar with the attached invite, or here:\n{gcal_link}\n\n"
             f"Need to change or cancel? {_manage_url(b['token'])}\n\n"
-            f"— {config.SITE_NAME}\n"
+            f"— {mailer.sender_name()}\n"
         )
         kevin_body = (
-            f"New booking via {config.BASE_URL}\n\n"
+            f"New booking via {urls.public_base_url()}\n\n"
             f"Event: {b['event_name']}\nWhen: {biz_when}\n"
             f"Name: {b['name']}\nEmail: {b['email']}\nPhone: {b['phone'] or '—'}\n\n"
             f"{b['notes'] or '(no note)'}\n\nManage: {_manage_url(b['token'])}\n"
@@ -165,7 +166,7 @@ def confirm(booking_id: int) -> None:
                 b["email"],
                 f"Booking confirmed — {b['event_name']}",
                 client_body,
-                reply_to=config.GMAIL_USER,
+                reply_to=mailer.studio_inbox(),
                 ics=invite,
             )
         except Exception as e:
@@ -173,7 +174,7 @@ def confirm(booking_id: int) -> None:
         try:
             # Kevin's copy doubles as the Odysseus inquiry_intake hook (it polls his inbox).
             mailer.send(
-                config.GMAIL_USER,
+                mailer.studio_inbox(),
                 f"Booking — {b['name']} · {b['event_name']} · {biz_when}",
                 kevin_body,
                 reply_to=b["email"],
@@ -233,7 +234,7 @@ def cancelled(booking_id: int, by_admin: bool = False) -> None:
     if not b:
         return
     cli_when = _when(b["start_utc"], b["tz"])
-    summary = f"{b['event_name']} · {config.SITE_NAME}"
+    summary = f"{b['event_name']} · {mailer.sender_name()}"
     if mailer.configured():
         cancel_ics = {
             "filename": "cancel.ics",
@@ -254,15 +255,15 @@ def cancelled(booking_id: int, by_admin: bool = False) -> None:
         body = (
             f"Hi {b['name']},\n\nYour booking has been cancelled:\n\n"
             f"  {b['event_name']}\n  {cli_when}\n\n"
-            f"Book a new time any time: {config.BASE_URL}/book\n\n"
-            f"— {config.SITE_NAME}\n"
+            f"Book a new time any time: {urls.public_base_url()}/book\n\n"
+            f"— {mailer.sender_name()}\n"
         )
         try:
             mailer.send(
                 b["email"],
                 f"Booking cancelled — {b['event_name']}",
                 body,
-                reply_to=config.GMAIL_USER,
+                reply_to=mailer.studio_inbox(),
                 ics=cancel_ics,
             )
         except Exception as e:
@@ -270,7 +271,7 @@ def cancelled(booking_id: int, by_admin: bool = False) -> None:
         if not by_admin:
             try:
                 mailer.send(
-                    config.GMAIL_USER,
+                    mailer.studio_inbox(),
                     f"Booking CANCELLED — {b['name']} · {b['event_name']}",
                     f"{b['name']} cancelled their {b['event_name']} "
                     f"({_when(b['start_utc'], config.TIMEZONE)}).\n"

@@ -10,7 +10,7 @@ credentials and lives elsewhere.
 import datetime as dt
 from urllib.parse import urlencode
 
-from . import config
+from . import mailer
 
 
 def _compact(utc_str: str) -> str:
@@ -60,7 +60,7 @@ def build(
         f"SUMMARY:{_esc(summary)}",
         f"DESCRIPTION:{_esc(description)}",
         f"LOCATION:{_esc(location)}",
-        f"ORGANIZER;CN={_esc(config.SITE_NAME)}:mailto:{organizer_email}",
+        f"ORGANIZER;CN={_esc(mailer.sender_name())}:mailto:{organizer_email}",
         f"ATTENDEE;CN={_esc(attendee_email)};RSVP=TRUE:mailto:{attendee_email}",
         f"STATUS:{status}",
         "END:VEVENT",

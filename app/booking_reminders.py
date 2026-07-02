@@ -60,7 +60,7 @@ def sweep() -> None:
             f"A quick reminder — your booking is {lead}:\n\n"
             f"  {b['event_name']}\n  {cli_when}\n  {loc}\n\n"
             f"Need to change or cancel? {_manage_url(b['token'])}\n\n"
-            f"— {config.SITE_NAME}\n"
+            f"— {mailer.sender_name()}\n"
         )
         try:
             mailer.send(

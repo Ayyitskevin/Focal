@@ -11,7 +11,7 @@ import logging
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
-from .. import config, db, mailer, security
+from .. import db, mailer, security
 from ..render import templates
 
 log = logging.getLogger("mise.public.packages")
@@ -140,7 +140,7 @@ async def submit_package_request(
     if mailer.configured():
         try:
             mailer.send(
-                config.GMAIL_USER,
+                mailer.studio_inbox(),
                 f"New package request - {package['name']}",
                 f"Name: {values['name']}\nEmail: {values['email']}\n"
                 f"Package: {package['name']}\nDate: {values['event_date'] or '-'}\n\n"

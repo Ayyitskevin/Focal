@@ -287,3 +287,90 @@ def test_login_confirms_trial_after_checkout_redirect(tmp_path, monkeypatch):
         )
         body = asyncio.run(auth.login_form(request)).body.decode()
     assert "your free trial is active" in body
+
+
+def test_outbound_email_identity_is_tenant_scoped(tmp_path, monkeypatch):
+    from app import mailer
+
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "SITE_NAME", "Operator Studio")
+    monkeypatch.setattr(config, "GMAIL_USER", "operator@gmail.test")
+    saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    with saas.tenant_runtime("alpha"):
+        # Identity: the studio's name over the operator's SMTP login; replies reach
+        # the studio owner, never the platform operator.
+        assert mailer.sender_name() == "Alpha Studio"
+        assert mailer.studio_inbox() == "alpha@example.com"
+        msg = mailer._build_message("client@example.com", "Your gallery", "hi")
+        assert msg["From"] == "Alpha Studio <operator@gmail.test>"
+        assert msg["Reply-To"] == "alpha@example.com"
+        # An explicit reply_to (e.g. a lead's own address) still wins.
+        lead = mailer._build_message("x@example.com", "s", "b", reply_to="lead@example.com")
+        assert lead["Reply-To"] == "lead@example.com"
+    # Platform/root context: operator identity, no implicit Reply-To.
+    msg = mailer._build_message("x@example.com", "s", "b")
+    assert msg["From"] == "Operator Studio <operator@gmail.test>"
+    assert msg["Reply-To"] is None
+
+
+def test_single_tenant_email_identity_unchanged(monkeypatch):
+    from app import mailer
+
+    monkeypatch.setattr(config, "SAAS_MODE", False)
+    monkeypatch.setattr(config, "SITE_NAME", "Kevin Lee Photography")
+    monkeypatch.setattr(config, "GMAIL_USER", "kevin@gmail.test")
+    assert mailer.sender_name() == "Kevin Lee Photography"
+    assert mailer.studio_inbox() == "kevin@gmail.test"
+    msg = mailer._build_message("x@example.com", "s", "b")
+    assert msg["From"] == "Kevin Lee Photography <kevin@gmail.test>"
+    assert msg["Reply-To"] is None
+
+
+def test_booking_links_use_tenant_host(tmp_path, monkeypatch):
+    from app import booking_notify, urls
+
+    _configure_saas(tmp_path, monkeypatch)
+    saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    with saas.tenant_runtime("alpha"):
+        # A studio's client must land on the studio's origin, not the platform's.
+        assert urls.public_base_url() == "https://alpha.mise.test"
+        assert booking_notify._manage_url("tok123") == "https://alpha.mise.test/booking/tok123"
+
+
+def test_operator_integrations_fail_closed_in_tenant_context(tmp_path, monkeypatch):
+    from app import features, gcal
+
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "QUO_API_KEY", "quo-key")
+    monkeypatch.setattr(config, "QUO_NUMBER", "+15550001111")
+    monkeypatch.setattr(config, "NOTION_TOKEN", "secret-notion")
+    monkeypatch.setattr(config, "NOTION_BOOKINGS_DB", "db1")
+    monkeypatch.setattr(config, "NOTION_SESSIONS_DB", "db2")
+    monkeypatch.setattr(config, "GOOGLE_CLIENT_ID", "gid")
+    monkeypatch.setattr(config, "GOOGLE_CLIENT_SECRET", "gsecret")
+    saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    # Operator/root context: the operator's own integrations work as before.
+    assert features.operator_context() is True
+    assert features.sms_enabled() and features.notion_bookings_enabled()
+    assert features.notion_sessions_enabled() and gcal.configured()
+    # Tenant context: every operator-credential integration is OFF (fail-closed) —
+    # a studio's bookings must never mirror into the operator's Notion/Calendar,
+    # and a studio's texts must never send from the operator's number.
+    with saas.tenant_runtime("alpha"):
+        assert features.operator_context() is False
+        assert not features.sms_enabled()
+        assert not features.notion_enabled()
+        assert not features.notion_bookings_enabled()
+        assert not features.notion_sessions_enabled()
+        assert not gcal.configured()
+
+
+def test_lead_notifications_route_to_tenant_owner(tmp_path, monkeypatch):
+    from app import mailer
+
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "GMAIL_USER", "operator@gmail.test")
+    saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    with saas.tenant_runtime("alpha"):
+        assert mailer.studio_inbox() == "alpha@example.com"
+    assert mailer.studio_inbox() == "operator@gmail.test"
