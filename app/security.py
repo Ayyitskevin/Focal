@@ -1,5 +1,6 @@
 """Cookies, PIN lockout, slugs, client IP resolution."""
 
+import hashlib
 import logging
 import secrets
 import string
@@ -271,11 +272,24 @@ def admin_principal(request: Request) -> str:
     stable signature (future per-request binding) even though the principal derives from context.
     """
     if not config.SAAS_MODE:
-        return "admin"
+        return f"admin:{_pw_fp(config.ADMIN_PASSWORD)}"
     from . import saas
 
     tenant = saas.current_tenant()
-    return f"tenant:{tenant['id']}:{tenant['slug']}" if tenant else "operator"
+    if tenant:
+        return f"tenant:{tenant['id']}:{tenant['slug']}:{_pw_fp(tenant.get('admin_password_hash') or '')}"
+    return f"operator:{_pw_fp(config.ADMIN_PASSWORD)}"
+
+
+def _pw_fp(source: str) -> str:
+    """Short digest of the current admin credential, mixed into the session principal
+    (ADR 0063). Changing the password — a hosted tenant's reset, or the operator/
+    self-host ADMIN_PASSWORD — changes this, so every admin cookie minted under the
+    old credential stops authenticating: a stolen live session can't outlive the
+    reset meant to evict it. Same idea as the reset-token fingerprint (ADR 0051) and
+    Django's get_session_auth_hash. Not reversible to the credential; only ever
+    *rejects* a stale cookie."""
+    return hashlib.sha256((source or "").encode()).hexdigest()[:12]
 
 
 def is_admin(request: Request) -> bool:

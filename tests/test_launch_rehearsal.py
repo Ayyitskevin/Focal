@@ -147,7 +147,8 @@ def test_full_hosted_lifecycle_rehearsal(tmp_path, monkeypatch):
 
     # 4. The tenant connects their OWN Stripe: client payments flip from
     #    fail-closed off to live (ADR 0049/0054).
-    principal = f"tenant:{tenant['id']}:rehearsal"
+    fp = security._pw_fp(saas.tenant_by_slug("rehearsal")["admin_password_hash"])
+    principal = f"tenant:{tenant['id']}:rehearsal:{fp}"
     cookie = f"{security.ADMIN_COOKIE}={security.sign(principal)}"
     with saas.tenant_runtime("rehearsal"):
         assert features.stripe_enabled() is False
