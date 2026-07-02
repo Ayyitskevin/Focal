@@ -117,6 +117,20 @@ def pin_matches(supplied: str, actual: str | None) -> bool:
     return secrets.compare_digest(supplied, actual)
 
 
+def tenant_log_label() -> str:
+    """' [tenant:<slug>]' suffix for auth-audit log lines in hosted mode, '' otherwise.
+
+    Logging is process-wide while gallery/portal ids restart per tenant, so without
+    this a hosted line like 'bad PIN for gallery 3' cannot be attributed to a studio
+    during incident forensics. Single-tenant log output is unchanged."""
+    if not config.SAAS_MODE:
+        return ""
+    from . import saas  # lazy: saas imports security
+
+    tenant = saas.current_tenant()
+    return f" [tenant:{tenant['slug']}]" if tenant else " [platform]"
+
+
 def pin_locked(ip: str, gallery_id: int) -> bool:
     cutoff = time.time() - config.PIN_LOCKOUT_MIN * 60
     row = db.one(
@@ -132,7 +146,7 @@ def pin_fail(ip: str, gallery_id: int) -> None:
         (ip, gallery_id, time.time()),
     )
     db.run("DELETE FROM pin_attempts WHERE ts < ?", (time.time() - 86400,))
-    log.warning("bad PIN for gallery %s from %s", gallery_id, ip)
+    log.warning("bad PIN for gallery %s from %s%s", gallery_id, ip, tenant_log_label())
     # Anomaly-only alert: fire the instant the lockout threshold is crossed (not on
     # every typo, not on Kevin's normal login). gallery_id 0 = admin login bucket.
     cutoff = time.time() - config.PIN_LOCKOUT_MIN * 60
@@ -144,7 +158,7 @@ def pin_fail(ip: str, gallery_id: int) -> None:
         what = "admin login" if gallery_id == 0 else f"gallery {gallery_id}"
         alerts.security_alert(
             f"{config.PIN_MAX_FAILS} failed {what} attempts from {ip} — "
-            f"locked out {config.PIN_LOCKOUT_MIN}m"
+            f"locked out {config.PIN_LOCKOUT_MIN}m{tenant_log_label()}"
         )
 
 

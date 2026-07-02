@@ -49,7 +49,7 @@ async def login(request: Request, password: str = Form(...)):
     security.set_signed_session_cookie(
         resp, security.ADMIN_COOKIE, security.admin_principal(request)
     )
-    log.info("admin login from %s", ip)
+    log.info("admin login from %s%s", ip, security.tenant_log_label())
     return resp
 
 
