@@ -6,7 +6,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from .. import config, db, features, jobs, security, urls, workflows
+from .. import alerts, config, db, features, jobs, security, urls, workflows
 from ..render import templates
 
 log = logging.getLogger("mise.public.pay")
@@ -209,6 +209,16 @@ async def stripe_webhook(request: Request):
     return _record_paid_session(event, session)
 
 
+def _expected_amount(d, kind: str) -> int:
+    """Cents the invoice is owed for this payment kind — the server's own numbers,
+    the mirror of next_payment()."""
+    if kind == "deposit":
+        return d["deposit_cents"]
+    if kind == "balance":
+        return d["total_cents"] - d["deposit_cents"]
+    return d["total_cents"]  # full
+
+
 def _record_paid_session(event, session):
     invoice_id = int(session["metadata"]["invoice_id"])
     kind = session["metadata"]["kind"]
@@ -216,6 +226,15 @@ def _record_paid_session(event, session):
     if not d:
         log.error("stripe webhook for unknown invoice %s", invoice_id)
         raise HTTPException(status_code=404)
+    # Amount reconciliation (ADR 0064): mark the invoice paid only if Stripe's
+    # authoritative amount_total actually covers what the invoice is owed for this
+    # kind. We create sessions with the server-derived amount, so a mismatch means a
+    # bug or a discounted/tampered session — the payment is still RECORDED (money
+    # arrived; never lose it) but the invoice is NOT auto-satisfied, and the operator
+    # is alerted to reconcile by hand. >= tolerates overpayment/rounding.
+    amount = int(session["amount_total"])
+    expected = _expected_amount(d, kind)
+    amount_ok = amount >= expected
     # Record the payment and advance invoice + project state as one atomic unit:
     # a crash between these writes would otherwise leave the payment logged but the
     # invoice unpaid, and Stripe's retry would short-circuit on the duplicate event
@@ -227,9 +246,23 @@ def _record_paid_session(event, session):
             con.execute(
                 """INSERT INTO payments (invoice_id, stripe_event_id, stripe_session_id,
                       amount_cents, kind) VALUES (?,?,?,?,?)""",
-                (invoice_id, event["id"], session["id"], session["amount_total"], kind),
+                (invoice_id, event["id"], session["id"], amount, kind),
             )
-            if kind == "deposit":
+            if not amount_ok:
+                log.error(
+                    "stripe session %s underpaid invoice %s: got %s, expected %s (kind=%s) — "
+                    "recorded but NOT marking paid",
+                    session["id"],
+                    invoice_id,
+                    amount,
+                    expected,
+                    kind,
+                )
+                alerts.security_alert(
+                    f"Underpaid invoice {invoice_id}: received {amount}¢ < {expected}¢ "
+                    f"({kind}) — payment recorded, needs manual review."
+                )
+            elif kind == "deposit":
                 con.execute("UPDATE invoices SET status='deposit_paid' WHERE id=?", (invoice_id,))
             else:
                 con.execute(
@@ -239,15 +272,24 @@ def _record_paid_session(event, session):
             # Payment landed → advance the project to Retainer Paid (the funnel's
             # money gate). Only moves forward from pre-payment stages; never rewinds
             # a project already at session planning / closed / archived.
-            con.execute(
-                """UPDATE projects SET status='retainer_paid',
-                      stage_changed_at=datetime('now') WHERE id=?
-                      AND status IN ('inquiry_received','consultation_call',
-                                     'proposal_sent','contract_signed')""",
-                (d["project_id"],),
-            )
+            if amount_ok:
+                con.execute(
+                    """UPDATE projects SET status='retainer_paid',
+                          stage_changed_at=datetime('now') WHERE id=?
+                          AND status IN ('inquiry_received','consultation_call',
+                                         'proposal_sent','contract_signed')""",
+                    (d["project_id"],),
+                )
     except db.sqlite3.IntegrityError:
         duplicate = True  # Stripe retries. Workflow calls below are idempotent too.
+    if not amount_ok:
+        # Money arrived but doesn't cover what this kind owes: the payment row stands
+        # (a real charge is never dropped) and the operator has been alerted, but we
+        # deliberately do NOT advance the invoice/project or fire the payment
+        # workflows. An underpayment is not a settled deposit/balance, and letting the
+        # funnel auto-advance to retainer_paid or a client-facing "deposit received"
+        # workflow fire is the exact false-settlement this reconciliation guards.
+        return {"ok": True, "underpaid": True, "duplicate": duplicate}
     trigger_key = "deposit_paid" if kind == "deposit" else "invoice_paid"
     event_kind = "payment"
     workflows.record_project_event(
