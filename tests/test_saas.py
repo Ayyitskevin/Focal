@@ -393,7 +393,7 @@ def test_operator_console_renders_for_platform_admin(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "SAAS_STRIPE_PRICE_ID", "price_20")
     monkeypatch.setattr(config, "SAAS_STRIPE_WEBHOOK_SECRET", "whsec_test")
     saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
-    cookie = f"{security.ADMIN_COOKIE}={security.sign('operator')}"
+    cookie = f"{security.ADMIN_COOKIE}={security.sign(f'operator:{security._pw_fp(config.ADMIN_PASSWORD)}')}"
 
     response = asyncio.run(
         saas.operator_console(_request("/admin/saas", "mise.test", cookie=cookie))
@@ -412,7 +412,7 @@ def test_operator_csv_export_route_is_platform_admin_only(tmp_path, monkeypatch)
     monkeypatch.setattr(config, "COOKIE_SECURE", True)
     tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
     saas.update_tenant_billing(tenant["id"], plan_status="active")
-    cookie = f"{security.ADMIN_COOKIE}={security.sign('operator')}"
+    cookie = f"{security.ADMIN_COOKIE}={security.sign(f'operator:{security._pw_fp(config.ADMIN_PASSWORD)}')}"
 
     response = asyncio.run(
         saas.operator_tenants_export(_request("/admin/saas/export.csv", "mise.test", cookie=cookie))
@@ -538,23 +538,24 @@ def test_onboarding_demo_seeds_project_flow(tmp_path, monkeypatch):
 
 
 def _tenant_cookie(tenant: dict) -> str:
-    principal = f"tenant:{tenant['id']}:{tenant['slug']}"
+    fp = security._pw_fp(tenant.get("admin_password_hash") or "")
+    principal = f"tenant:{tenant['id']}:{tenant['slug']}:{fp}"
     return f"{security.ADMIN_COOKIE}={security.sign(principal)}"
 
 
 def test_admin_principal_is_context_bound(tmp_path, monkeypatch):
-    # single-tenant: legacy "admin" (unchanged so existing self-hosted sessions survive)
+    # Each principal now carries a trailing credential fingerprint (ADR 0063) so a
+    # password change evicts live sessions; identity is the stable prefix.
     monkeypatch.setattr(config, "SAAS_MODE", False)
-    assert security.admin_principal(_request("/admin/home", "studio.example")) == "admin"
-    # hosted: "operator" at the root host, "tenant:<id>:<slug>" inside a tenant runtime
+    assert security.admin_principal(_request("/admin/home", "studio.example")).startswith("admin:")
+    # hosted: "operator:<fp>" at the root host, "tenant:<id>:<slug>:<fp>" in a tenant runtime
     _configure_saas(tmp_path, monkeypatch)
     monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
     tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
-    assert security.admin_principal(_request("/admin/saas", "mise.test")) == "operator"
+    assert security.admin_principal(_request("/admin/saas", "mise.test")).startswith("operator:")
     with saas.tenant_runtime(tenant):
-        assert (
-            security.admin_principal(_request("/admin", "alpha.mise.test"))
-            == f"tenant:{tenant['id']}:alpha"
+        assert security.admin_principal(_request("/admin", "alpha.mise.test")).startswith(
+            f"tenant:{tenant['id']}:alpha:"
         )
 
 
@@ -589,7 +590,7 @@ def test_operator_cookie_rejected_on_tenant(tmp_path, monkeypatch):
     _configure_saas(tmp_path, monkeypatch)
     monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
     tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
-    cookie = f"{security.ADMIN_COOKIE}={security.sign('operator')}"
+    cookie = f"{security.ADMIN_COOKIE}={security.sign(f'operator:{security._pw_fp(config.ADMIN_PASSWORD)}')}"
     with saas.tenant_runtime(tenant):
         request = _request("/admin/billing", "alpha.mise.test", cookie=cookie)
         assert security.is_admin(request) is False
@@ -603,7 +604,9 @@ def test_matching_cookies_still_authenticate(tmp_path, monkeypatch):
         req = _request("/admin", "alpha.mise.test", cookie=_tenant_cookie(tenant))
         assert security.is_admin(req) is True
     op = _request(
-        "/admin/saas", "mise.test", cookie=f"{security.ADMIN_COOKIE}={security.sign('operator')}"
+        "/admin/saas",
+        "mise.test",
+        cookie=f"{security.ADMIN_COOKIE}={security.sign(f'operator:{security._pw_fp(config.ADMIN_PASSWORD)}')}",
     )
     assert security.is_admin(op) is True
 

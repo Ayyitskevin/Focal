@@ -191,7 +191,9 @@ def test_access_routes_use_shared_session_cookie_policy(client, monkeypatch):
         "/admin/login", data={"password": config.ADMIN_PASSWORD}, follow_redirects=False
     )
     assert admin.status_code == 303
-    assert security.unsign(assert_session_cookie(admin, security.ADMIN_COOKIE).value) == "admin"
+    assert security.unsign(assert_session_cookie(admin, security.ADMIN_COOKIE).value).startswith(
+        "admin:"
+    )
 
     db.run(
         "INSERT INTO galleries (slug,title,pin,published) VALUES (?,?,?,1)",

@@ -67,6 +67,7 @@ states context, the decision, consequences, measured reopen criteria, and altern
 | [0060](0060-launch-playbook-and-beta-instrumentation.md) | Launch playbook + beta instrumentation: the lifecycle rehearsal as a CI test, agent-executable Phase 3–5 playbook (LAUNCH-PLAYBOOK.md), marketing-only funnel analytics, card-on-file visibility, one-shot card-less trial-ending reminder | Accepted |
 | [0061](0061-security-slice1-input-hardening.md) | Security Slice 1 (input validation): per-file upload size cap + partial cleanup + content-disguise rejection (both upload paths), constant-time PIN compare across gallery/portal/workspace, email-header-injection stripping in mailer | Accepted |
 | [0062](0062-security-slice2-client-session-isolation.md) | Security Slice 2 (tenant/client isolation): tenant-id-bind the portal + workspace client-session cookies (closes ADR-0048-class cross-tenant replay), regression tests locking media/visitor/portal scoping; media path + visitor server-side token + portal client_id binding verified correct | Accepted |
+| [0063](0063-security-slice3-session-credential-binding.md) | Security Slice 3 (auth/sessions/rate-limit): mix a credential fingerprint into the admin session principal so a password reset/rotation evicts live sessions (stateless get_session_auth_hash); rate-limit completeness + tenant-scoped lockout isolation verified | Accepted |
 
 See also the operator runbook [`../MISE-SOLO-STUDIO-OS-RUNBOOK.md`](../MISE-SOLO-STUDIO-OS-RUNBOOK.md)
 (how to run it day to day), [`../MISE-SOLO-STUDIO-OS.md`](../MISE-SOLO-STUDIO-OS.md),
