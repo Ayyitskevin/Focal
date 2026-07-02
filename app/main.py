@@ -75,10 +75,13 @@ log = logging.getLogger("mise.app")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # The default DB is used in BOTH modes: it is the single-tenant studio, and in
+    # hosted mode it still serves every ROOT-host request outside a tenant context —
+    # the operator-login lockout writes pin_attempts there. A pristine hosted deploy
+    # that skipped this 500'd on the operator's very first /admin/login.
+    db.migrate()
     if config.SAAS_MODE:
         saas.migrate_control()
-    else:
-        db.migrate()
     if config.SHOWCASE_SEED and not config.SAAS_MODE:
         bootstrap.ensure_public_showcase()
     jobs.start()

@@ -23,7 +23,8 @@
     {% elif not email_on %}
     <div class="login-card">
       <p>Email isn't configured on this deployment yet, so reset links can't be sent.
-         Contact support to reset your password.</p>
+         {% if support_url %}<a href="{{ support_url }}" class="link">Contact support</a>{% else %}Contact support{% endif %}
+         to reset your password.</p>
       <p class="login-note"><a href="/admin/login" class="link">Back to sign in</a></p>
     </div>
     {% else %}

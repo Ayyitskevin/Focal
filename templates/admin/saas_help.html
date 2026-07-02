@@ -1,0 +1,42 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Help & feedback - Mise{% endblock %}
+{% block admin_body %}
+<section class="page-top">
+  <div>
+    <p class="pgtop-eyebrow">Mise hosted plan</p>
+    <h1>Help &amp; feedback</h1>
+    <p class="muted">Stuck, confused, or wishing something worked differently? This goes straight to a human.</p>
+  </div>
+  <div class="pgtop-actions">
+    <a class="pgtop-link" href="/admin/onboarding">Onboarding</a>
+    <a class="pgtop-link" href="/admin/billing">Billing</a>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Quick answers</h2>
+  <table class="kv">
+    <tr><th>Setting up the studio</th><td><a href="/admin/onboarding">Onboarding checklist</a> — presets, demo data, and the launch score.</td></tr>
+    <tr><th>Taking client payments</th><td><a href="/admin/account">Account → Client payments</a> — connect your own Stripe keys.</td></tr>
+    <tr><th>Plan, trial &amp; your data</th><td><a href="/admin/billing">Billing</a> — subscription, full studio export, delete.</td></tr>
+    <tr><th>Everything else</th><td><a href="{{ support_url }}">Support page</a>{% if support_email %} or email <a href="mailto:{{ support_email }}">{{ support_email }}</a>{% endif %}.</td></tr>
+  </table>
+</section>
+
+<section class="panel">
+  <h2>Send feedback</h2>
+  {% if sent %}
+  <p class="notice">Thank you — it landed. Every note during the beta gets read and answered.</p>
+  {% endif %}
+  <p class="muted">First thing that felt unclear? First thing that saved you time? A bug? All equally welcome.</p>
+  <form method="post" action="/admin/help/feedback" class="stack-form">
+    <input type="hidden" name="page" value="{{ request.headers.get('referer', '') }}">
+    <label>Your note
+      <textarea name="message" rows="5" maxlength="2000" required
+                placeholder="What were you trying to do, and what happened?"></textarea>
+    </label>
+    <button type="submit">Send to the Mise team</button>
+    <p class="muted">Replies go to {{ tenant.owner_email }}.</p>
+  </form>
+</section>
+{% endblock %}
