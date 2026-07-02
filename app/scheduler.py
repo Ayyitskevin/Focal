@@ -49,6 +49,10 @@ def _loop() -> None:
                 saas.winback_sweep()
             except Exception:
                 log.exception("win-back sweep failed")
+            try:
+                saas.dunning_sweep()
+            except Exception:
+                log.exception("dunning sweep failed")
             for tenant in saas.list_tenants(billable_only=True):
                 try:
                     with saas.tenant_runtime(tenant):

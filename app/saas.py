@@ -270,6 +270,10 @@ def migrate_control() -> None:
         # One-shot win-back stamp (Batch C1): set when the platform has emailed a
         # lapsed-trial or canceled owner their single come-back note.
         _ensure_column(con, "tenants", "winback_sent_at", "winback_sent_at TEXT")
+        # Dunning stamps (Batch C2): the decline notice + the grace-ending warning.
+        # Cleared when billing recovers to active so a FUTURE decline notifies again.
+        _ensure_column(con, "tenants", "dunning_notice_sent_at", "dunning_notice_sent_at TEXT")
+        _ensure_column(con, "tenants", "dunning_final_sent_at", "dunning_final_sent_at TEXT")
         # Offboarding tombstone (ADR 0051): set when the owner deletes the studio; the
         # slug is renamed so the address frees up, and the row keeps billing linkage.
         _ensure_column(con, "tenants", "deleted_at", "deleted_at TEXT")
@@ -1739,6 +1743,86 @@ def winback_sweep() -> int:
         sent += 1
     if sent:
         log.info("win-back emails sent: %d", sent)
+    return sent
+
+
+# Days before the grace window lapses when the second (final) dunning email fires.
+DUNNING_FINAL_WARN_DAYS = 2
+
+
+def dunning_sweep() -> int:
+    """Owner email when a card declines, and once more as the grace runs out.
+
+    Before this, past_due handling relied on Stripe's own retry emails plus an
+    in-admin banner the owner only sees by visiting (launch-gap audit) — a studio
+    owner mid-shoot-season could lose access without Mise ever telling them.
+    Two one-shot emails per decline EPISODE: the notice when past_due lands, the
+    final warning DUNNING_FINAL_WARN_DAYS before the ADR 0050 grace window ends.
+    Stamps clear when billing recovers to active, so a future decline notifies
+    again. Same platform-lifecycle-mail doctrine as the trial/win-back sweeps.
+    """
+    if not (config.SAAS_MODE and mailer.configured()):
+        return 0
+    with control_connect() as con:
+        # Recovery reset: billing healthy again → this episode is over.
+        con.execute(
+            """UPDATE tenants SET dunning_notice_sent_at=NULL, dunning_final_sent_at=NULL
+               WHERE plan_status='active'
+                 AND (dunning_notice_sent_at IS NOT NULL OR dunning_final_sent_at IS NOT NULL)"""
+        )
+        rows = [
+            dict(r)
+            for r in con.execute(
+                """SELECT * FROM tenants
+                   WHERE plan_status='past_due' AND deleted_at IS NULL
+                     AND (dunning_notice_sent_at IS NULL OR dunning_final_sent_at IS NULL)"""
+            ).fetchall()
+        ]
+    sent = 0
+    now = _now()
+    for tenant in rows:
+        flipped = _parse_iso(tenant.get("updated_at"))
+        grace_ends = flipped + timedelta(days=config.SAAS_PAST_DUE_GRACE_DAYS) if flipped else None
+        days_left = max((grace_ends - now).days, 0) if grace_ends else 0
+        billing_url = tenant_url(tenant["slug"], "/admin/billing")
+        if tenant.get("dunning_notice_sent_at") is None:
+            stamp_col = "dunning_notice_sent_at"
+            subject = f"Card declined for {tenant['studio_name']} — quick fix"
+            body = (
+                f"Stripe couldn't charge the card for {tenant['studio_name']} and is "
+                "retrying automatically.\n\n"
+                f"Your studio stays live for now — update the card here and nothing "
+                f"changes:\n{billing_url}\n\n"
+                f"Questions? {platform_url('/support')}\n"
+            )
+        elif (
+            tenant.get("dunning_final_sent_at") is None
+            and grace_ends is not None
+            and (grace_ends - now).days <= DUNNING_FINAL_WARN_DAYS
+        ):
+            stamp_col = "dunning_final_sent_at"
+            subject = f"{tenant['studio_name']} pauses in about {max(days_left, 1)} day{'s' if max(days_left, 1) != 1 else ''}"
+            body = (
+                f"The card for {tenant['studio_name']} still hasn't gone through, and "
+                f"access pauses in about {max(days_left, 1)} "
+                f"day{'s' if max(days_left, 1) != 1 else ''}.\n\n"
+                f"One click fixes it — update the card here:\n{billing_url}\n\n"
+                "Nothing gets deleted either way: your galleries, contracts, and "
+                "invoices wait for you, and you can export everything from the same "
+                f"page.\n\nQuestions? {platform_url('/support')}\n"
+            )
+        else:
+            continue
+        try:
+            mailer.send(tenant["owner_email"], subject, body)
+        except Exception:
+            log.exception("dunning email failed for %s (will retry next sweep)", tenant["slug"])
+            continue
+        with control_connect() as con:
+            con.execute(f"UPDATE tenants SET {stamp_col}=? WHERE id=?", (_iso(now), tenant["id"]))
+        sent += 1
+    if sent:
+        log.info("dunning emails sent: %d", sent)
     return sent
 
 
