@@ -375,6 +375,32 @@ POSTSHOOT_CULL_DAYS = int(os.environ.get("MISE_POSTSHOOT_CULL_DAYS", "1"))
 PIN_MAX_FAILS = int(os.environ.get("MISE_PIN_MAX_FAILS", "5"))
 PIN_LOCKOUT_MIN = int(os.environ.get("MISE_PIN_LOCKOUT_MIN", "15"))
 
+# Ingress proxies whose forwarded-client headers we trust (ADR 0058). Defaults cover
+# loopback (cloudflared/bare-metal) and the RFC1918 ranges Docker bridges live in —
+# safe because the app port is never published directly in the shipped deploys. Set
+# explicitly (e.g. just the Caddy container IP) to narrow, or "" to trust none.
+_TRUSTED_PROXY_DEFAULT = "127.0.0.1/32,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+
+
+def _parse_proxy_cidrs(raw: str):
+    import ipaddress
+
+    nets = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            nets.append(ipaddress.ip_network(part, strict=False))
+        except ValueError:
+            pass  # a typo'd CIDR must not take the app down; it just isn't trusted
+    return tuple(nets)
+
+
+TRUSTED_PROXY_NETS = _parse_proxy_cidrs(
+    os.environ.get("MISE_TRUSTED_PROXY_CIDRS", _TRUSTED_PROXY_DEFAULT)
+)
+
 # Per-IP request rate limits (max requests / window seconds). Deliberately generous
 # — real galleries never approach these; the media/thumbnail grid is exempt entirely
 # (see ratelimit._bucket_for) and logged-in admins are exempt so deploys/testing

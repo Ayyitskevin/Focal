@@ -56,11 +56,46 @@ def unsign_scoped(purpose: str, token: str, *, max_age: int) -> str | None:
     return payload[len(prefix) :] if payload.startswith(prefix) else None
 
 
+def _peer_is_trusted_proxy(peer: str) -> bool:
+    import ipaddress
+
+    try:
+        addr = ipaddress.ip_address(peer)
+    except ValueError:
+        return False
+    return any(addr in net for net in config.TRUSTED_PROXY_NETS)
+
+
 def client_ip(request: Request) -> str:
-    """Peer IP, or CF-Connecting-IP ONLY when the peer is local (cloudflared)."""
+    """Real client IP behind our own ingress; the raw peer everywhere else.
+
+    In the shipped compose topology the TCP peer of every request is the Caddy
+    container's bridge IP — trusting the peer blindly made per-IP rate limits and
+    the PIN lockout effectively GLOBAL (one abuser throttled/locked out everyone,
+    ADR 0058). When the peer is one of OUR proxies (loopback or the private ranges
+    in MISE_TRUSTED_PROXY_CIDRS), we recover the client from, in order:
+
+    - ``CF-Connecting-IP`` — set by Cloudflare when it fronts the deploy (also the
+      legacy cloudflared-on-localhost path, unchanged);
+    - the RIGHTMOST ``X-Forwarded-For`` entry — the one our own Caddy stamped.
+      Caddy replaces client-supplied XFF unless the sender is a configured
+      trusted proxy, so the rightmost entry is not client-forgeable; leftmost
+      entries are attacker-controlled and must never be used.
+
+    A public peer returns as-is — headers from arbitrary internet clients are
+    never trusted.
+    """
     peer = request.client.host if request.client else "?"
-    if peer in ("127.0.0.1", "::1"):
-        return request.headers.get("cf-connecting-ip", peer)
+    if not _peer_is_trusted_proxy(peer):
+        return peer
+    cf = request.headers.get("cf-connecting-ip", "").strip()
+    if cf:
+        return cf
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        rightmost = xff.rsplit(",", 1)[-1].strip()
+        if rightmost:
+            return rightmost
     return peer
 
 
