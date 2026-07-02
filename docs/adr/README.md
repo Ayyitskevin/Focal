@@ -58,6 +58,7 @@ states context, the decision, consequences, measured reopen criteria, and altern
 | [0051](0051-hosted-recovery-and-ownership.md) | Hosted recovery & ownership: stateless single-use password reset, one-click full-studio export (consistent DB snapshot + media), self-serve delete (cancels billing, tombstones slug, trash-parks data) | Accepted |
 | [0052](0052-hosted-trust-pages.md) | Hosted trust pages: public /terms, /privacy, /support at the platform root (one template, product-accurate copy incl. no-AI-training promise), footer + signup consent links; content-only, no red-light surface | Accepted |
 | [0053](0053-hosted-beta-gate-and-welcome-email.md) | Hosted beta gate + welcome email: MISE_SAAS_INVITE_CODE gates signup (constant-time, pre-provisioning; unset = public), deferred welcome email carries the studio URL on both checkout exits, login honors ?trial=1 confirmation | Accepted |
+| [0054](0054-tenant-self-serve-stripe-connection.md) | Tenant self-serve Stripe connection (BYO keys): Account panel writes the ADR 0049 fail-closed columns — both key + webhook secret required, live-verified before save, masked render, one-click fail-closed disconnect; Connect remains the later upgrade | Accepted |
 
 See also the operator runbook [`../MISE-SOLO-STUDIO-OS-RUNBOOK.md`](../MISE-SOLO-STUDIO-OS-RUNBOOK.md)
 (how to run it day to day), [`../MISE-SOLO-STUDIO-OS.md`](../MISE-SOLO-STUDIO-OS.md),

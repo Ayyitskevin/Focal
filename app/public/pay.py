@@ -164,17 +164,27 @@ async def pay_invoice(request: Request, slug: str):
 
 @router.post("/webhooks/stripe")
 async def stripe_webhook(request: Request):
-    if not features.stripe_webhook_enabled():
+    secrets = features.client_stripe_webhook_secrets()
+    if not secrets:
         raise HTTPException(status_code=503, detail="webhook not configured")
     payload = await request.body()
     stripe_mod = _stripe()
-    try:
-        event = stripe_mod.Webhook.construct_event(
-            payload,
-            request.headers.get("stripe-signature", ""),
-            features.client_stripe_webhook_secret(),
+    signature = request.headers.get("stripe-signature", "")
+    event = None
+    # Current secret first, then the previous one (ADR 0054 rotation grace) so a
+    # payment whose checkout session predates a key rotation still records.
+    for secret in secrets:
+        try:
+            event = stripe_mod.Webhook.construct_event(payload, signature, secret)
+            break
+        except (ValueError, stripe_mod.SignatureVerificationError):
+            continue
+    if event is None:
+        log.warning(
+            "stripe webhook signature failed against %d known secret(s) — "
+            "if this repeats, a checkout may predate a key rotation",
+            len(secrets),
         )
-    except (ValueError, stripe_mod.SignatureVerificationError):
         raise HTTPException(status_code=400, detail="bad signature")
 
     if event["type"] not in (

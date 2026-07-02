@@ -228,6 +228,15 @@ def migrate_control() -> None:
         _ensure_column(
             con, "tenants", "client_stripe_webhook_secret", "client_stripe_webhook_secret TEXT"
         )
+        # Rotation grace (ADR 0054): the webhook secret in force before the last
+        # connect/disconnect, still accepted for verification so an in-flight checkout
+        # (payable ~24h, retried for days) can never lose its payment record.
+        _ensure_column(
+            con,
+            "tenants",
+            "client_stripe_webhook_secret_prev",
+            "client_stripe_webhook_secret_prev TEXT",
+        )
         # Offboarding tombstone (ADR 0051): set when the owner deletes the studio; the
         # slug is renamed so the address frees up, and the row keeps billing linkage.
         _ensure_column(con, "tenants", "deleted_at", "deleted_at TEXT")
@@ -805,6 +814,79 @@ def update_tenant_billing(
         return
     with control_connect() as fresh:
         fresh.execute(sql, params)
+
+
+def _payments_status(tenant: dict) -> dict:
+    """Masked, render-safe view of the tenant's client-payment connection.
+
+    The raw secret is never sent back to the browser — only a short mask and the
+    key mode (live/test) derived from its prefix.
+    """
+    key = (tenant.get("client_stripe_secret_key") or "").strip()
+    webhook = (tenant.get("client_stripe_webhook_secret") or "").strip()
+    if key.startswith(("sk_live_", "rk_live_")):
+        mode = "live"
+    elif key:
+        mode = "test"
+    else:
+        mode = ""
+    masked = f"{key[:7]}…{key[-4:]}" if len(key) > 14 else ("configured" if key else "")
+    return {
+        "connected": bool(key),
+        "mode": mode,
+        "masked_key": masked,
+        "webhook_set": bool(webhook),
+    }
+
+
+def set_tenant_client_stripe(tenant_id: int, secret_key: str, webhook_secret: str) -> None:
+    """Write the tenant's OWN client-payment Stripe credentials (ADR 0049/0054).
+
+    Empty values disconnect: features.client_stripe_secret_key() resolves "" and the
+    pay button falls back to fail-closed off. When the webhook secret CHANGES
+    (including disconnect), the outgoing one is kept as _prev and still accepted for
+    webhook verification — a checkout link stays payable ~24h and Stripe retries for
+    days, so without this grace a rotation mid-flight would leave a client charged
+    with the invoice never marked paid. Deliberately does not stamp updated_at
+    (the past_due dunning clock, ADR 0050).
+    """
+    new_key = secret_key.strip() or None
+    new_webhook = webhook_secret.strip() or None
+    current = tenant_by_id(tenant_id) or {}
+    old_webhook = (current.get("client_stripe_webhook_secret") or "").strip() or None
+    prev = (current.get("client_stripe_webhook_secret_prev") or "").strip() or None
+    if old_webhook and old_webhook != new_webhook:
+        prev = old_webhook
+    with control_connect() as con:
+        con.execute(
+            "UPDATE tenants SET client_stripe_secret_key=?, client_stripe_webhook_secret=?, "
+            "client_stripe_webhook_secret_prev=? WHERE id=?",
+            (new_key, new_webhook, prev, tenant_id),
+        )
+
+
+def _verify_stripe_secret_key(secret_key: str) -> str | None:
+    """Best-effort live check that a key is usable; returns an error message or None.
+
+    Auth (401) and permission (403) rejections are hard errors — both are
+    deterministic, and saving such a key would surface as a 500 on the *client's*
+    pay click later, the worst possible place. Network/other failures do not block
+    the save (format is already validated and Stripe may be briefly down).
+    """
+    stripe_mod = _stripe()
+    try:
+        stripe_mod.Account.retrieve(api_key=secret_key)
+    except stripe_mod.AuthenticationError:
+        return "Stripe rejected that secret key. Copy it exactly from Developers → API keys."
+    except stripe_mod.PermissionError:
+        return (
+            "That key doesn't have enough access to verify. Use your standard secret key "
+            "(sk_), or a restricted key that includes at least Account read and "
+            "Checkout Sessions write."
+        )
+    except Exception as exc:
+        log.warning("stripe key verification skipped (transient error: %s); saving key", exc)
+    return None
 
 
 def set_tenant_password(tenant_id: int, password: str) -> None:
@@ -1707,22 +1789,27 @@ async def operator_reset_domain(request: Request, tenant_id: int):
     return RedirectResponse("/admin/saas?domain=reset", status_code=303)
 
 
+def _account_context(tenant: dict, *, error: str | None = None, saved: bool = False) -> dict:
+    return {
+        "tenant": tenant,
+        "error": error,
+        "saved": saved,
+        "root_domain": _root_domain(),
+        "payments": _payments_status(tenant),
+        "client_webhook_url": tenant_url(tenant["slug"], "/webhooks/stripe"),
+    }
+
+
 @router.get("/admin/account", response_class=HTMLResponse)
 async def account(request: Request):
     security.require_admin(request)
     tenant = current_tenant()
     if not tenant:
         raise HTTPException(status_code=404)
-    return templates.TemplateResponse(
-        request,
-        "admin/saas_account.html",
-        {
-            "tenant": tenant,
-            "error": None,
-            "saved": request.query_params.get("saved") == "1",
-            "root_domain": _root_domain(),
-        },
-    )
+    ctx = _account_context(tenant, saved=request.query_params.get("saved") == "1")
+    ctx["payments_saved"] = request.query_params.get("payments") == "1"
+    ctx["payments_off"] = request.query_params.get("payments_off") == "1"
+    return templates.TemplateResponse(request, "admin/saas_account.html", ctx)
 
 
 @router.post("/admin/account", response_class=HTMLResponse)
@@ -1758,15 +1845,58 @@ async def update_account(
         return templates.TemplateResponse(
             request,
             "admin/saas_account.html",
-            {
-                "tenant": values,
-                "error": str(exc),
-                "saved": False,
-                "root_domain": _root_domain(),
-            },
+            _account_context(values, error=str(exc)),
             status_code=400,
         )
     return RedirectResponse("/admin/account?saved=1", status_code=303)
+
+
+@router.post("/admin/account/payments", response_class=HTMLResponse)
+async def update_account_payments(
+    request: Request,
+    stripe_secret_key: str = Form(""),
+    stripe_webhook_secret: str = Form(""),
+):
+    security.require_admin(request)
+    tenant = current_tenant()
+    if not tenant:
+        raise HTTPException(status_code=404)
+    secret_key = stripe_secret_key.strip()
+    webhook_secret = stripe_webhook_secret.strip()
+    error = None
+    if not secret_key.startswith(("sk_", "rk_")):
+        error = "That doesn't look like a Stripe secret key (they start with sk_ or rk_)."
+    elif not webhook_secret.startswith("whsec_"):
+        # The webhook is how Mise marks an invoice paid — without it a client's
+        # successful charge would never be recorded, so it is required, not optional.
+        error = (
+            "The webhook signing secret is required (starts with whsec_) — "
+            "it's how Mise records your client's payment against the invoice."
+        )
+    if error is None:
+        error = await run_in_threadpool(_verify_stripe_secret_key, secret_key)
+    if error:
+        return templates.TemplateResponse(
+            request,
+            "admin/saas_account.html",
+            _account_context(tenant, error=error),
+            status_code=400,
+        )
+    set_tenant_client_stripe(tenant["id"], secret_key, webhook_secret)
+    mode = "live" if secret_key.startswith(("sk_live_", "rk_live_")) else "test"
+    log.info("tenant %s connected client Stripe (%s mode)", tenant["slug"], mode)
+    return RedirectResponse("/admin/account?payments=1", status_code=303)
+
+
+@router.post("/admin/account/payments/disconnect")
+async def disconnect_account_payments(request: Request):
+    security.require_admin(request)
+    tenant = current_tenant()
+    if not tenant:
+        raise HTTPException(status_code=404)
+    set_tenant_client_stripe(tenant["id"], "", "")
+    log.info("tenant %s disconnected client Stripe (payments fail-closed off)", tenant["slug"])
+    return RedirectResponse("/admin/account?payments_off=1", status_code=303)
 
 
 @router.get("/admin/onboarding", response_class=HTMLResponse)

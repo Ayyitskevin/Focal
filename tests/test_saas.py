@@ -964,3 +964,229 @@ def test_forgot_route_uses_tight_rate_bucket():
     # Sending the email is throttled hard; viewing the form only costs the admin bucket.
     assert ratelimit._bucket_for("/admin/forgot", "POST") == "signup"
     assert ratelimit._bucket_for("/admin/forgot", "GET") == "admin"
+
+
+# ── Tenant self-serve Stripe connection (ADR 0054) ────────────────────────────
+
+
+def _fake_stripe(fail_auth: bool = False, fail_perm: bool = False):
+    """Stand-in for the stripe module: records Account.retrieve calls."""
+    import types
+
+    class AuthError(Exception):
+        pass
+
+    class PermError(Exception):
+        pass
+
+    calls: list[str] = []
+
+    class Account:
+        @staticmethod
+        def retrieve(api_key=None):
+            calls.append(api_key)
+            if fail_auth:
+                raise AuthError("bad key")
+            if fail_perm:
+                raise PermError("missing scope")
+            return {"id": "acct_1"}
+
+    return types.SimpleNamespace(
+        AuthenticationError=AuthError, PermissionError=PermError, Account=Account
+    ), calls
+
+
+def test_tenant_connects_own_stripe_and_payments_go_live(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    fake, calls = _fake_stripe()
+    monkeypatch.setattr(saas, "_stripe", lambda: fake)
+    with saas.tenant_runtime("alpha"):
+        req = _request(
+            "/admin/account/payments",
+            "alpha.mise.test",
+            cookie=_tenant_cookie(tenant),
+            method="POST",
+        )
+        resp = asyncio.run(
+            saas.update_account_payments(
+                req,
+                stripe_secret_key="sk_test_abc123def456",
+                stripe_webhook_secret="whsec_xyz789",
+            )
+        )
+    assert resp.status_code == 303 and "payments=1" in resp.headers["location"]
+    assert calls == ["sk_test_abc123def456"]  # key was live-verified before saving
+    # Fresh runtime -> fail-closed gate now resolves the tenant's own key.
+    with saas.tenant_runtime("alpha"):
+        assert features.stripe_enabled() is True
+        assert features.client_stripe_secret_key() == "sk_test_abc123def456"
+        page = asyncio.run(
+            saas.account(
+                _request("/admin/account", "alpha.mise.test", cookie=_tenant_cookie(tenant))
+            )
+        ).body.decode()
+    assert "sk_test_abc123def456" not in page  # the raw secret never renders
+    assert "sk_test…f456" in page  # only the mask does
+    assert "(test mode)" in page
+
+
+def test_bad_key_or_missing_webhook_secret_rejected(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    fake, calls = _fake_stripe()
+    monkeypatch.setattr(saas, "_stripe", lambda: fake)
+    cases = [
+        {"stripe_secret_key": "pk_live_wrong_kind", "stripe_webhook_secret": "whsec_ok"},
+        {"stripe_secret_key": "sk_test_abc123def456", "stripe_webhook_secret": ""},
+        {"stripe_secret_key": "sk_test_abc123def456", "stripe_webhook_secret": "nope"},
+    ]
+    with saas.tenant_runtime("alpha"):
+        req = _request(
+            "/admin/account/payments",
+            "alpha.mise.test",
+            cookie=_tenant_cookie(tenant),
+            method="POST",
+        )
+        for form in cases:
+            resp = asyncio.run(saas.update_account_payments(req, **form))
+            assert resp.status_code == 400
+    assert calls == []  # format failures never reach the live verify
+    with saas.tenant_runtime("alpha"):
+        assert features.stripe_enabled() is False  # nothing was saved
+
+
+def test_stripe_rejected_key_is_not_saved(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    fake, _calls = _fake_stripe(fail_auth=True)
+    monkeypatch.setattr(saas, "_stripe", lambda: fake)
+    with saas.tenant_runtime("alpha"):
+        resp = asyncio.run(
+            saas.update_account_payments(
+                _request(
+                    "/admin/account/payments",
+                    "alpha.mise.test",
+                    cookie=_tenant_cookie(tenant),
+                    method="POST",
+                ),
+                stripe_secret_key="sk_live_stolen_or_typoed",
+                stripe_webhook_secret="whsec_ok",
+            )
+        )
+        assert resp.status_code == 400
+        assert "rejected" in resp.body.decode()
+    with saas.tenant_runtime("alpha"):
+        assert features.stripe_enabled() is False
+
+
+def test_disconnect_returns_payments_to_fail_closed(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    saas.set_tenant_client_stripe(tenant["id"], "sk_test_abc123def456", "whsec_xyz789")
+    with saas.tenant_runtime("alpha"):
+        assert features.stripe_enabled() is True
+        resp = asyncio.run(
+            saas.disconnect_account_payments(
+                _request(
+                    "/admin/account/payments/disconnect",
+                    "alpha.mise.test",
+                    cookie=_tenant_cookie(tenant),
+                    method="POST",
+                )
+            )
+        )
+        assert resp.status_code == 303 and "payments_off=1" in resp.headers["location"]
+    with saas.tenant_runtime("alpha"):
+        assert features.stripe_enabled() is False  # ADR 0049 off state restored: no new charges
+        # …but the OLD webhook secret stays verifiable so an in-flight checkout
+        # that the client already paid can still record (rotation grace).
+        assert features.client_stripe_webhook_secrets() == ["whsec_xyz789"]
+
+
+def test_permission_rejected_key_is_not_saved(tmp_path, monkeypatch):
+    # A 403 is deterministic (restricted key without the needed scopes), not transient:
+    # saving it would 500 on the client's pay click, so it must hard-reject.
+    _configure_saas(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    fake, _calls = _fake_stripe(fail_perm=True)
+    monkeypatch.setattr(saas, "_stripe", lambda: fake)
+    with saas.tenant_runtime("alpha"):
+        resp = asyncio.run(
+            saas.update_account_payments(
+                _request(
+                    "/admin/account/payments",
+                    "alpha.mise.test",
+                    cookie=_tenant_cookie(tenant),
+                    method="POST",
+                ),
+                stripe_secret_key="rk_live_minimal_scope_key",
+                stripe_webhook_secret="whsec_ok",
+            )
+        )
+        assert resp.status_code == 400
+        assert "enough access" in resp.body.decode()
+    with saas.tenant_runtime("alpha"):
+        assert features.stripe_enabled() is False
+
+
+def test_webhook_secret_rotation_keeps_previous_secret_verifiable(tmp_path, monkeypatch):
+    # The mid-update hazard: a checkout created under secret A stays payable ~24h.
+    # Rotating to B must not orphan A-signed deliveries — grace-verify via _prev.
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    saas.set_tenant_client_stripe(tenant["id"], "sk_test_key_for_acct_a", "whsec_AAA")
+    saas.set_tenant_client_stripe(tenant["id"], "sk_test_key_for_acct_b", "whsec_BBB")
+    with saas.tenant_runtime("alpha"):
+        assert features.client_stripe_webhook_secret() == "whsec_BBB"
+        assert features.client_stripe_webhook_secrets() == ["whsec_BBB", "whsec_AAA"]
+    # Re-saving the SAME webhook secret must not clobber the grace slot.
+    saas.set_tenant_client_stripe(tenant["id"], "sk_test_key_for_acct_b2", "whsec_BBB")
+    with saas.tenant_runtime("alpha"):
+        assert features.client_stripe_webhook_secrets() == ["whsec_BBB", "whsec_AAA"]
+    # A second rotation retires A: only the last two secrets ever verify.
+    saas.set_tenant_client_stripe(tenant["id"], "sk_test_key_for_acct_c", "whsec_CCC")
+    with saas.tenant_runtime("alpha"):
+        assert features.client_stripe_webhook_secrets() == ["whsec_CCC", "whsec_BBB"]
+
+
+def test_client_webhook_accepts_delivery_signed_with_previous_secret(tmp_path, monkeypatch):
+    import types
+
+    from app.public import pay
+
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    saas.set_tenant_client_stripe(tenant["id"], "sk_test_key_for_acct_a", "whsec_AAA")
+    saas.set_tenant_client_stripe(tenant["id"], "sk_test_key_for_acct_b", "whsec_BBB")
+
+    class SigError(Exception):
+        pass
+
+    class Webhook:
+        @staticmethod
+        def construct_event(payload, signature, secret):
+            if secret != "whsec_AAA":  # the delivery was signed under the OLD secret
+                raise SigError("mismatch")
+            return {"type": "ping.ignored", "data": {"object": {}}}
+
+    fake = types.SimpleNamespace(Webhook=Webhook, SignatureVerificationError=SigError)
+    monkeypatch.setattr(pay, "_stripe", lambda: fake)
+
+    async def _post():
+        request = _request("/webhooks/stripe", "alpha.mise.test", method="POST")
+
+        async def body():
+            return b"{}"
+
+        request.body = body
+        return await pay.stripe_webhook(request)
+
+    with saas.tenant_runtime("alpha"):
+        result = asyncio.run(_post())
+    assert result == {"ok": True, "ignored": "ping.ignored"}  # verified via the grace secret
