@@ -37,6 +37,28 @@ def _check_backup() -> None:
     import datetime as dt
 
     bdir = config.DATA_DIR / "backups"
+    if config.SAAS_MODE:
+        # Hosted (ADR 0057): the backup sidecar stamps a marker after each pass;
+        # assert the positive on the marker instead of inferring from silence.
+        from .hosted_backup import MARKER_NAME
+
+        marker = bdir / MARKER_NAME
+        if not marker.exists():
+            alerts.ops_alert(
+                "backup_missing",
+                "No hosted backup has ever completed — tenant databases are "
+                "unprotected. Check the compose `backup` service.",
+            )
+            return
+        age_h = (dt.datetime.now().timestamp() - marker.stat().st_mtime) / 3600
+        if age_h > config.BACKUP_STALE_HOURS:
+            alerts.ops_alert(
+                "backup_stale",
+                f"Latest hosted backup is {int(age_h)}h old (over the "
+                f"{config.BACKUP_STALE_HOURS}h threshold) — the backup sidecar may "
+                f"have stopped. Check the compose `backup` service.",
+            )
+        return
     snaps = sorted(bdir.glob("*.db.gz")) if bdir.exists() else []
     if not snaps:
         alerts.ops_alert(

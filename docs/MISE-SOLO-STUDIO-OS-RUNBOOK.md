@@ -399,3 +399,35 @@ for.
 
 *This runbook is living — when a capability is armed, promoted, or a new one is integrated,
 update the relevant section and add/observe the matching ADR.*
+
+## 10. Hosted backups & restore (ADR 0057)
+
+The compose `backup` sidecar runs `scripts/hosted-backup.py --loop`: every
+`MISE_BACKUP_INTERVAL_HOURS` (default 24) it takes a **consistent, integrity-checked,
+gzipped snapshot of every tenant database and the control DB** into
+`/data/backups/<stamp>/`, prunes snapshots older than `MISE_BACKUP_RETENTION_DAYS`
+(default 14), and stamps `/data/backups/.last-hosted-backup`. The hourly ops sweep
+alerts on Telegram when that marker is missing or older than
+`MISE_BACKUP_STALE_HOURS` — silence is not evidence; the marker asserts the positive.
+
+**Local snapshots live on the same volume as the data** — they protect against
+corruption and mistakes, not disk loss. Set `MISE_BACKUP_RCLONE_REMOTE` (e.g.
+`b2:mise-backups`; configure rclone credentials in the container env) and each pass
+also syncs the snapshot dir **and the full tenant media tree** off-site. An
+unset remote reports `offsite: off`; a broken one reports `failed:*` and exits
+non-zero — never a silent no-op.
+
+### Restore drill (practice this before you need it)
+
+1. `docker compose exec backup ls /data/backups/` — pick a snapshot stamp.
+2. Restore one tenant DB:
+   `docker compose exec backup sh -c 'gunzip -c /data/backups/<stamp>/tenants/<slug>.db.gz > /data/tenants/<slug>/mise.db.restore'`
+3. Verify it opens: `python3 -c "import sqlite3;print(sqlite3.connect('/data/tenants/<slug>/mise.db.restore').execute('PRAGMA quick_check').fetchone())"` (run inside the container).
+4. Swap it in with the app stopped for that step:
+   `docker compose stop mise && mv .../mise.db.restore .../mise.db && docker compose start mise`
+   (also delete stale `mise.db-wal`/`mise.db-shm` beside it).
+5. Full-disk-loss recovery: provision a new host, `rclone sync <remote>/tenants /data/tenants`
+   and `rclone sync <remote>/backups /data/backups`, restore each tenant DB from the newest
+   snapshot as above (the live DB files in the media sync are NOT crash-consistent — always
+   restore DBs from snapshots), then bring the stack up and run the preflight.
+6. Manual one-off pass anytime: `docker compose exec backup python scripts/hosted-backup.py`.

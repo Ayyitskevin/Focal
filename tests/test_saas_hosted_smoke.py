@@ -1,9 +1,13 @@
 import asyncio
 
+import pytest
 from starlette.requests import Request
 
 from app import config, db, onboarding, saas
 from app.admin import activity, auth
+
+# Fast, hermetic (tmp-path DBs, no network): run in the CI unit gate.
+pytestmark = pytest.mark.unit
 
 
 def _configure_saas(tmp_path, monkeypatch):

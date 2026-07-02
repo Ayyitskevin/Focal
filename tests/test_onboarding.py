@@ -4,6 +4,9 @@ import pytest
 
 from app import db, onboarding, preset_packs, saas
 
+# Fast, hermetic (tmp-path DBs, no network): run in the CI unit gate.
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture()
 def isolated_db(tmp_path):
