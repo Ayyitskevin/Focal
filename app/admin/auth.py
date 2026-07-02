@@ -40,7 +40,12 @@ async def login(request: Request, password: str = Form(...)):
     if config.SAAS_MODE:
         from .. import saas
 
-        if not saas.current_tenant():
+        tenant = saas.current_tenant()
+        if tenant:
+            # Tenant pulse (Batch A2): the operator's only "is this studio alive"
+            # signal — stamped only on a SUCCESSFUL login, after the lockout gate.
+            saas.touch_tenant_login(tenant["id"])
+        else:
             destination = "/admin/saas"
     resp = RedirectResponse(destination, status_code=303)
     # Bind the session to this host's principal (tenant slug / operator / legacy "admin") so a
