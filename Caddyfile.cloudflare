@@ -1,0 +1,24 @@
+# Origin Caddyfile for the Cloudflare-fronted hosted deploy (ADR 0059).
+#
+#   cp Caddyfile.cloudflare Caddyfile   # then: docker compose up -d caddy
+#
+# Cloudflare's edge terminates public TLS for mise.example.com and
+# *.mise.example.com with its own wildcard certificate (orange-cloud/proxied
+# DNS records). This origin serves HTTPS to Cloudflare ONLY, using a
+# Cloudflare Origin CA certificate (SSL/TLS -> Origin Server -> Create
+# Certificate; cover both the apex and *.your-domain; 15-year validity):
+#
+#   certs/cloudflare-origin.pem   (certificate)
+#   certs/cloudflare-origin.key   (private key)
+#
+# Set the Cloudflare zone's SSL/TLS mode to "Full (strict)" and enable
+# "Always Use HTTPS". Client IPs arrive via CF-Connecting-IP, which
+# security.client_ip already prefers from trusted proxies (ADR 0058).
+
+{$MISE_CADDY_SITE_ADDRESS} {
+	tls /certs/cloudflare-origin.pem /certs/cloudflare-origin.key
+	reverse_proxy mise:8400 {
+		header_up Host {host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+}

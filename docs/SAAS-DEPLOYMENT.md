@@ -42,27 +42,43 @@ cp .env.example .env
 MISE_CADDY_SITE_ADDRESS='mise.example.com, *.mise.example.com' docker compose up --build -d
 ```
 
-Wildcard public TLS usually needs DNS-challenge support in Caddy. If the Caddy
-image is not built with your DNS provider module, put Cloudflare/Tailscale in
-front or provision tenant domains explicitly.
+## Wildcard TLS — Cloudflare fronting (the supported hosted setup, ADR 0059)
+
+The stock `caddy` image cannot issue `*.your-domain` certificates (that needs a
+DNS-01 challenge module). The supported setup fronts the deploy with Cloudflare,
+whose edge holds the wildcard certificate:
+
+1. Add your domain to Cloudflare (free plan) and move nameservers to it.
+2. DNS records, all **Proxied** (orange cloud): `@ -> server IP`,
+   `* -> server IP`, `www -> server IP`.
+3. Zone settings: SSL/TLS mode **Full (strict)**; enable **Always Use HTTPS**.
+4. SSL/TLS -> **Origin Server -> Create Certificate**, covering
+   `your-domain` and `*.your-domain` (15-year validity). Save the pair as
+   `certs/cloudflare-origin.pem` and `certs/cloudflare-origin.key` next to
+   `docker-compose.yml` (the compose file mounts `./certs` into Caddy;
+   `certs/` is gitignored — never commit it).
+5. `cp Caddyfile.cloudflare Caddyfile`, then launch as below.
+
+Client IPs stay correct: Cloudflare sends `CF-Connecting-IP`, which
+`security.client_ip` prefers from trusted proxies (ADR 0058), so rate limits,
+PIN lockout, and audit logs see the real visitor.
 
 ## DNS
 
-Platform:
+Platform (managed by Cloudflare per the section above):
 
 ```text
-mise.example.com -> server IP
-*.mise.example.com -> server IP
+@   -> server IP   (proxied)
+*   -> server IP   (proxied)
+www -> server IP   (proxied)
 ```
 
-Custom domains:
-
-```text
-studio.customer.com CNAME mise.example.com
-```
-
-After a tenant saves a custom domain in `/admin/account`, the domain is marked
-verified the first time a request reaches Mise on that hostname.
+Custom tenant domains (`studio.customer.com`): with Cloudflare fronting, a plain
+CNAME to the platform host will NOT get valid TLS — that requires **Cloudflare
+for SaaS** (Custom Hostnames; free tier covers 100 hostnames), which is a
+post-beta setup step. Until it's enabled, advise tenants to use their built-in
+`slug.your-domain` address; the `/admin/account` custom-domain field marks a
+domain verified on first request once TLS for it actually resolves.
 
 ## Stripe Webhooks
 
