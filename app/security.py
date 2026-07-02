@@ -285,6 +285,25 @@ def is_admin(request: Request) -> bool:
     return unsign(raw) == admin_principal(request)
 
 
+def client_session_payload(kind: str, resource_id: int) -> str:
+    """Signed-cookie payload for a client session (portal / workspace), bound to the
+    serving studio in hosted mode (ADR 0062).
+
+    Single-tenant: ``"<kind>:<id>"`` — unchanged, so self-hosted client cookies keep
+    working byte-for-byte. Hosted: ``"<kind>:<tenant_id>:<id>"``. Portal/project ids
+    restart per tenant and SECRET_KEY is global, so without the tenant-id prefix a
+    copied ``portal:5`` cookie would validate against another studio's portal 5. The
+    immutable tenant **id** (not the reusable slug — ADR 0051) prevents a reclaimed
+    slug from resurrecting a stale session."""
+    if not config.SAAS_MODE:
+        return f"{kind}:{resource_id}"
+    from . import saas
+
+    tenant = saas.current_tenant()
+    scope = f"{tenant['id']}:" if tenant else ""
+    return f"{kind}:{scope}{resource_id}"
+
+
 def require_admin(request: Request) -> None:
     if not is_admin(request):
         raise HTTPException(status_code=303, headers={"Location": "/admin/login"})

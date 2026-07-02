@@ -42,7 +42,9 @@ def _cookie_name(project_id: int) -> str:
 
 def _has_access(request: Request, project_id: int) -> bool:
     raw = request.cookies.get(_cookie_name(project_id))
-    return bool(raw) and security.unsign(raw) == f"workspace:{project_id}"
+    return bool(raw) and security.unsign(raw) == security.client_session_payload(
+        "workspace", project_id
+    )
 
 
 @router.get("/{slug}", response_class=HTMLResponse)
@@ -118,5 +120,7 @@ async def check_pin(request: Request, slug: str, pin: str = Form(...)):
         )
     security.pin_clear(ip, key)
     resp = RedirectResponse(f"/w/{slug}", status_code=303)
-    security.set_signed_session_cookie(resp, _cookie_name(p["id"]), f"workspace:{p['id']}")
+    security.set_signed_session_cookie(
+        resp, _cookie_name(p["id"]), security.client_session_payload("workspace", p["id"])
+    )
     return resp

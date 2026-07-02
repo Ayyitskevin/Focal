@@ -125,7 +125,9 @@ def _cookie_name(portal_id: int) -> str:
 
 def _has_access(request: Request, portal_id: int) -> bool:
     raw = request.cookies.get(_cookie_name(portal_id))
-    return bool(raw) and security.unsign(raw) == f"portal:{portal_id}"
+    return bool(raw) and security.unsign(raw) == security.client_session_payload(
+        "portal", portal_id
+    )
 
 
 def _require_access(request: Request, portal_id: int) -> None:
@@ -252,7 +254,9 @@ async def check_pin(request: Request, slug: str, pin: str = Form(...)):
         )
     security.pin_clear(ip, -p["id"])
     resp = RedirectResponse(f"/portal/{slug}", status_code=303)
-    security.set_signed_session_cookie(resp, _cookie_name(p["id"]), f"portal:{p['id']}")
+    security.set_signed_session_cookie(
+        resp, _cookie_name(p["id"]), security.client_session_payload("portal", p["id"])
+    )
     return resp
 
 
