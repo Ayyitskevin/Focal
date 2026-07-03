@@ -1,12 +1,14 @@
-"""Mise's first scheduler — an in-process daemon thread for recurring retainers.
+"""Mise's scheduler — one in-process daemon thread for every recurring sweep.
 
-It wakes on an interval and runs the due recurring plans, generating DRAFT
-invoices only — it never sends or charges (the manual-send doctrine is intact:
-Kevin still clicks Send, Stripe still collects). It is deliberately the simplest
-thing that works: no cron, no run_at column, no second process. The sweep is
-idempotent (the period claim in recurring.generate_for_plan dedupes per month),
-so the loop can fire as often as it likes and a plan still gets exactly one draft
-per period.
+It wakes on an interval and runs: due recurring plans (DRAFT invoices only —
+the money path never sends or charges itself; Kevin still clicks Send, Stripe
+still collects), the operational reminder sweeps (booking/gallery/contract/
+retainer/post-shoot — owner- and client-consented reminder mail per their own
+gates), and in hosted mode the platform lifecycle mail (trial reminder,
+win-back, dunning, weekly operator digest — all owner-facing, all one-shot).
+It is deliberately the simplest thing that works: no cron, no run_at column,
+no second process. Every sweep is idempotent (period claims, one-shot stamps),
+so the loop can fire as often as it likes.
 
 The thread WAITS one interval before its first sweep — there is no sweep-on-boot.
 That keeps test lifespan cycles from generating anything, and in production it
@@ -34,8 +36,8 @@ _stop = threading.Event()
 _thread: threading.Thread | None = None
 
 
-def _loop() -> None:
-    while not _stop.wait(config.RECURRING_TICK_SECONDS):
+def _loop(stop_event: threading.Event) -> None:
+    while not stop_event.wait(config.RECURRING_TICK_SECONDS):
         if config.SAAS_MODE:
             from . import saas
 
@@ -100,11 +102,16 @@ def _sweep_once() -> None:
 
 
 def start() -> None:
-    global _thread
-    _stop.clear()
-    _thread = threading.Thread(target=_loop, name="mise-recurring", daemon=True)
+    global _thread, _stop
+    # A FRESH event per generation: stop() joins with a 2s timeout, so a sweep
+    # mid-SMTP can outlive it — clearing the shared event would un-stop that
+    # orphan and leave two loops sweeping side by side after a restart.
+    _stop = threading.Event()
+    _thread = threading.Thread(target=_loop, args=(_stop,), name="mise-recurring", daemon=True)
     _thread.start()
-    log.info("recurring scheduler up (every %ss, drafts only)", config.RECURRING_TICK_SECONDS)
+    log.info(
+        "scheduler up (every %ss; money path stays drafts-only)", config.RECURRING_TICK_SECONDS
+    )
 
 
 def stop() -> None:

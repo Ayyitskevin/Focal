@@ -114,7 +114,9 @@ def pin_matches(supplied: str, actual: str | None) -> bool:
     actual = (actual or "").strip()
     if not actual or len(supplied) != len(actual):
         return False
-    return secrets.compare_digest(supplied, actual)
+    # Encoded first: compare_digest raises TypeError on non-ASCII str input, so a
+    # PIN guess like "pïn1" would 500 instead of failing closed as a plain miss.
+    return secrets.compare_digest(supplied.encode(), actual.encode())
 
 
 def tenant_log_label() -> str:
@@ -346,10 +348,13 @@ def check_admin_password(password: str) -> bool:
             return passwords.verify_password(password, tenant["admin_password_hash"])
         if not config.ADMIN_PASSWORD:
             return False
-        return secrets.compare_digest(password, config.ADMIN_PASSWORD)
+        # Encoded: compare_digest raises TypeError on non-ASCII str, so a password
+        # attempt like "pässword" would 500 (uncharged by the lockout bucket)
+        # instead of returning a plain 401.
+        return secrets.compare_digest(password.encode(), config.ADMIN_PASSWORD.encode())
     if not config.ADMIN_PASSWORD:
         return False
-    return secrets.compare_digest(password, config.ADMIN_PASSWORD)
+    return secrets.compare_digest(password.encode(), config.ADMIN_PASSWORD.encode())
 
 
 def require_argus_token(request: Request) -> None:
@@ -361,7 +366,7 @@ def require_argus_token(request: Request) -> None:
         raise HTTPException(status_code=503, detail="galleries api disarmed")
     header = request.headers.get("Authorization", "")
     expected = f"Bearer {config.ARGUS_TOKEN}"
-    if not secrets.compare_digest(header, expected):
+    if not secrets.compare_digest(header.encode(), expected.encode()):
         raise HTTPException(status_code=401, detail="bad token")
 
 
@@ -376,5 +381,5 @@ def require_shots_token(request: Request) -> None:
         raise HTTPException(status_code=503, detail="shots api disarmed")
     header = request.headers.get("Authorization", "")
     expected = f"Bearer {config.SHOTS_TOKEN}"
-    if not secrets.compare_digest(header, expected):
+    if not secrets.compare_digest(header.encode(), expected.encode()):
         raise HTTPException(status_code=401, detail="bad token")

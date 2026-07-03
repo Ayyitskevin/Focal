@@ -4,6 +4,26 @@
 the self-hosted studio, after a ten-slice hardening and polish campaign
 (security slices 1–5, ADRs 0061–0065; polish slices 1–4).
 
+## Addendum — beta ops batch (2026-07-03)
+
+Twelve slices landed between the cut above and launch, turning the console
+into a beta cockpit:
+
+- **Cockpit (A):** in-app Help & feedback per studio → operator triage queue
+  (new/done); login pulse with silent-trial at-risk flags; waitlist capture on
+  the invite gate + CSV; per-studio operator notes.
+- **Launch surface (B):** og:image link cards; real product screenshots on
+  `/demo`; Plausible funnel goals; marketing `robots.txt` + `sitemap.xml`
+  (and the noindex header no longer overrides the marketing pages' meta).
+- **Revenue engine (C):** one-shot win-back email after a lapse; platform
+  dunning (decline notice + grace-ending warning, reset on recovery);
+  operator trial extension (1–30 days, re-arms lifecycle mail); exit-reason
+  capture on studio deletion.
+- **Ops loop (D):** weekly operator digest email (the console's headline,
+  first tick of each ISO week); feedback triage state; the public-launch
+  flip verified live, with a gate badge in the console and a "Going Public"
+  checklist in `BETA-LAUNCH.md`.
+
 ## What Mise is at this cut
 
 One product, two shapes:

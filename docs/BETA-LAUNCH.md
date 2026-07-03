@@ -21,6 +21,9 @@ into the hosted `$20/month` beta.
   `MISE_GMAIL_APP_PASSWORD` before inviting real customers — signup sends the
   welcome email carrying each studio's own URL, and the day-11 trial reminder
   depends on it too.
+- `MISE_SAAS_SUPPORT_EMAIL` is set to the inbox you actually read — it is the
+  public support contact **and** where the weekly operator digest lands
+  (unset, both fall back to the Gmail sender).
 - `python scripts/hosted-preflight.py` returns `READY` with `0 fail`.
 - CI is green, including the `dependency-audit` job (see `docs/SECURITY.md`).
 - `/admin/saas` launch checklist is clear or every remaining item has an owner.

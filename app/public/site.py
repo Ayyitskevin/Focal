@@ -490,6 +490,15 @@ async def submit_inquiry(
     # spammer's 4th submit hits this wall (honeypot kicks in earlier for naive
     # bots; this is for the ones smart enough to skip the trap).
     ip = security.client_ip(request)
+    # Error re-renders echo what the visitor already typed (as prefill) and keep
+    # the sidebar image — a 400 that wipes a half-written inquiry loses the lead.
+    echo = {
+        "name": name.strip(),
+        "email": email.strip(),
+        "business": business.strip(),
+        "service": service.strip(),
+        "message": message.strip(),
+    }
     if security.inquiry_throttled(ip, security.INQUIRY_BUCKET_CONTACT):
         log.warning("contact form throttled for ip=%s", ip)
         return templates.TemplateResponse(
@@ -499,6 +508,8 @@ async def submit_inquiry(
                 "sent": False,
                 "error": "You've sent a few inquiries recently — give me a chance to reply "
                 "before sending another one. If it's urgent, email me directly.",
+                "prefill": echo,
+                "featured": _portfolio_assets()[:1],
                 "faqs": CONTACT_FAQS,
                 "faq_heading": "Good to know",
             },
@@ -512,6 +523,8 @@ async def submit_inquiry(
             {
                 "sent": False,
                 "error": "Please add your name, a valid email, and a short message.",
+                "prefill": echo,
+                "featured": _portfolio_assets()[:1],
                 "faqs": CONTACT_FAQS,
                 "faq_heading": "Good to know",
             },
@@ -669,12 +682,14 @@ async def portfolio_video_poster(asset_id: int):
 
 @router.get("/robots.txt", response_class=PlainTextResponse)
 async def robots():
+    # public_base_url, not BASE_URL: on a hosted tenant host this file must
+    # point at the TENANT's own sitemap, not the platform operator's domain.
     return (
         "User-agent: *\n"
         "Disallow: /g/\nDisallow: /portal/\nDisallow: /media/\n"
         "Disallow: /admin\nDisallow: /p/\nDisallow: /c/\nDisallow: /i/\n"
         "Allow: /\n"
-        f"Sitemap: {config.BASE_URL}/sitemap.xml\n"
+        f"Sitemap: {urls.public_base_url()}/sitemap.xml\n"
     )
 
 
@@ -694,9 +709,10 @@ async def sitemap():
     # Case-study detail pages are also surfaced on /portfolio (Featured clients)
     # but get their own crawlable URLs here (/work index + /work/{slug} details).
     paths += [f"/work/{g['slug']}" for g in _case_studies()]
-    urls = "".join(f"<url><loc>{config.BASE_URL}{p}</loc></url>" for p in paths)
+    base = urls.public_base_url()
+    locs = "".join(f"<url><loc>{base}{p}</loc></url>" for p in paths)
     return Response(
         content='<?xml version="1.0" encoding="UTF-8"?>'
-        f'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{urls}</urlset>',
+        f'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{locs}</urlset>',
         media_type="application/xml",
     )
