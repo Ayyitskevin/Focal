@@ -154,7 +154,11 @@ async def csrf_guard(request: Request, call_next):
 async def common_headers(request: Request, call_next):
     resp = await call_next(request)
     p = request.url.path
-    if not (p in site.INDEXABLE or p.startswith(("/site/img/", "/static/", "/work/"))):
+    if not (
+        p in site.INDEXABLE
+        or (config.SAAS_MODE and p in saas.MARKETING_INDEXABLE)
+        or p.startswith(("/site/img/", "/static/", "/work/"))
+    ):
         resp.headers["X-Robots-Tag"] = "noindex, nofollow"
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["X-Content-Type-Options"] = "nosniff"
