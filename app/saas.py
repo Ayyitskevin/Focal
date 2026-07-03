@@ -29,6 +29,7 @@ from fastapi.responses import (
     JSONResponse,
     PlainTextResponse,
     RedirectResponse,
+    Response,
 )
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
@@ -1390,6 +1391,22 @@ def tenant_billing_context(tenant: dict | None) -> dict | None:
     }
 
 
+# Marketing paths crawlers may index on the platform host (Batch B3). The
+# common_headers middleware stamps X-Robots-Tag: noindex on everything outside
+# the STUDIO site's INDEXABLE set — which silently overrode the index,follow
+# meta these pages have declared since B1 (headers beat meta for noindex).
+MARKETING_INDEXABLE = {
+    "/",
+    "/pricing",
+    "/demo",
+    "/terms",
+    "/privacy",
+    "/support",
+    "/robots.txt",
+    "/sitemap.xml",
+}
+
+
 def _platform_path(path: str) -> bool:
     return (
         path
@@ -1404,6 +1421,8 @@ def _platform_path(path: str) -> bool:
             "/support",
             "/healthz",
             "/favicon.ico",
+            "/robots.txt",
+            "/sitemap.xml",
         }
         or path.startswith("/static/")
         or path in {"/admin/login", "/admin/logout", "/admin/saas"}
@@ -1544,6 +1563,37 @@ def _legal_page(request: Request, doc: str) -> HTMLResponse:
         {"doc": doc, "doc_title": _LEGAL_DOCS[doc], "support_email": config.SAAS_SUPPORT_EMAIL}
     )
     return templates.TemplateResponse(request, "saas/legal.html", ctx)
+
+
+@router.get("/robots.txt", response_class=PlainTextResponse)
+async def saas_robots():
+    """Host-aware robots.txt (Batch B3).
+
+    In SAAS mode this router shadows the studio site's route on every host, so
+    tenant hosts delegate back to it — their rules stay byte-identical to before.
+    The platform host finally gets its own file: until now the middleware 303'd
+    crawlers to /pricing, which reads as 'no robots.txt' at best.
+    """
+    if current_tenant() is not None:
+        from .public import site
+
+        return await site.robots()
+    return f"User-agent: *\nDisallow: /admin\nAllow: /\nSitemap: {platform_url('/sitemap.xml')}\n"
+
+
+@router.get("/sitemap.xml")
+async def saas_sitemap():
+    if current_tenant() is not None:
+        from .public import site
+
+        return await site.sitemap()
+    pages = ["/", "/pricing", "/demo", "/terms", "/privacy", "/support"]
+    urls = "".join(f"<url><loc>{platform_url(p)}</loc></url>" for p in pages)
+    return Response(
+        content='<?xml version="1.0" encoding="UTF-8"?>'
+        f'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{urls}</urlset>',
+        media_type="application/xml",
+    )
 
 
 @router.post("/start-trial")
