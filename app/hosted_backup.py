@@ -30,6 +30,13 @@ from pathlib import Path
 log = logging.getLogger("mise.hosted_backup")
 
 MARKER_NAME = ".last-hosted-backup"
+# Companion signal: written (newline-joined tenant slugs) when a pass backs up
+# some studios but a per-tenant snapshot FAILED, cleared on a fully-clean pass.
+# The heartbeat marker alone can't express partial failure — a single tenant
+# whose DB is corrupt would otherwise accrue zero backups while the marker stays
+# fresh and ops_monitor reads only its mtime (ADR 0057: assert the positive, and
+# a partial success is not a full one).
+FAILURE_MARKER_NAME = ".last-hosted-backup-failures"
 
 
 def _snapshot_sqlite(src: Path, dest_gz: Path) -> None:
@@ -102,7 +109,8 @@ def run_backup(
         _snapshot_sqlite(control_db, dest / "saas-control.db.gz")
         control_done = True
 
-    tenant_count, tenant_failures = 0, 0
+    tenant_count = 0
+    failed_tenants: list[str] = []
     tenant_dest = dest / "tenants"
     if tenants_dir.exists():
         for entry in sorted(tenants_dir.iterdir()):
@@ -120,20 +128,29 @@ def run_backup(
             except Exception:
                 # One broken tenant DB must not stop the other studios' backups.
                 log.exception("backup failed for tenant %s", entry.name)
-                tenant_failures += 1
+                failed_tenants.append(entry.name)
 
     if not control_done and tenant_count == 0:
         shutil.rmtree(dest, ignore_errors=True)
         raise RuntimeError(f"nothing to back up under {data_dir} — wrong paths?")
 
     (backups_dir / MARKER_NAME).write_text(datetime.now(UTC).isoformat())
+    # Surface partial failure to ops_monitor via a durable file signal (the sidecar
+    # runs in its own process, so a return value can't reach the app's monitor). A
+    # fully-clean pass clears any stale failure marker so the alert self-resolves.
+    failure_marker = backups_dir / FAILURE_MARKER_NAME
+    if failed_tenants:
+        failure_marker.write_text("\n".join(failed_tenants))
+    else:
+        failure_marker.unlink(missing_ok=True)
     pruned = _prune(backups_dir, retention_days)
     offsite = _offsite_sync(rclone_remote, backups_dir, tenants_dir)
     summary = {
         "snapshot": str(dest),
         "control": control_done,
         "tenants": tenant_count,
-        "tenant_failures": tenant_failures,
+        "tenant_failures": len(failed_tenants),
+        "failed": failed_tenants,
         "pruned": pruned,
         "offsite": offsite,
     }
