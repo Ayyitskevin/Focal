@@ -18,6 +18,15 @@ from ..render import templates
 log = logging.getLogger("mise.public.portal")
 router = APIRouter(prefix="/portal")
 
+# PIN-lockout bucket namespace (shared pin_attempts table, keyed by gallery_id).
+# Portals MUST offset off every other keyspace: raw -portal_id collided with the
+# reserved inquiry-throttle sentinels (INQUIRY_BUCKET_* = -2..-5 in security.py),
+# so a portal client's PIN fumbles cross-throttled the public /contact form and a
+# NAT-shared visitor's inquiries phantom-locked the portal. 1_000_000 puts portals
+# in their own band — above gallery ids (raw positive), clear of the negatives, and
+# distinct from workspace's 2_000_000 offset.
+PIN_OFFSET = 1_000_000
+
 # Friendly labels for the client-facing licence view (the admin stores slugs).
 _TIER_LABEL = {
     "standard": "Standard",
@@ -241,7 +250,8 @@ async def view(request: Request, slug: str):
 async def check_pin(request: Request, slug: str, pin: str = Form(...)):
     p = get_live_portal(slug)
     ip = security.client_ip(request)
-    if security.pin_locked(ip, -p["id"]):
+    bucket = PIN_OFFSET + p["id"]
+    if security.pin_locked(ip, bucket):
         return templates.TemplateResponse(
             request,
             "public/portal_pin.html",
@@ -249,14 +259,14 @@ async def check_pin(request: Request, slug: str, pin: str = Form(...)):
             status_code=429,
         )
     if not security.pin_matches(pin, p["pin"]):
-        security.pin_fail(ip, -p["id"])
+        security.pin_fail(ip, bucket)
         return templates.TemplateResponse(
             request,
             "public/portal_pin.html",
             {"p": p, "error": "That PIN doesn't match — double-check the email we sent you."},
             status_code=401,
         )
-    security.pin_clear(ip, -p["id"])
+    security.pin_clear(ip, bucket)
     resp = RedirectResponse(f"/portal/{slug}", status_code=303)
     security.set_signed_session_cookie(
         resp, _cookie_name(p["id"]), security.client_session_payload("portal", p["id"])

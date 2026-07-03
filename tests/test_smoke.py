@@ -2832,11 +2832,17 @@ def test_portal_lifecycle(admin):
             follow_redirects=False,
         )
 
-        # PIN gate: page, wrong PIN, lockout uses negative ids (gallery untouched)
+        # PIN gate: page, wrong PIN, lockout uses portal's own offset band so it can
+        # never collide with gallery buckets or the inquiry-throttle sentinels.
+        from app.public.portal import PIN_OFFSET as PORTAL_PIN_OFFSET
+
         r = pub.get(f"/portal/{portal['slug']}")
         assert r.status_code == 200 and "PIN" in r.text
         assert pub.post(f"/portal/{portal['slug']}/pin", data={"pin": "0000"}).status_code == 401
-        assert db.one("SELECT gallery_id FROM pin_attempts")["gallery_id"] == -portal["id"]
+        assert (
+            db.one("SELECT gallery_id FROM pin_attempts")["gallery_id"]
+            == PORTAL_PIN_OFFSET + portal["id"]
+        )
         for _ in range(4):
             pub.post(f"/portal/{portal['slug']}/pin", data={"pin": "0000"})
         assert (
