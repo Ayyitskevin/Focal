@@ -282,6 +282,10 @@ def migrate_control() -> None:
         # Offboarding tombstone (ADR 0051): set when the owner deletes the studio; the
         # slug is renamed so the address frees up, and the row keeps billing linkage.
         _ensure_column(con, "tenants", "deleted_at", "deleted_at TEXT")
+        # Set when the best-effort Stripe cancel on delete FAILED (transient 5xx): the
+        # subscription may still be charging, so the operator console surfaces it for a
+        # manual cancel until they resolve it. Cleared by the resolve action.
+        _ensure_column(con, "tenants", "cancel_failed_at", "cancel_failed_at TEXT")
         # Feedback triage (Batch D2): 'new' is the operator's queue, 'done' is the
         # archive — triaged notes leave the console but are never deleted (C4 exit
         # reasons keep their record value). Existing rows backfill to 'new'.
@@ -762,6 +766,21 @@ def recent_tenant_feedback(limit: int = 50, status: str | None = None) -> list[d
     return [dict(r) for r in rows]
 
 
+def departed_needs_cancel() -> list[dict]:
+    """Deleted studios whose platform-subscription cancel FAILED and is unresolved.
+
+    These are excluded from operator_tenant_overview (they're tombstones), so this
+    is the only console surface for a departure that may still be billing — the
+    'never a silent live charge' guarantee delete_tenant_studio promises.
+    """
+    with control_connect() as con:
+        rows = con.execute(
+            """SELECT id, studio_name, owner_email, stripe_subscription_id, cancel_failed_at
+               FROM tenants WHERE cancel_failed_at IS NOT NULL ORDER BY cancel_failed_at DESC"""
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def operator_tenant_export_csv(overview: dict | None = None) -> str:
     overview = overview or operator_tenant_overview()
     output = io.StringIO()
@@ -1220,7 +1239,19 @@ def delete_tenant_studio(tenant: dict) -> None:
                 tenant["stripe_subscription_id"], api_key=config.STRIPE_SECRET_KEY
             )
         except Exception:
+            # A swallowed cancel used to be a silent live charge: the tombstone is
+            # excluded from the console, so nothing surfaced it. Stamp it (the console
+            # lists cancel-failed departures for a manual Stripe cancel) and ping now.
             log.exception("stripe cancel failed for %s (operator follow-up needed)", slug)
+            with control_connect() as con:
+                con.execute("UPDATE tenants SET cancel_failed_at=? WHERE id=?", (now, tenant["id"]))
+            from . import alerts  # lazy: alerts→features would cycle at import time
+
+            alerts.notify(
+                f"Stripe cancel FAILED for deleted studio {tenant['studio_name']} "
+                f"({slug}) — subscription {tenant['stripe_subscription_id']} may still be "
+                "charging. Cancel it in Stripe, then resolve it in /admin/saas."
+            )
     data_dir = tenant_data_path(slug)
     if data_dir.exists():
         trash = config.SAAS_TENANT_DATA_DIR / ".trash"
@@ -2409,6 +2440,7 @@ async def operator_console(request: Request):
             "trial_nudges": operator_trial_nudges(overview),
             "feedback": recent_tenant_feedback(30, status="new"),
             "waitlist": waitlist_entries(50),
+            "cancel_failures": departed_needs_cancel(),
             "root_domain": _root_domain(),
             "platform_url": platform_url("/pricing"),
             "price_cents": config.SAAS_PRICE_CENTS,
@@ -2482,6 +2514,23 @@ async def operator_feedback_done(request: Request, feedback_id: int):
         if cur.rowcount == 0:
             raise HTTPException(status_code=404)
     return RedirectResponse("/admin/saas#feedback", status_code=303)
+
+
+@router.post("/admin/saas/{tenant_id}/cancel-resolved")
+async def operator_cancel_resolved(request: Request, tenant_id: int):
+    """Clear a failed-cancel flag once the operator has cancelled in Stripe by hand.
+
+    The stamp is a follow-up reminder, not a state machine — this just dismisses it
+    from the console after the manual cancel is done."""
+    require_platform_admin(request)
+    with control_connect() as con:
+        cur = con.execute(
+            "UPDATE tenants SET cancel_failed_at=NULL WHERE id=? AND cancel_failed_at IS NOT NULL",
+            (tenant_id,),
+        )
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404)
+    return RedirectResponse("/admin/saas#cancel-failures", status_code=303)
 
 
 TRIAL_EXTEND_MAX_DAYS = 30
