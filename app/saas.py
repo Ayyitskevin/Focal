@@ -222,6 +222,10 @@ def migrate_control() -> None:
                 campaign TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
+            CREATE TABLE IF NOT EXISTS control_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
             """
         )
         _ensure_column(con, "tenants", "custom_domain", "custom_domain TEXT")
@@ -287,6 +291,27 @@ def _ensure_column(con: sqlite3.Connection, table: str, column: str, ddl: str) -
     columns = {row["name"] for row in con.execute(f"PRAGMA table_info({table})")}
     if column not in columns:
         con.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+
+
+def _meta_get(key: str) -> str | None:
+    """Platform-level key/value stamps that aren't per-tenant (Batch D1).
+
+    The tenant sweeps stamp their one-shots on the tenant row; platform-wide
+    one-shots (the weekly digest's week key) need a home that isn't a column
+    on somebody's tenant.
+    """
+    with control_connect() as con:
+        row = con.execute("SELECT value FROM control_meta WHERE key=?", (key,)).fetchone()
+    return row["value"] if row else None
+
+
+def _meta_set(key: str, value: str) -> None:
+    with control_connect() as con:
+        con.execute(
+            "INSERT INTO control_meta (key, value) VALUES (?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, value),
+        )
 
 
 def tenant_by_slug(slug: str) -> dict | None:
@@ -1824,6 +1849,94 @@ def dunning_sweep() -> int:
     if sent:
         log.info("dunning emails sent: %d", sent)
     return sent
+
+
+def _within_days(stamp: str | None, days: int) -> bool:
+    parsed = _parse_iso(stamp)
+    return parsed is not None and _now() - parsed <= timedelta(days=days)
+
+
+def _plural(count: int, noun: str) -> str:
+    return f"{count} {noun}{'s' if count != 1 else ''}"
+
+
+def weekly_digest_sweep() -> int:
+    """One operator email per ISO week: the console's headline, delivered (Batch D1).
+
+    Every other sweep here mails TENANTS; this is the only platform mail addressed
+    to the OPERATOR — signups, at-risk trials, fresh feedback, waitlist growth, and
+    what lifecycle mail went out, so running the beta doesn't depend on remembering
+    to open /admin/saas. Fires on the first tick of each ISO week (Monday 00:00 UTC)
+    and is stamped in control_meta only after a successful send — a failed send
+    retries next tick, a restart never double-sends, and a server down on Monday
+    catches up whenever it returns that week.
+    """
+    if not (config.SAAS_MODE and mailer.configured() and config.SAAS_SUPPORT_EMAIL):
+        return 0
+    now = _now()
+    iso_week = now.isocalendar()
+    week_key = f"{iso_week.year}-W{iso_week.week:02d}"
+    if _meta_get("digest_last_week") == week_key:
+        return 0
+
+    overview = operator_tenant_overview()
+    counts = overview["counts"]
+    with control_connect() as con:
+        tenants = [dict(r) for r in con.execute("SELECT * FROM tenants").fetchall()]
+        waitlist_total = con.execute("SELECT COUNT(*) FROM waitlist").fetchone()[0]
+    new_signups = sum(1 for t in tenants if _within_days(t["created_at"], 7))
+    departures = sum(1 for t in tenants if _within_days(t.get("deleted_at"), 7))
+    reminders = sum(1 for t in tenants if _within_days(t.get("trial_reminder_sent_at"), 7))
+    winbacks = sum(1 for t in tenants if _within_days(t.get("winback_sent_at"), 7))
+    dunnings = sum(
+        1
+        for t in tenants
+        if _within_days(t.get("dunning_notice_sent_at"), 7)
+        or _within_days(t.get("dunning_final_sent_at"), 7)
+    )
+    feedback = [f for f in recent_tenant_feedback() if _within_days(f["created_at"], 7)]
+    waitlist_new = sum(1 for w in waitlist_entries(limit=1000) if _within_days(w["created_at"], 7))
+    nudges = operator_trial_nudges(overview)[:5]
+
+    lines = [
+        f"Week {week_key} — {_plural(counts['total'], 'studio')}: "
+        f"{counts['active']} paying (${counts['active_mrr_cents'] // 100}/mo), "
+        f"{counts['trialing']} trialing, {counts['trials_at_risk']} at risk.",
+        "",
+        "This week:",
+        f"- New studios: {new_signups}" + (f" (departures: {departures})" if departures else ""),
+        f"- Waitlist joins: {waitlist_new} (total {waitlist_total})",
+        f"- Feedback notes: {len(feedback)}",
+        "- Lifecycle mail sent: "
+        + ", ".join(
+            [
+                _plural(reminders, "trial reminder"),
+                _plural(winbacks, "win-back"),
+                _plural(dunnings, "dunning email"),
+            ]
+        ),
+    ]
+    if nudges:
+        lines += ["", "Needs a human:"]
+        lines += [f"- {n['label']}: {n['tenant']['studio_name']} — {n['reason']}" for n in nudges]
+    if feedback:
+        lines += ["", "Fresh feedback:"]
+        for item in feedback[:5]:
+            excerpt = item["message"][:120] + ("…" if len(item["message"]) > 120 else "")
+            lines.append(f"- {item['studio_name']} ({item['page'] or 'app'}): {excerpt}")
+    lines += ["", f"Console: {platform_url('/admin/saas')}"]
+    subject = (
+        f"Mise weekly — {_plural(counts['total'], 'studio')}, "
+        f"{counts['trials_at_risk']} at risk, {new_signups} new"
+    )
+    try:
+        mailer.send(config.SAAS_SUPPORT_EMAIL, subject, "\n".join(lines) + "\n")
+    except Exception:
+        log.exception("weekly digest failed (will retry next sweep)")
+        return 0
+    _meta_set("digest_last_week", week_key)
+    log.info("weekly operator digest sent (%s)", week_key)
+    return 1
 
 
 def _remaining_trial_days(tenant: dict) -> int:
