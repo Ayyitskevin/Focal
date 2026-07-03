@@ -281,6 +281,10 @@ def migrate_control() -> None:
         # Offboarding tombstone (ADR 0051): set when the owner deletes the studio; the
         # slug is renamed so the address frees up, and the row keeps billing linkage.
         _ensure_column(con, "tenants", "deleted_at", "deleted_at TEXT")
+        # Feedback triage (Batch D2): 'new' is the operator's queue, 'done' is the
+        # archive — triaged notes leave the console but are never deleted (C4 exit
+        # reasons keep their record value). Existing rows backfill to 'new'.
+        _ensure_column(con, "tenant_feedback", "status", "status TEXT NOT NULL DEFAULT 'new'")
         con.execute(
             """CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_custom_domain
                ON tenants(custom_domain) WHERE custom_domain IS NOT NULL"""
@@ -728,15 +732,23 @@ def record_tenant_feedback(tenant_id: int, page: str, message: str) -> None:
         )
 
 
-def recent_tenant_feedback(limit: int = 50) -> list[dict]:
-    """Newest feedback first, tenant-attributed, for the operator console panel."""
+def recent_tenant_feedback(limit: int = 50, status: str | None = None) -> list[dict]:
+    """Newest feedback first, tenant-attributed, for the operator console panel.
+
+    status='new' is the console's working queue (Batch D2); None is everything —
+    the weekly digest and the archive read all of a week's notes regardless of
+    whether they've been triaged.
+    """
+    where = "AND f.status=?" if status else ""
+    params: tuple = (status, limit) if status else (limit,)
     with control_connect() as con:
         rows = con.execute(
-            """SELECT f.id, f.page, f.message, f.created_at,
+            f"""SELECT f.id, f.page, f.message, f.created_at, f.status,
                       t.slug, t.studio_name, t.owner_email
                FROM tenant_feedback f JOIN tenants t ON t.id = f.tenant_id
+               WHERE 1=1 {where}
                ORDER BY f.id DESC LIMIT ?""",
-            (limit,),
+            params,
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -2324,7 +2336,7 @@ async def operator_console(request: Request):
             "preflight": preflight,
             "launch": operator_launch_checklist(overview, preflight),
             "trial_nudges": operator_trial_nudges(overview),
-            "feedback": recent_tenant_feedback(30),
+            "feedback": recent_tenant_feedback(30, status="new"),
             "waitlist": waitlist_entries(50),
             "root_domain": _root_domain(),
             "platform_url": platform_url("/pricing"),
@@ -2379,6 +2391,23 @@ async def operator_tenant_notes(request: Request, tenant_id: int, notes: str = F
         if cur.rowcount == 0:
             raise HTTPException(status_code=404)
     return RedirectResponse("/admin/saas#tenants", status_code=303)
+
+
+@router.post("/admin/saas/feedback/{feedback_id}/done")
+async def operator_feedback_done(request: Request, feedback_id: int):
+    """Triage a feedback note (Batch D2): done leaves the console queue, not the DB.
+
+    Once real beta feedback flows, an append-only panel stops being a queue and
+    starts being a guilt pile. 'done' is one-way and never deletes — C4 exit
+    reasons and shipped requests keep their archive value (the weekly digest
+    still counts a week's notes regardless of triage).
+    """
+    require_platform_admin(request)
+    with control_connect() as con:
+        cur = con.execute("UPDATE tenant_feedback SET status='done' WHERE id=?", (feedback_id,))
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404)
+    return RedirectResponse("/admin/saas#feedback", status_code=303)
 
 
 TRIAL_EXTEND_MAX_DAYS = 30
