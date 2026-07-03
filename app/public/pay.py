@@ -241,6 +241,7 @@ def _record_paid_session(event, session):
     # id (below) without ever repairing it. The INSERT runs first, so a duplicate
     # event rolls the whole tx back with nothing else written.
     duplicate = False
+    already_settled = False
     try:
         with db.tx() as con:
             con.execute(
@@ -262,17 +263,34 @@ def _record_paid_session(event, session):
                     f"Underpaid invoice {invoice_id}: received {amount}¢ < {expected}¢ "
                     f"({kind}) — payment recorded, needs manual review."
                 )
-            elif kind == "deposit":
-                con.execute("UPDATE invoices SET status='deposit_paid' WHERE id=?", (invoice_id,))
             else:
-                con.execute(
-                    "UPDATE invoices SET status='paid', paid_at=datetime('now') WHERE id=?",
-                    (invoice_id,),
-                )
+                # The status advance is CONDITIONAL on the obligation not already being
+                # met, and that is the idempotency guard against a SECOND DISTINCT
+                # checkout session (two tabs, a double-click) for the same invoice+kind.
+                # UNIQUE(stripe_event_id) only catches Stripe RE-DELIVERIES of one event;
+                # two independently-completed sessions have distinct event AND session
+                # ids, so both INSERT. db.tx() serializes the two writers (deferred SQLite
+                # write lock), so the second UPDATE reads the first's committed status:
+                # rowcount 0 means the kind was already settled -> the client was charged
+                # twice. The payment row still stands (never hide a real charge), but the
+                # invoice/project must NOT re-advance and the operator is alerted to refund.
+                if kind == "deposit":
+                    changed = con.execute(
+                        "UPDATE invoices SET status='deposit_paid' "
+                        "WHERE id=? AND status NOT IN ('deposit_paid','paid')",
+                        (invoice_id,),
+                    ).rowcount
+                else:
+                    changed = con.execute(
+                        "UPDATE invoices SET status='paid', paid_at=datetime('now') "
+                        "WHERE id=? AND status != 'paid'",
+                        (invoice_id,),
+                    ).rowcount
+                already_settled = changed == 0
             # Payment landed → advance the project to Retainer Paid (the funnel's
             # money gate). Only moves forward from pre-payment stages; never rewinds
             # a project already at session planning / closed / archived.
-            if amount_ok:
+            if amount_ok and not already_settled:
                 con.execute(
                     """UPDATE projects SET status='retainer_paid',
                           stage_changed_at=datetime('now') WHERE id=?
@@ -290,6 +308,22 @@ def _record_paid_session(event, session):
         # funnel auto-advance to retainer_paid or a client-facing "deposit received"
         # workflow fire is the exact false-settlement this reconciliation guards.
         return {"ok": True, "underpaid": True, "duplicate": duplicate}
+    if already_settled:
+        # A second distinct paid session for an obligation already settled = a double
+        # charge. The payment is on record (for the receipt + refund trail); alert the
+        # operator to refund, but do NOT re-fire the payment workflows or re-advance.
+        log.error(
+            "duplicate paid session %s for invoice %s (%s): already settled — "
+            "recorded, likely double charge needing a refund",
+            session["id"],
+            invoice_id,
+            kind,
+        )
+        alerts.security_alert(
+            f"Possible double charge on invoice {invoice_id} ({kind}): a second payment of "
+            f"{amount}¢ arrived after it was already settled — recorded, needs a refund."
+        )
+        return {"ok": True, "duplicate_charge": True}
     trigger_key = "deposit_paid" if kind == "deposit" else "invoice_paid"
     event_kind = "payment"
     workflows.record_project_event(

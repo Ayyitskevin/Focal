@@ -2149,9 +2149,16 @@ def _process_saas_event(event) -> dict:
             metadata = obj.get("metadata") or {}
             tenant_id = int(metadata.get("tenant_id") or 0)
             if tenant_id:
+                # Attach the Stripe customer + subscription, but do NOT set plan_status
+                # here. This event and customer.subscription.created race — Stripe does
+                # not order them — and hardcoding "trialing" would clobber the real
+                # "active" status of a LAPSED tenant who just re-subscribed (recovery
+                # checkout runs with trial_days=0, so Stripe activates immediately),
+                # leaving a just-paid customer locked out by tenant_has_access() until
+                # the next subscription event. The customer.subscription.* branch below
+                # carries the authoritative status regardless of which arrives last.
                 update_tenant_billing(
                     tenant_id,
-                    plan_status="trialing",
                     stripe_customer_id=obj.get("customer"),
                     stripe_subscription_id=obj.get("subscription"),
                     con=con,
