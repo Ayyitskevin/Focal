@@ -69,17 +69,34 @@ def _prune(backups_dir: Path, retention_days: int) -> int:
     return pruned
 
 
-def _offsite_sync(remote: str, backups_dir: Path, tenants_dir: Path) -> str:
-    """rclone sync of snapshots + tenant media to the remote; returns a status word."""
+def _offsite_sync(remote: str, backups_dir: Path, tenants_dir: Path, stamp: str) -> str:
+    """rclone sync of snapshots + tenant media to the remote; returns a status word.
+
+    Uses ``--backup-dir`` so this is a VERSIONED mirror, not a bare one: files the
+    sync would otherwise delete or overwrite on the remote (because they vanished or
+    changed locally) are moved into ``<remote>/<sub>-history/<stamp>/`` instead of
+    being destroyed. Without it, local corruption or an accidental deletion is
+    propagated to the off-site copy on the very next pass — the exact disaster the
+    off-site layer exists to survive. The operator prunes ``*-history/`` per their
+    retention policy (rclone keeps no automatic bound).
+    """
     if not remote:
         return "off"
     if shutil.which("rclone") is None:
         log.error("MISE_BACKUP_RCLONE_REMOTE is set but rclone is not installed")
         return "failed:rclone-missing"
+    base = remote.rstrip("/")
     for src, sub in ((backups_dir, "backups"), (tenants_dir, "tenants")):
         try:
             subprocess.run(
-                ["rclone", "sync", str(src), f"{remote.rstrip('/')}/{sub}"],
+                [
+                    "rclone",
+                    "sync",
+                    str(src),
+                    f"{base}/{sub}",
+                    "--backup-dir",
+                    f"{base}/{sub}-history/{stamp}",
+                ],
                 check=True,
                 capture_output=True,
                 timeout=6 * 3600,
@@ -144,7 +161,7 @@ def run_backup(
     else:
         failure_marker.unlink(missing_ok=True)
     pruned = _prune(backups_dir, retention_days)
-    offsite = _offsite_sync(rclone_remote, backups_dir, tenants_dir)
+    offsite = _offsite_sync(rclone_remote, backups_dir, tenants_dir, stamp)
     summary = {
         "snapshot": str(dest),
         "control": control_done,
