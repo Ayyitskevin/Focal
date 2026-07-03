@@ -66,6 +66,36 @@
   </div>
 </section>
 
+{% if cancel_failures %}
+<section class="panel" id="cancel-failures">
+  <div class="panel-head">
+    <div>
+      <p class="pgtop-eyebrow">Billing follow-up</p>
+      <h2>Departed studios still billing</h2>
+    </div>
+    <span class="badge is-declined">{{ cancel_failures|length }}</span>
+  </div>
+  <p class="muted">Their studio was deleted but the Stripe cancel failed — the subscription may
+     still be charging. Cancel it in the Stripe dashboard, then mark it resolved.</p>
+  <table class="list">
+    <tr><th>Studio</th><th>Subscription</th><th>Failed</th><th></th></tr>
+    {% for c in cancel_failures %}
+    <tr>
+      <td><strong>{{ c.studio_name }}</strong><br>
+          <span class="muted">{{ c.owner_email }}</span></td>
+      <td><code>{{ c.stripe_subscription_id }}</code></td>
+      <td class="muted">{{ c.cancel_failed_at }}</td>
+      <td>
+        <form method="post" action="/admin/saas/{{ c.id }}/cancel-resolved">
+          <button type="submit" title="Cancelled in Stripe — dismiss this reminder">Resolved</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+{% endif %}
+
 <section class="panel">
   <div class="panel-head">
     <div>
