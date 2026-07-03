@@ -105,3 +105,27 @@ the questions beta users actually ask.
 - 1 beta user creates a real proposal or gallery.
 - Every confusion point is converted into either product copy, onboarding copy,
   or a launch-blocking issue.
+
+## Going Public — the One-Variable Flip
+
+The private beta is one env var. When the success criteria above are met and
+the feedback queue in `/admin/saas` has been triaged, going public is:
+
+1. **Flip:** remove `MISE_SAAS_INVITE_CODE` from `.env` and restart the app
+   container. Nothing else changes — no deploy, no migration.
+2. **Verify the funnel is open** (five minutes, in a private browser window):
+   - `/pricing` no longer shows the invite-code field.
+   - A test signup with a throwaway slug goes straight to the new studio's
+     onboarding (delete it from the studio's own billing page afterwards).
+   - `/admin/saas` shows the **Public — open signup live** badge in the page
+     header. If it still says the gate is armed, the old env var is still set.
+3. **Invite the waitlist.** Download the CSV from `/admin/saas` — everyone on
+   it asked to be told. One plain email: Mise is open, here is the pricing
+   link (tag it `utm_campaign=waitlist` so the console shows what it converts).
+4. **Watch the first week.** The weekly digest reports signups, at-risk trials,
+   and feedback; the rate limiter already covers `/start-trial` and `/waitlist`
+   against open-signup abuse.
+
+To close the gate again (abuse, capacity), set `MISE_SAAS_INVITE_CODE` back
+and restart — signups return to invite-only and the pricing page grows the
+waitlist form; existing studios are untouched.
