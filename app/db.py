@@ -1,5 +1,6 @@
 """SQLite access — WAL mode, short-lived connections (safe across job threads)."""
 
+import re
 import sqlite3
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -55,11 +56,42 @@ def migrate(path: Path | None = None) -> None:
             aliases = MIGRATION_ALIASES.get(path.name, set())
             if path.name in applied or aliases.intersection(applied):
                 continue
-            con.executescript(path.read_text())
-            con.execute("INSERT INTO schema_migrations (name) VALUES (?)", (path.name,))
-            con.commit()
+            _apply_migration(con, path)
     finally:
         con.close()
+
+
+# A migration that manages its own transaction (top-level COMMIT;, e.g. 031's
+# BEGIN/COMMIT backfill) is already all-or-nothing; a trigger body ends in END;,
+# not COMMIT;, so this only matches real transaction control.
+_SELF_TXN = re.compile(r"(?im)^\s*commit\s*;")
+
+
+def _apply_migration(con: sqlite3.Connection, path: Path) -> None:
+    """Apply one migration file and record it — atomically where we can.
+
+    A file with no transaction control (the common case: plain DDL/DML) is wrapped
+    with its schema_migrations marker in a SINGLE transaction, so an interrupted
+    apply (crash / OOM / deploy restart mid-file) rolls back ENTIRELY and re-runs
+    cleanly next boot. Without this, a half-applied non-idempotent migration bricks
+    the DB: SQLite has no DROP COLUMN IF EXISTS, so re-running e.g. 075's bare
+    DROP COLUMNs after a partial apply throws on the first already-dropped column
+    and migrate() can never complete for that database.
+
+    A file that already carries its own BEGIN/COMMIT is self-atomic; we run it as-is
+    and record it in a follow-up commit (executescript can't be nested in a txn).
+    """
+    script = path.read_text()
+    name = path.name
+    assert "'" not in name  # our own filenames; inlined below since executescript can't bind
+    if _SELF_TXN.search(script):
+        con.executescript(script)
+        con.execute("INSERT INTO schema_migrations (name) VALUES (?)", (name,))
+        con.commit()
+    else:
+        con.executescript(
+            f"BEGIN;\n{script}\nINSERT INTO schema_migrations (name) VALUES ('{name}');\nCOMMIT;"
+        )
 
 
 def ident(name: str, allowed) -> str:
