@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from starlette.concurrency import run_in_threadpool
 
 from .. import config, db, delivery_gate, jobs, security
 from ..render import templates
@@ -137,11 +138,15 @@ async def download_favorites(request: Request, slug: str):
     )
     if not assets:
         raise HTTPException(status_code=404, detail="no favorites yet")
-    # small subset of originals — built synchronously, content-keyed per visitor
+    # Content-keyed per visitor. Build on a worker THREAD, never the event loop:
+    # a large favorites set is unbounded, and on the single shared worker a
+    # synchronous multi-GB build froze every other request — other clients'
+    # galleries, other tenants, /healthz (audit finding). run_in_threadpool keeps
+    # the loop responsive while this one client waits for their archive.
     key = hashlib.sha256(",".join(str(a["id"]) for a in assets).encode()).hexdigest()[:8]
     out = config.ZIP_DIR / f"g{g['id']}-v{visitor['id']}-{key}.zip"
     if not out.is_file():
-        _store_zip(g["id"], assets, out)
+        await run_in_threadpool(_store_zip, g["id"], assets, out)
         for old in config.ZIP_DIR.glob(f"g{g['id']}-v{visitor['id']}-*.zip"):
             if old != out:
                 old.unlink(missing_ok=True)
@@ -168,10 +173,13 @@ async def download_section(request: Request, slug: str, section_id: int):
     )
     if not assets:
         raise HTTPException(status_code=404, detail="section is empty")
+    # Built on a worker THREAD, not the event loop (see download_favorites): a big
+    # section is unbounded and a synchronous build on the single shared worker
+    # stalled every other in-flight request until it finished (audit finding).
     key = hashlib.sha256(",".join(str(a["id"]) for a in assets).encode()).hexdigest()[:8]
     out = config.ZIP_DIR / f"g{g['id']}-s{section_id}-{key}.zip"
     if not out.is_file():
-        _store_zip(g["id"], assets, out)
+        await run_in_threadpool(_store_zip, g["id"], assets, out)
         for old in config.ZIP_DIR.glob(f"g{g['id']}-s{section_id}-*.zip"):
             if old != out:
                 old.unlink(missing_ok=True)
