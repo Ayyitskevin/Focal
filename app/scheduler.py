@@ -53,6 +53,11 @@ def _loop() -> None:
                 saas.dunning_sweep()
             except Exception:
                 log.exception("dunning sweep failed")
+            try:
+                # The one sweep that mails the OPERATOR, not a tenant (Batch D1).
+                saas.weekly_digest_sweep()
+            except Exception:
+                log.exception("weekly digest sweep failed")
             for tenant in saas.list_tenants(billable_only=True):
                 try:
                     with saas.tenant_runtime(tenant):
