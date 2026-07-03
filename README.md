@@ -76,7 +76,16 @@ Hosted mode adds:
   risk, and acquisition sources
 - manual trial nudge drafts for setup help, trial rescue, conversion, and
   billing recovery follow-up
-- tenant CSV export from `/admin/saas/export.csv`
+- platform lifecycle email: trial reminder, one-shot win-back after a lapse,
+  and dunning (decline notice + grace-ending warning) — all one-shot, all
+  owner-facing, nothing client-facing
+- a weekly operator digest email with the console's headline (sent to
+  `MISE_SAAS_SUPPORT_EMAIL`, falling back to the Gmail sender)
+- in-app Help & feedback per studio, landing in an operator triage queue
+  (new/done) alongside exit reasons captured on studio deletion
+- waitlist capture on the invite gate, with its own CSV
+- tenant CSV export from `/admin/saas/export.csv` and waitlist CSV from
+  `/admin/saas/waitlist.csv`
 - optional tenant-admin announcement banner with `MISE_SAAS_ANNOUNCEMENT`
 
 Production billing uses:
@@ -112,6 +121,7 @@ MISE_SAAS_TRIAL_DAYS=14
 MISE_STRIPE_SECRET_KEY=sk_live_xxx
 MISE_SAAS_STRIPE_PRICE_ID=price_xxx
 MISE_SAAS_STRIPE_WEBHOOK_SECRET=whsec_xxx
+MISE_SAAS_SUPPORT_EMAIL=you@example.com  # weekly digest + public support contact
 ```
 
 Run readiness checks before launch:
@@ -142,15 +152,19 @@ On the root hosted domain, `/admin/login` uses `MISE_ADMIN_PASSWORD` and opens
 The operator console shows:
 
 - tenant count, active/trialing/support counts, and readiness state
+- the beta gate badge: invite code armed vs public open signup
 - acquisition source breakdown from `utm_source`, `utm_campaign`, and referrer
-- launch score and at-risk trial counts for retention follow-up
+- launch score and at-risk trial counts for retention follow-up (including
+  the login pulse — studios that have gone quiet are flagged)
 - activation rate, active rate, average launch score, and top source
 - trial nudge mail drafts for high-leverage retention follow-up
+- the studio feedback triage queue (new/done) and the waitlist panel
 - CSV export for beta cohorts, revenue, launch health, and acquisition source
 - per-tenant billing status and Stripe IDs
 - custom-domain pending/verified state
 - isolated data path and tenant DB presence
-- manual support actions for billing status and domain verification
+- manual support actions: billing status, domain verification, trial
+  extension (1–30 days), and per-studio operator notes
 
 This keeps support simple enough for one founder.
 

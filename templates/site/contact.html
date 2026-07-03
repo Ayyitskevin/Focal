@@ -43,8 +43,10 @@
     </div>
     {% else %}
     <form method="post" action="/contact" class="stack-form contact-form">
-      <label>Name <input type="text" name="name" required></label>
-      <label>Email <input type="email" name="email" required></label>
+      <label>Name <input type="text" name="name" required
+             value="{{ prefill.name if prefill else '' }}"></label>
+      <label>Email <input type="email" name="email" required
+             value="{{ prefill.email if prefill else '' }}"></label>
       <label>Business <input type="text" name="business"
              value="{{ prefill.business if prefill else '' }}"
              placeholder="Restaurant / café / brand name"></label>

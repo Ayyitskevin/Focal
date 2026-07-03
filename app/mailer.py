@@ -59,7 +59,10 @@ def _build_message(
     to: str, subject: str, body: str, reply_to: str = "", ics: dict | None = None
 ) -> EmailMessage:
     msg = EmailMessage()
-    msg["From"] = f"{sender_name()} <{config.GMAIL_USER}>"
+    # _hdr on the display name too: in hosted mode sender_name() is the tenant's
+    # self-serve studio_name — a control char there would make EmailMessage raise
+    # at send time, breaking every send for that studio (same class as ADR 0061).
+    msg["From"] = f"{_hdr(sender_name())} <{config.GMAIL_USER}>"
     msg["To"] = _hdr(to)
     msg["Subject"] = _hdr(subject)
     reply_to = _hdr(reply_to or _default_reply_to())

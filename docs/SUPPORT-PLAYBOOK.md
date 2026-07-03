@@ -44,13 +44,18 @@ action). This is the ownership promise from the welcome email — honor it fast.
 **7. "How do I change my card or cancel?"**
 `/admin/billing` → the Stripe billing portal handles card changes and
 cancellation. A failed renewal gets a grace window while Stripe retries the
-card before access pauses (they'll get dunning email from Stripe).
+card before access pauses. Mise emails the owner itself: a decline notice
+when the card first fails, and a final warning ~2 days before the grace
+window ends (Stripe's own retry emails may arrive too).
 
 **8. "My trial is ending — what happens?"**
 Card-less trials get one reminder email ~3 days out. At day 14 the studio
 locks to `/admin/billing`, which has the start-subscription button; unused
 trial days carry over, a spent trial bills immediately. Nothing is deleted at
-the paywall — their data waits for them.
+the paywall — their data waits for them, and a trial that lapses quietly gets
+one win-back email ~3 days later (one ever — not a drip). If they just need
+more time, you can extend the trial 1–30 days from their row in `/admin/saas`
+(this re-arms the reminder emails for the new window).
 
 **9. "Can I use my own domain?"**
 During the beta: your studio subdomain only. Custom domains are the first
@@ -58,12 +63,28 @@ post-beta upgrade on the list. (Don't promise a date.)
 
 **10. "Something looks broken."**
 Ask for the URL and what they clicked. On your side: check their row in
-`/admin/saas` (billing state, launch score), then the app log filtered by
-`[tenant:<slug>]` — every auth event and error is attributable per studio.
-Crashes and lockout storms also reach you on Telegram if configured.
+`/admin/saas` (billing state, launch score, and the login pulse — `quiet Nd`
+or `never signed in` badges flag a studio that's gone silent), then the app
+log filtered by `[tenant:<slug>]` — every auth event and error is
+attributable per studio. Crashes and lockout storms also reach you on
+Telegram if configured.
 
 ## Operator quick actions
 
+- **Studio feedback**: notes from each studio's in-app Help & feedback page
+  land in the `/admin/saas` feedback queue (and ping Telegram). Mark a note
+  **Done** once it became copy, onboarding, or an issue — done notes are
+  kept, just out of the queue. Exit reasons from deleted studios land in the
+  same queue.
+- **Extend a trial**: their row in `/admin/saas` → Billing cell → extend
+  1–30 days. Re-arms the trial-reminder and win-back emails for the new
+  window and leaves an audit line in the notes.
+- **Per-studio notes**: free-text on each row in `/admin/saas` — the home
+  for feedback that arrives by email/DM and for support context.
+- **Weekly digest**: the console's headline (signups, at-risk trials, fresh
+  feedback, waitlist, lifecycle mail) emails you on the first scheduler tick
+  of each week — sent to `MISE_SAAS_SUPPORT_EMAIL` (falls back to the Gmail
+  sender).
 - **Reset a studio's password for them**: send them `/admin/forgot` —
   self-serve and audited. There is deliberately no operator-sets-password
   path; if the owner's *email address* is the broken thing, correct it on the

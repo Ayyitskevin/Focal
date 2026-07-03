@@ -50,7 +50,7 @@ def _send(text: str) -> None:
         with urllib.request.urlopen(url, data=data, timeout=5) as r:
             r.read()
     except Exception as e:  # never let a notify failure surface into an auth path
-        log.warning("security alert send failed: %s", e)
+        log.warning("telegram alert send failed: %s", e)
 
 
 def security_alert(text: str) -> None:

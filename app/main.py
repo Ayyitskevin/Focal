@@ -128,13 +128,6 @@ CSP_POLICY = "; ".join(
 
 
 @app.middleware("http")
-async def tenant_context(request: Request, call_next):
-    if config.SAAS_MODE:
-        return await saas.tenant_middleware(request, call_next)
-    return await call_next(request)
-
-
-@app.middleware("http")
 async def rate_limit(request: Request, call_next):
     blocked = ratelimit.check(request, request.url.path)
     if blocked is not None:
@@ -150,6 +143,20 @@ async def csrf_guard(request: Request, call_next):
     return await call_next(request)
 
 
+# Registration order is load-bearing: Starlette runs the LAST-registered
+# middleware OUTERMOST. tenant_context must sit outside csrf_guard and
+# rate_limit (so the rate limiter's admin exemption sees the tenant principal
+# — registered before it, a tenant admin's cookie never matched and paying
+# customers could 429 on burst-heavy admin work), but inside common_headers
+# (so responses the tenant middleware short-circuits — unknown-tenant 404s,
+# expired-subscription 402s — still carry the security headers).
+@app.middleware("http")
+async def tenant_context(request: Request, call_next):
+    if config.SAAS_MODE:
+        return await saas.tenant_middleware(request, call_next)
+    return await call_next(request)
+
+
 @app.middleware("http")
 async def common_headers(request: Request, call_next):
     resp = await call_next(request)
@@ -157,7 +164,9 @@ async def common_headers(request: Request, call_next):
     if not (
         p in site.INDEXABLE
         or (config.SAAS_MODE and p in saas.MARKETING_INDEXABLE)
-        or p.startswith(("/site/img/", "/static/", "/work/"))
+        # /site/vid + /site/poster serve the indexable /reels page's media —
+        # noindex there excluded portfolio reels from video search.
+        or p.startswith(("/site/img/", "/site/vid/", "/site/poster/", "/static/", "/work/"))
     ):
         resp.headers["X-Robots-Tag"] = "noindex, nofollow"
     resp.headers["X-Frame-Options"] = "DENY"
@@ -202,7 +211,7 @@ async def unhandled_errors(request: Request, exc: Exception):
         f"{type(exc).__name__} on {request.method} {request.url.path}: {str(exc)[:300]}",
     )
     if "text/html" in request.headers.get("accept", ""):
-        return templates.TemplateResponse(
+        resp = templates.TemplateResponse(
             request,
             "public/error.html",
             {
@@ -211,7 +220,15 @@ async def unhandled_errors(request: Request, exc: Exception):
             },
             status_code=500,
         )
-    return JSONResponse({"detail": "internal server error"}, status_code=500)
+    else:
+        resp = JSONResponse({"detail": "internal server error"}, status_code=500)
+    # This handler runs on ServerErrorMiddleware, OUTSIDE the common_headers
+    # middleware — without these, 500 pages ship with no security headers at all.
+    resp.headers["X-Robots-Tag"] = "noindex, nofollow"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Content-Security-Policy"] = CSP_POLICY
+    return resp
 
 
 @app.get("/healthz")

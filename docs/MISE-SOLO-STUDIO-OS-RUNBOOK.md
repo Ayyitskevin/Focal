@@ -431,3 +431,35 @@ non-zero — never a silent no-op.
    snapshot as above (the live DB files in the media sync are NOT crash-consistent — always
    restore DBs from snapshots), then bring the stack up and run the preflight.
 6. Manual one-off pass anytime: `docker compose exec backup python scripts/hosted-backup.py`.
+
+## 11. Hosted operations — the /admin/saas cockpit
+
+Day-to-day beta running happens in one place: `/admin/saas` on the root host
+(operator password, never a tenant login). What each surface is for:
+
+- **Gate badge** (page header): *invite gate armed* vs *public — open signup
+  live*. The flip is one env var (`MISE_SAAS_INVITE_CODE`); the badge is the
+  truth of what production is doing. Going-public checklist: BETA-LAUNCH.md.
+- **Studio feedback queue**: notes from each studio's in-app Help & feedback
+  page, plus exit reasons from deleted studios. Mark **Done** once a note
+  became copy, onboarding, or an issue — done notes stay in the record, out
+  of the queue. New notes also ping Telegram.
+- **Trial nudges**: ranked mailto drafts (trial rescue, conversion, setup,
+  billing recovery). Deliberately manual — nothing sends itself.
+- **Pulse badges** on each row: `never signed in` / `quiet Nd` — a silent
+  trial counts as at-risk even when launch-ready.
+- **Row actions**: billing-status override, domain verification, per-studio
+  notes (the home for feedback that arrives by email/DM), and **extend
+  trial** (1–30 days; re-arms the reminder/win-back emails, writes an audit
+  line into the notes).
+- **CSVs**: tenants (`/admin/saas/export.csv`) and waitlist
+  (`/admin/saas/waitlist.csv` — the announcement list for going public).
+
+Mail the platform sends on its own (all owner-facing, all one-shot, nothing
+client-facing): trial reminder (~3 days before a card-less trial ends),
+win-back (once, ~3 days after a lapse or cancel), dunning decline notice +
+grace-ending warning (per decline episode, reset on recovery), and the
+**weekly operator digest** to `MISE_SAAS_SUPPORT_EMAIL` — signups, at-risk
+trials, fresh feedback, waitlist growth, lifecycle-mail counts — on the
+first scheduler tick of each ISO week. A failed send retries next tick; a
+restart never double-sends (stamps in `control_meta` / tenant rows).

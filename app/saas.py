@@ -437,6 +437,7 @@ def operator_tenant_overview() -> dict:
         "average_launch_score": 0,
         "card_on_file": 0,
         "no_card_trials": 0,
+        "departed": 0,
     }
     attention_statuses = {
         "past_due",
@@ -447,6 +448,13 @@ def operator_tenant_overview() -> dict:
         "incomplete_expired",
     }
     for tenant in list_tenants():
+        if tenant.get("deleted_at"):
+            # Tombstones (ADR 0051) keep billing linkage but are not studios:
+            # counting them inflated every headline KPI forever — a deleted
+            # studio reads as 'canceled', so the attention/support queue could
+            # only ever grow, and growth rates divided by ghosts.
+            counts["departed"] += 1
+            continue
         billing = tenant_billing_context(tenant)
         launch = tenant_launch_status(tenant)
         domain_state = "none"
@@ -1618,8 +1626,10 @@ async def start_trial(
         "invite_code": invite_code,
     }
     # Private-beta gate (ADR 0053): checked before any provisioning happens.
+    # Encoded: compare_digest raises TypeError on non-ASCII str, and this is a
+    # public endpoint — a pasted smart-quote in the code must 403, not 500.
     if config.SAAS_INVITE_CODE and not secrets.compare_digest(
-        (invite_code or "").strip(), config.SAAS_INVITE_CODE
+        (invite_code or "").strip().encode(), config.SAAS_INVITE_CODE.encode()
     ):
         ctx = _pricing_context(
             "Mise is in private beta — that invite code isn't valid. "
@@ -1946,6 +1956,11 @@ def weekly_digest_sweep() -> int:
     with control_connect() as con:
         tenants = [dict(r) for r in con.execute("SELECT * FROM tenants").fetchall()]
         waitlist_total = con.execute("SELECT COUNT(*) FROM waitlist").fetchone()[0]
+        # Both sides of this comparison are SQLite datetime('now') strings, so
+        # the count stays exact however large the waitlist grows.
+        waitlist_new = con.execute(
+            "SELECT COUNT(*) FROM waitlist WHERE created_at >= datetime('now','-7 days')"
+        ).fetchone()[0]
     new_signups = sum(1 for t in tenants if _within_days(t["created_at"], 7))
     departures = sum(1 for t in tenants if _within_days(t.get("deleted_at"), 7))
     reminders = sum(1 for t in tenants if _within_days(t.get("trial_reminder_sent_at"), 7))
@@ -1956,8 +1971,7 @@ def weekly_digest_sweep() -> int:
         if _within_days(t.get("dunning_notice_sent_at"), 7)
         or _within_days(t.get("dunning_final_sent_at"), 7)
     )
-    feedback = [f for f in recent_tenant_feedback() if _within_days(f["created_at"], 7)]
-    waitlist_new = sum(1 for w in waitlist_entries(limit=1000) if _within_days(w["created_at"], 7))
+    feedback = [f for f in recent_tenant_feedback(limit=200) if _within_days(f["created_at"], 7)]
     nudges = operator_trial_nudges(overview)[:5]
 
     lines = [

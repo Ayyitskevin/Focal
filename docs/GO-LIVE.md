@@ -58,8 +58,12 @@ attributes signups. Success criteria and the feedback loop live there too.
 
 ## 5. Operate
 
+- The console comes to you: a **weekly digest email** (first scheduler tick
+  of each week, to `MISE_SAAS_SUPPORT_EMAIL`) carries signups, at-risk
+  trials, fresh feedback, waitlist growth, and what lifecycle mail went out.
+  Studio feedback and exit reasons land in the `/admin/saas` triage queue.
 - Support answers: `SUPPORT-PLAYBOOK.md` (the 10 questions + operator
-  actions).
+  actions, including trial extension and feedback triage).
 - Incidents & rotation: `SECURITY.md`.
 - Day-to-day: `MISE-SOLO-STUDIO-OS-RUNBOOK.md`; weekly beta review cadence in
   `LAUNCH-PLAYBOOK.md` Stage 4.

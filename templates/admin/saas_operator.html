@@ -34,7 +34,7 @@
   <div class="panel">
     <p class="muted">Studios</p>
     <h2>{{ overview.counts.total }}</h2>
-    <span class="muted">{{ overview.counts.active }} active · {{ overview.counts.trialing }} trialing · {{ overview.counts.launch_ready }} ready</span>
+    <span class="muted">{{ overview.counts.active }} active · {{ overview.counts.trialing }} trialing · {{ overview.counts.launch_ready }} ready{% if overview.counts.departed %} · {{ overview.counts.departed }} departed{% endif %}</span>
   </div>
   <div class="panel">
     <p class="muted">Support queue</p>
