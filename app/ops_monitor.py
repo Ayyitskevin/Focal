@@ -40,7 +40,7 @@ def _check_backup() -> None:
     if config.SAAS_MODE:
         # Hosted (ADR 0057): the backup sidecar stamps a marker after each pass;
         # assert the positive on the marker instead of inferring from silence.
-        from .hosted_backup import MARKER_NAME
+        from .hosted_backup import FAILURE_MARKER_NAME, MARKER_NAME
 
         marker = bdir / MARKER_NAME
         if not marker.exists():
@@ -58,6 +58,22 @@ def _check_backup() -> None:
                 f"{config.BACKUP_STALE_HOURS}h threshold) — the backup sidecar may "
                 f"have stopped. Check the compose `backup` service.",
             )
+            return
+        # The heartbeat is fresh, but was the latest pass COMPLETE? A per-tenant
+        # snapshot failure leaves this marker (cleared on a clean pass), so a studio
+        # whose DB won't back up is surfaced by name instead of hiding behind an
+        # otherwise-green heartbeat.
+        fmarker = bdir / FAILURE_MARKER_NAME
+        if fmarker.exists():
+            failed = [n for n in fmarker.read_text().splitlines() if n.strip()]
+            if failed:
+                shown = ", ".join(failed[:10]) + ("…" if len(failed) > 10 else "")
+                alerts.ops_alert(
+                    "backup_partial",
+                    f"Latest hosted backup skipped {len(failed)} tenant "
+                    f"database(s): {shown}. Those studios have no fresh snapshot — "
+                    "check the backup sidecar logs for the failure.",
+                )
         return
     snaps = sorted(bdir.glob("*.db.gz")) if bdir.exists() else []
     if not snaps:

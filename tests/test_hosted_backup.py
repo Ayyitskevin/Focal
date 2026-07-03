@@ -72,6 +72,28 @@ def test_one_broken_tenant_does_not_stop_the_others(tmp_path):
     summary = hosted_backup.run_backup(data, tenants, control)
     assert summary["tenants"] == 2
     assert summary["tenant_failures"] == 1  # loudly counted, never silently dropped
+    assert summary["failed"] == ["gamma"]
+
+
+def test_partial_failure_writes_marker_and_a_clean_pass_clears_it(tmp_path):
+    # A per-tenant failure must leave a durable signal (the heartbeat marker alone
+    # can't express "some studios have no fresh snapshot"), and it must self-resolve
+    # once the tenant backs up cleanly again.
+    data, tenants, control = _setup(tmp_path)
+    corrupt = tenants / "gamma" / "mise.db"
+    corrupt.parent.mkdir(parents=True)
+    corrupt.write_bytes(b"not a database")
+    fmarker = data / "backups" / hosted_backup.FAILURE_MARKER_NAME
+
+    hosted_backup.run_backup(data, tenants, control)
+    assert fmarker.exists() and "gamma" in fmarker.read_text()
+
+    # Heal the tenant; the next clean pass clears the failure signal.
+    corrupt.unlink()
+    _make_db(corrupt, "gamma-data")
+    summary = hosted_backup.run_backup(data, tenants, control)
+    assert summary["tenant_failures"] == 0 and summary["failed"] == []
+    assert not fmarker.exists()
 
 
 def test_backup_refuses_to_report_success_on_empty_paths(tmp_path):
@@ -111,3 +133,29 @@ def test_ops_monitor_asserts_on_the_hosted_marker(tmp_path, monkeypatch):
     os.utime(marker, (stale, stale))
     ops_monitor._check_backup()
     assert alerts_seen and alerts_seen[0][0] == "backup_stale"
+
+
+def test_ops_monitor_alerts_on_a_partial_backup_by_name(tmp_path, monkeypatch):
+    alerts_seen: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        ops_monitor.alerts, "ops_alert", lambda sig, msg: alerts_seen.append((sig, msg))
+    )
+    monkeypatch.setattr(config, "SAAS_MODE", True)
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "BACKUP_STALE_HOURS", 26)
+    bdir = tmp_path / "backups"
+    bdir.mkdir(parents=True, exist_ok=True)
+    (bdir / hosted_backup.MARKER_NAME).write_text("now")  # heartbeat fresh
+
+    # Fresh heartbeat but a tenant was skipped -> surfaced by name, not hidden.
+    (bdir / hosted_backup.FAILURE_MARKER_NAME).write_text("gamma\ndelta")
+    ops_monitor._check_backup()
+    assert len(alerts_seen) == 1
+    sig, msg = alerts_seen[0]
+    assert sig == "backup_partial" and "gamma" in msg and "delta" in msg and "2 tenant" in msg
+
+    # A clean pass removed the failure marker -> quiet again.
+    alerts_seen.clear()
+    (bdir / hosted_backup.FAILURE_MARKER_NAME).unlink()
+    ops_monitor._check_backup()
+    assert alerts_seen == []
