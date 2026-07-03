@@ -110,7 +110,7 @@
   </table>
 </section>
 
-<section class="panel">
+<section class="panel" id="feedback">
   <div class="panel-head">
     <div>
       <p class="pgtop-eyebrow">Beta signal</p>
@@ -119,18 +119,24 @@
     <span class="badge {{ 'is-active' if feedback else 'is-sent' }}">{{ feedback|length }}</span>
   </div>
   <p class="muted">Submitted from each studio's Help &amp; feedback page. Every note during the beta
-     becomes product copy, onboarding, or a launch-blocking issue.</p>
+     becomes product copy, onboarding, or a launch-blocking issue — mark it done once it has.
+     Done notes are kept, just out of the queue.</p>
   <table class="list">
-    <tr><th>Studio</th><th>Note</th><th>When</th></tr>
+    <tr><th>Studio</th><th>Note</th><th>When</th><th></th></tr>
     {% for f in feedback %}
     <tr>
       <td><strong>{{ f.studio_name }}</strong><br>
           <a href="mailto:{{ f.owner_email }}?subject=Re: your Mise feedback" class="muted">{{ f.owner_email }}</a></td>
       <td>{{ f.message }}{% if f.page %}<br><span class="muted">from {{ f.page }}</span>{% endif %}</td>
       <td class="muted">{{ f.created_at }}</td>
+      <td>
+        <form method="post" action="/admin/saas/feedback/{{ f.id }}/done">
+          <button type="submit" title="Triaged — remove from queue (kept in the record)">Done</button>
+        </form>
+      </td>
     </tr>
     {% else %}
-    <tr><td colspan="3" class="muted">Nothing yet — feedback from studio owners lands here.</td></tr>
+    <tr><td colspan="4" class="muted">Queue clear — new feedback from studio owners lands here.</td></tr>
     {% endfor %}
   </table>
 </section>
