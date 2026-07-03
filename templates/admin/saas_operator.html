@@ -7,6 +7,13 @@
     <p class="pgtop-eyebrow">Hosted operator</p>
     <h1>SaaS control room</h1>
     <p class="muted">Root-host support view for tenants, billing state, domains, and launch readiness.</p>
+    <p>
+      {% if invite_gate_armed %}
+      <span class="badge is-draft" title="Signup requires the invite code. Unset MISE_SAAS_INVITE_CODE and restart to go public (docs/BETA-LAUNCH.md).">Private beta — invite gate armed</span>
+      {% else %}
+      <span class="badge is-active" title="Anyone can start a trial. Set MISE_SAAS_INVITE_CODE and restart to close the gate.">Public — open signup live</span>
+      {% endif %}
+    </p>
   </div>
   <div class="pgtop-actions">
     <a class="pgtop-link" href="/admin/saas/export.csv">Export CSV</a>

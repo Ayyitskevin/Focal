@@ -2341,6 +2341,9 @@ async def operator_console(request: Request):
             "root_domain": _root_domain(),
             "platform_url": platform_url("/pricing"),
             "price_cents": config.SAAS_PRICE_CENTS,
+            # Batch D3: which mode is production actually in? The flip is one env
+            # var (ADR 0053) — this makes its current state impossible to misread.
+            "invite_gate_armed": bool(config.SAAS_INVITE_CODE),
         },
     )
 
