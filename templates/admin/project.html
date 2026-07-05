@@ -31,7 +31,7 @@
         <div class="ph-fact"><span class="k">Client</span><span class="v">{{ p.client_name }}</span></div>
         <div class="ph-fact"><span class="k">Shoot date</span><span class="v">{{ p.shoot_date or '—' }}</span></div>
         <div class="ph-fact"><span class="k">Gallery</span><span class="v">{{ _gal.title if _gal else '—' }}</span></div>
-        <div class="ph-fact"><span class="k">Stage</span><span class="v">{{ p.status }}</span></div>
+        <div class="ph-fact"><span class="k">Stage</span><span class="v">{{ p.status|replace('_', ' ')|title }}</span></div>
       </div>
 
       <div class="pipeline" aria-label="Project stage">

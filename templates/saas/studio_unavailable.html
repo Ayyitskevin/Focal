@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Temporarily unavailable{% endblock %}
+{% block content %}
+{# Shown to a CLIENT who follows a hosted studio's public link (gallery/invoice/portal)
+   while that studio's subscription has lapsed. Neutral by design: it never says WHY the
+   page is down (no "subscription required" blame on the studio) and never pushes the
+   client toward Mise's own pricing. Programmatic callers still get the JSON 402. #}
+<main style="min-height:100vh;display:grid;place-items:center;background:#faf7f0;color:#171717;font-family:ui-sans-serif,system-ui,sans-serif;padding:24px;">
+  <section style="max-width:520px;border:1px solid #d8d4ca;border-radius:8px;background:#fffdf7;padding:28px;">
+    <p style="margin:0 0 8px;color:#2f5c45;font-weight:800;text-transform:uppercase;font-size:.78rem;">Temporarily unavailable</p>
+    <h1 style="margin:0 0 12px;font-size:2rem;letter-spacing:0;">{{ studio_name }} isn't available right now.</h1>
+    <p style="color:#62645f;line-height:1.5;">This page is temporarily offline. If you were expecting to view photos or pay an invoice, replying to the studio's last email is the fastest way to reach them.</p>
+  </section>
+</main>
+{% endblock %}

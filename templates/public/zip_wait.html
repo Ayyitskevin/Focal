@@ -3,17 +3,30 @@
 {% block content %}
 <main class="center-card">
   <h1>Packing your gallery&hellip;</h1>
-  <p class="muted">This can take a minute for large galleries. The download will start
+  <p class="muted" id="zip-status">This can take a minute for large galleries. The download will start
      automatically.</p>
-  <div class="spinner"></div>
+  <div class="spinner" id="zip-spinner"></div>
 </main>
 <script>
-(function poll() {
-  fetch("/g/{{ g.slug }}/download/zip/status")
-    .then(r => r.json())
-    .then(d => { if (d.ready) { window.location = "/g/{{ g.slug }}/download/zip"; }
-                 else { setTimeout(poll, 3000); } })
-    .catch(() => setTimeout(poll, 5000));
+(function () {
+  // Bounded poll: give up gracefully after ~2 minutes rather than spin forever if
+  // packing stalls or fails, so the client isn't left staring at a dead spinner.
+  var deadline = Date.now() + 120000;
+  function stall() {
+    var s = document.getElementById("zip-spinner");
+    var p = document.getElementById("zip-status");
+    if (s) s.style.display = "none";
+    if (p) p.innerHTML = "This is taking longer than expected. " +
+      "<a href=\"/g/{{ g.slug }}\">Reload the gallery</a> to try again, or reach out to the studio.";
+  }
+  (function poll() {
+    if (Date.now() > deadline) { stall(); return; }
+    fetch("/g/{{ g.slug }}/download/zip/status")
+      .then(r => r.json())
+      .then(d => { if (d.ready) { window.location = "/g/{{ g.slug }}/download/zip"; }
+                   else { setTimeout(poll, 3000); } })
+      .catch(() => setTimeout(poll, 5000));
+  })();
 })();
 </script>
 {% endblock %}

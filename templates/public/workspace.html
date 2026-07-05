@@ -15,7 +15,7 @@
     <a class="ws-card" href="/p/{{ d.slug }}">
       <span class="ws-card-title">{{ d.title }}</span>
       <span class="ws-card-meta">${{ d.total_cents|usd }}</span>
-      <span class="kind-badge kind-proposal">{{ d.status }}</span>
+      <span class="kind-badge kind-proposal">{{ d.status|replace('_', ' ')|title }}</span>
     </a>
     {% endfor %}
   </section>
@@ -27,7 +27,7 @@
     {% for d in contracts %}
     <a class="ws-card" href="/c/{{ d.slug }}">
       <span class="ws-card-title">{{ d.title }}</span>
-      <span class="kind-badge kind-contract">{{ d.status }}</span>
+      <span class="kind-badge kind-contract">{{ d.status|replace('_', ' ')|title }}</span>
     </a>
     {% endfor %}
   </section>
@@ -41,7 +41,7 @@
       <span class="ws-card-title">{{ d.title }}</span>
       <span class="ws-card-meta">${{ d.total_cents|usd }}
         {% if d.due_date %}· due {{ d.due_date }}{% endif %}</span>
-      <span class="kind-badge kind-invoice">{{ d.status }}</span>
+      <span class="kind-badge kind-invoice">{{ d.status|replace('_', ' ')|title }}</span>
     </a>
     {% endfor %}
   </section>

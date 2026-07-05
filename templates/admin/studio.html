@@ -47,6 +47,15 @@
         "project_closed": "#143C2F", "archived": "#8A9183"} %}
 
     <div class="stu-board" id="studio-board">
+      {% if not projects %}
+      {# First-run: the board is the default view, so a brand-new studio would land
+         on 8 empty columns with no orientation. Mirror the list view's guidance here. #}
+      <div class="stu-board-empty" style="max-width:540px;margin:28px auto;padding:22px;border:1px dashed var(--line, #d8d4ca);border-radius:12px;text-align:center;">
+        <p style="margin:0 0 6px;font-weight:800;">No sessions yet</p>
+        <p class="muted" style="margin:0;">Every project starts with a client — add your first with
+          <b>+ New project</b> above, or convert an inquiry from your <a href="/admin/inbox">Inbox</a>.</p>
+      </div>
+      {% endif %}
       <div class="stu-board-rail">
         {% for s in statuses %}
         <div class="stu-col" data-stage="{{ s }}">

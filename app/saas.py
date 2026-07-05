@@ -1519,6 +1519,17 @@ async def tenant_middleware(request: Request, call_next):
         if not tenant_has_access(tenant) and not _billing_allowed_path(path):
             if path.startswith("/admin"):
                 return RedirectResponse("/admin/billing?expired=1", status_code=303)
+            # A client following the studio's gallery/invoice link gets a branded,
+            # neutral page (never the raw "subscription required" JSON, which both
+            # dumps a blob and blames the studio's billing). Non-browser callers keep
+            # the JSON 402 contract — mirror the unknown-tenant handling above.
+            if "text/html" in request.headers.get("accept", ""):
+                return templates.TemplateResponse(
+                    request,
+                    "saas/studio_unavailable.html",
+                    {"studio_name": tenant.get("studio_name") or "This studio"},
+                    status_code=402,
+                )
             return JSONResponse({"detail": "subscription required"}, status_code=402)
         return await call_next(request)
 
@@ -2240,6 +2251,9 @@ async def billing(request: Request):
             "checkout_available": checkout_available,
             "subscribed_notice": request.query_params.get("subscribed") == "1",
             "already_notice": request.query_params.get("already") == "1",
+            # tenant_middleware bounces a locked-out owner here with ?expired=1;
+            # read it so the page can say WHY they landed, not just that access is off.
+            "expired_notice": request.query_params.get("expired") == "1",
         },
     )
 
