@@ -76,6 +76,10 @@ _RESERVED_SLUGS = {
 def _stripe():
     import stripe
 
+    # Pin the API version to the tested contract (ADR: config.STRIPE_API_VERSION),
+    # so an SDK bump can't silently shift request/response shapes on the money path.
+    if config.STRIPE_API_VERSION:
+        stripe.api_version = config.STRIPE_API_VERSION
     return stripe
 
 

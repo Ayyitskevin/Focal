@@ -152,6 +152,15 @@ TIMEZONE = os.environ.get("MISE_TIMEZONE", "America/New_York")
 # Studio (Phase 4) — empty means the feature is off; routes degrade gracefully
 STRIPE_SECRET_KEY = os.environ.get("MISE_STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.environ.get("MISE_STRIPE_WEBHOOK_SECRET", "")
+# Pin the Stripe API version to the contract this code was written and TESTED
+# against, independent of the installed stripe-python. Every SDK bump ships a new
+# default pinned version (15.2.1 → 2026-05-27.dahlia, 15.3.0 → 2026-06-24.dahlia);
+# without an explicit pin, a routine dependency update silently changes the
+# request/response contract on the money path. Setting it here makes an SDK bump a
+# pure library update, and moving to a newer API version a DELIBERATE, env-gated
+# step (bump this, rehearse in Stripe test mode per GO-LIVE, then deploy). Empty
+# defers to the SDK's own default.
+STRIPE_API_VERSION = os.environ.get("MISE_STRIPE_API_VERSION", "2026-05-27.dahlia")
 GMAIL_USER = os.environ.get("MISE_GMAIL_USER", "")
 GMAIL_APP_PASSWORD = os.environ.get("MISE_GMAIL_APP_PASSWORD", "")
 NOTION_TOKEN = os.environ.get("MISE_NOTION_TOKEN", "")
