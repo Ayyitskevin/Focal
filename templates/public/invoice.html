@@ -10,7 +10,7 @@
   <div class="client-doc-brandbar">
     <div>
       <strong>{{ site_name }}</strong>
-      <span>Food &amp; Beverage</span>
+      {% if site_specialty %}<span>{{ site_specialty }}</span>{% endif %}
     </div>
     <span>Invoice #{{ d.id }}</span>
   </div>
@@ -67,6 +67,12 @@
 
     {% if d.status == 'paid' %}
     <p class="doc-accepted">Paid in full {{ d.paid_at }} — thank you.</p>
+    {% elif just_paid %}
+    {# Returned from Stripe checkout; the confirming webhook may still be landing.
+       Reassure and do NOT re-show a Pay button, so the client never pays twice. #}
+    <p class="doc-accepted">Thank you — we've received your payment and it's processing.
+      Card payments confirm within a moment; bank transfers can take a few business days.
+      You'll get an email receipt once it clears — no need to pay again.</p>
     {% elif amount_due %}
       {% if d.status == 'deposit_paid' %}
       <p class="doc-accepted">Deposit received — your date is reserved.</p>
@@ -80,7 +86,7 @@
       </div>
       <p class="client-doc-security no-print">Secured by Stripe · card or bank transfer · questions can stay in the email thread.</p>
       {% else %}
-      <p class="muted">To pay, reply to the email thread — online payment is being set up.</p>
+      <p class="muted">To pay this invoice, reply to the email thread and we'll send payment details.</p>
       {% endif %}
     {% endif %}
 

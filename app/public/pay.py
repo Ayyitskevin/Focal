@@ -66,7 +66,7 @@ def next_payment(d: "db.sqlite3.Row") -> tuple[int, str]:
 
 
 @router.get("/i/{slug}", response_class=HTMLResponse)
-async def view_invoice(request: Request, slug: str):
+async def view_invoice(request: Request, slug: str, thanks: int = 0):
     d = _invoice_or_404(slug)
     if d["status"] == "sent":
         db.run(
@@ -89,6 +89,10 @@ async def view_invoice(request: Request, slug: str):
             "pay_kind": kind,
             "paid_cents": paid_cents,
             "payments_on": features.stripe_enabled(),
+            # Set on the Stripe success return (?thanks=1). The webhook that marks the
+            # invoice paid may not have landed yet (cards confirm in a moment, ACH in
+            # days), so the template reassures instead of re-showing a Pay button.
+            "just_paid": bool(thanks),
         },
     )
 

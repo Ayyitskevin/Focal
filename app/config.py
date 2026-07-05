@@ -131,6 +131,11 @@ SECRET_KEY = os.environ.get("MISE_SECRET_KEY", "")  # required in prod
 ADMIN_PASSWORD = os.environ.get("MISE_ADMIN_PASSWORD", "")  # required in prod
 
 SITE_NAME = os.environ.get("MISE_SITE_NAME", "Kevin Lee Photography")
+# Discipline subtitle under the studio name on client documents + admin letterhead.
+# Self-host defaults to the operator's own specialty; hosted tenants render name-only
+# (render._site_specialty returns "" in a tenant context) so a wedding/portrait studio
+# never ships a client a contract stamped "Food & Beverage". Empty hides the line.
+SITE_SPECIALTY = os.environ.get("MISE_SITE_SPECIALTY", "Food & Beverage")
 
 # Public marketing (optional — empty = feature off / sensible default)
 INSTAGRAM_URL = os.environ.get("MISE_INSTAGRAM_URL") or None
