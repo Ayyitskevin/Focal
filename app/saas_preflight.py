@@ -191,6 +191,18 @@ def check_readiness(*, project_root: Path | None = None, write_probes: bool = Fa
             "Set MISE_SAAS_STRIPE_WEBHOOK_SECRET for /webhooks/stripe/saas.",
         )
     )
+    checks.append(
+        _check(
+            "stripe_api_version",
+            "Stripe API version",
+            "pass" if config.STRIPE_API_VERSION else "warn",
+            f"pinned to {config.STRIPE_API_VERSION}"
+            if config.STRIPE_API_VERSION
+            else "unpinned — SDK bumps can shift the API contract",
+            "Set MISE_STRIPE_API_VERSION to the tested version; bump it deliberately "
+            "after a Stripe test-mode rehearsal.",
+        )
+    )
 
     if config.SAAS_MODE:
         from . import features

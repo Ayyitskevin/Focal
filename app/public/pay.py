@@ -31,6 +31,10 @@ def _stripe_field(obj, key: str, default=None):
 def _stripe():
     import stripe
 
+    # Pin the API version to the tested contract (config.STRIPE_API_VERSION), so an
+    # SDK bump can't silently shift request/response shapes on the client-money path.
+    if config.STRIPE_API_VERSION:
+        stripe.api_version = config.STRIPE_API_VERSION
     return stripe
 
 

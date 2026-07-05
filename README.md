@@ -122,6 +122,11 @@ MISE_STRIPE_SECRET_KEY=sk_live_xxx
 MISE_SAAS_STRIPE_PRICE_ID=price_xxx
 MISE_SAAS_STRIPE_WEBHOOK_SECRET=whsec_xxx
 MISE_SAAS_SUPPORT_EMAIL=you@example.com  # weekly digest + public support contact
+# Optional: the Stripe API version the code is pinned to. Defaults to the tested
+# contract, so a stripe-python upgrade can't silently change API behavior. Bump it
+# deliberately (after a Stripe test-mode rehearsal), not as a side effect of a
+# dependency update.
+# MISE_STRIPE_API_VERSION=2026-05-27.dahlia
 ```
 
 Run readiness checks before launch:

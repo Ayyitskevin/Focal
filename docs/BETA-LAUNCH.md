@@ -17,6 +17,10 @@ into the hosted `$20/month` beta.
   exactly `$20.00`.
 - Stripe test-mode Checkout, `/webhooks/stripe/saas`, and the billing portal
   have been rehearsed before live keys are used.
+- The Stripe API version is pinned in code (`MISE_STRIPE_API_VERSION`, default the
+  tested contract), so a `stripe-python` upgrade never silently changes API
+  behavior. Moving to a newer version is a deliberate step: bump the var, rerun the
+  test-mode rehearsal above, then deploy — never as a side effect of a dependency PR.
 - Outbound email is configured with `MISE_GMAIL_USER` and
   `MISE_GMAIL_APP_PASSWORD` before inviting real customers — signup sends the
   welcome email carrying each studio's own URL, and the day-11 trial reminder
