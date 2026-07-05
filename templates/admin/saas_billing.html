@@ -35,7 +35,7 @@
   <p class="notice">Your subscription is already active — manage it in the Stripe portal below.</p>
   {% endif %}
   {% if not access_ok %}
-  <p class="error">Your trial or subscription needs attention before the studio can be used again.</p>
+  <p class="error">{% if expired_notice %}Your trial or subscription has ended, so <strong>{{ tenant.studio_name }}</strong> is paused — your galleries, clients, and invoices are all safe. Restart below to bring it back.{% else %}Your trial or subscription needs attention before the studio can be used again.{% endif %}</p>
   {% elif billing_status and billing_status.tone == "warn" %}
   <p class="notice">{{ billing_status.message }}</p>
   {% endif %}

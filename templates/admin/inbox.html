@@ -42,7 +42,17 @@
         </span>
       </a>
       {% else %}
+      {% if not (counts.all or counts.bookings or counts.archived) %}
+      {# Truly empty inbox (not just this tab): explain how inquiries arrive so a new
+         owner can tell it's unconfigured/empty, not broken, and points at the action. #}
+      <div class="ib-empty-list">
+        <p style="margin:0 0 4px;font-weight:700;">No inquiries yet.</p>
+        <p style="margin:0 0 10px;">Messages from your lead forms and booking page land here.</p>
+        <a href="/admin/forms">Publish a lead form &rarr;</a>
+      </div>
+      {% else %}
       <div class="ib-empty-list">No messages in this view.</div>
+      {% endif %}
       {% endfor %}
     </div>
   </div>
@@ -128,7 +138,7 @@
     </div>
     {% else %}
     <div class="ib-blank">
-      <p>No inquiry selected.</p>
+      <p>Select an inquiry to see the conversation.</p>
     </div>
     {% endif %}
   </div>

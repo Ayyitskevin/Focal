@@ -3,7 +3,7 @@
 {% block content %}
 <main class="center-card">
   <h1>{{ p.company or p.client_name }}</h1>
-  <p class="muted">Client portal</p>
+  <p class="muted">Client portal — the 4-digit PIN is in the email we sent you.</p>
   <form method="post" action="/portal/{{ p.slug }}/pin" class="pin-form">
     <input type="text" name="pin" inputmode="numeric" pattern="[0-9]{4}" maxlength="4"
            placeholder="4-digit PIN" autofocus required>

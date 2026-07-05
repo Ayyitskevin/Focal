@@ -31,6 +31,8 @@
   {% endif %}
   <p class="muted">Invoice total ${{ d.total_cents|usd }}.
     Payments processed securely by Stripe.</p>
+  <p class="muted">Reference: Invoice #{{ d.id }}. Questions, or need this for reimbursement?
+    Just reply to our email thread.</p>
 
   <div class="doc-actions no-print">
     <button onclick="window.print()" class="link">Print / save as PDF</button>

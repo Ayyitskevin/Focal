@@ -229,7 +229,8 @@
           {% if revenue.goal_cents %}<span class="pct">{{ revenue.goal_pct }}% of goal</span>{% endif %}
         </div>
         <div class="dash-money-body">
-          {% set pct = revenue.goal_pct if revenue.goal_cents else 100 %}
+          {# No goal set (new studio) → empty ring, not a misleading full gold circle. #}
+          {% set pct = revenue.goal_pct if revenue.goal_cents else 0 %}
           {% set dash = 326.7 %}
           <div class="dash-ring">
             <svg viewBox="0 0 120 120" aria-hidden="true">
