@@ -38,10 +38,10 @@
     <section class="inv-paper" aria-label="Invoice preview">
       <div class="inv-letterhead">
         <div class="inv-brand">
-          <span class="inv-brand-mark">K</span>
+          <span class="inv-brand-mark">{{ site_name[:1] }}</span>
           <div>
-            <strong>Kevin Lee</strong>
-            <span>Food &amp; beverage photography</span>
+            <strong>{{ site_name }}</strong>
+            {% if site_specialty %}<span>{{ site_specialty }}</span>{% endif %}
           </div>
         </div>
         <div class="inv-id">

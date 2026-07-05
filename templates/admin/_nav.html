@@ -8,9 +8,13 @@
    Nav links point at live routes only; less-used pages (Templates, Reference,
    Email templates, Search) live in the ⌘K palette so nothing is orphaned. #}
 <aside class="admin-nav ns-shell" aria-label="Primary">
-  <a class="admin-brand ns-brand" href="/admin/home" aria-label="Kevin Lee — admin home">
+  <a class="admin-brand ns-brand" href="/admin/home" aria-label="{{ (saas_tenant.studio_name ~ ' — admin home') if (saas_mode and saas_tenant) else 'Kevin Lee — admin home' }}">
     <span class="ns-crest" aria-hidden="true"><svg class="ns-crest-badger" viewBox="0 0 32 32" width="26" height="26" fill="none"><path d="M16 3.6 22.6 5.8 V14.2 C22.6 19.4 19.6 23 16 24.8 C12.4 23 9.4 19.4 9.4 14.2 V5.8 Z" fill="#E0A43B" stroke="#2a1d10" stroke-width="1.3" stroke-linejoin="round"/><path d="M16 8.6c3.3 0 5.3 2.2 5.3 5.4 0 3.4-2.4 6-5.3 6s-5.3-2.6-5.3-6c0-3.2 2-5.4 5.3-5.4Z" fill="#17110c"/><path d="M13.8 10.5c-.7 1.1-.95 3.3-.6 5.1l1.35-.25-.3-4.45Z" fill="#F7F1E1"/><path d="M18.2 10.5c.7 1.1 .95 3.3 .6 5.1l-1.35-.25.3-4.45Z" fill="#F7F1E1"/><circle cx="13.95" cy="13.9" r="0.6" fill="#F7F1E1"/><circle cx="18.05" cy="13.9" r="0.6" fill="#F7F1E1"/><ellipse cx="16" cy="17.3" rx="1.35" ry="1.6" fill="#3a2a20"/><ellipse cx="16" cy="17.9" rx="0.6" ry="0.5" fill="#17110c"/></svg><svg class="ns-crest-sly" viewBox="0 0 32 32" width="26" height="26" fill="none"><path d="M16 3.6 22.6 5.8 V14.2 C22.6 19.4 19.6 23 16 24.8 C12.4 23 9.4 19.4 9.4 14.2 V5.8 Z" fill="#1a472a" stroke="#C8CED3" stroke-width="1.3" stroke-linejoin="round"/><path d="M18.6 8.4 C13.8 9 13.6 13 16.6 13.9 C19.8 14.9 19.5 18.6 14.4 19.4" stroke="#C8CED3" stroke-width="2" stroke-linecap="round"/><circle cx="18.7" cy="8.2" r="1.5" fill="#C8CED3"/><circle cx="19.2" cy="7.9" r="0.42" fill="#0a1f14"/><path d="M13.7 19.9 11.8 20.7 M13.7 19.9 11.9 18.9" stroke="#C8CED3" stroke-width="1" stroke-linecap="round"/></svg></span>
+    {% if saas_mode and saas_tenant %}
+    <span class="ns-brandtext"><span class="mark">{{ saas_tenant.studio_name }}</span><span class="ns-crm">CRM</span></span>
+    {% else %}
     <span class="ns-brandtext"><span class="mark">Kevin <b>Lee</b></span><span class="ns-crm">CRM</span></span>
+    {% endif %}
   </a>
   <button type="button" class="ns-cmd" id="ns-cmd-open" aria-haspopup="dialog" aria-label="Search — Command menu (Ctrl or ⌘ + K)">
     <span class="ns-cmd-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></span>

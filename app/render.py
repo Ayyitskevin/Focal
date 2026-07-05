@@ -34,11 +34,26 @@ def _site_name() -> str:
     return config.SITE_NAME
 
 
+def _site_specialty() -> str:
+    """Discipline subtitle under the studio name on client docs + admin letterhead.
+
+    A hosted tenant has no specialty field of its own, so it renders name-only
+    (empty) rather than inheriting the operator's "Food & Beverage" — the twin of
+    _site_name() for the subtitle. Self-host uses config.SITE_SPECIALTY."""
+    if config.SAAS_MODE:
+        from . import saas  # lazy: saas imports render
+
+        if saas.current_tenant():
+            return ""
+    return config.SITE_SPECIALTY
+
+
 def _context(request) -> dict:
     return {
         "static_rev": _static_rev(),
         "base_url": urls.public_base_url(request),
         "site_name": _site_name(),
+        "site_specialty": _site_specialty(),
         "saas_mode": config.SAAS_MODE,
         "saas_tenant": getattr(request.state, "tenant", None),
         "saas_billing": getattr(request.state, "saas_billing", None),
