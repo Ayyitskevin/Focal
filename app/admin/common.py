@@ -4,10 +4,37 @@ import datetime as dt
 import statistics
 from pathlib import Path
 
+from fastapi.responses import RedirectResponse
+
 from .. import clients as client_tree
 from .. import db
 
 CADENCE_SOON_DAYS = 14
+
+
+def initials(name: str, empty: str = "?") -> str:
+    """Avatar initials for a display name; ``empty`` is the fallback when there is
+    no name (callers differ: '?' for a client card, '#' for an inbox lead)."""
+    parts = [p for p in (name or "").split() if p]
+    if not parts:
+        return empty
+    if len(parts) == 1:
+        return parts[0][:2].upper()
+    return (parts[0][0] + parts[-1][0]).upper()
+
+
+def flash_redirect(base_path: str, msg: str = "", err: str = "") -> RedirectResponse:
+    """303 back to ``base_path`` carrying optional ?msg= / &err= flash params.
+    Params are intentionally NOT URL-encoded, preserving the pre-existing admin
+    flash convention shared by these console pages."""
+    q = []
+    if msg:
+        q.append(f"msg={msg}")
+    if err:
+        q.append(f"err={err}")
+    suffix = ("?" + "&".join(q)) if q else ""
+    return RedirectResponse(f"{base_path}{suffix}", status_code=303)
+
 
 _STATUS_STYLE = {
     "Delivered": ("#2f7d57", "#e1f2e9"),

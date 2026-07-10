@@ -21,6 +21,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from .. import qwen_writeback, security
 from ..render import templates
+from . import common
 
 log = logging.getLogger("mise.admin.vision_cutover")
 router = APIRouter(prefix="/admin/vision-cutover", dependencies=[Depends(security.require_admin)])
@@ -66,13 +67,7 @@ async def preview(request: Request):
 
 
 def _redirect(msg: str = "", err: str = "") -> RedirectResponse:
-    q = []
-    if msg:
-        q.append(f"msg={msg}")
-    if err:
-        q.append(f"err={err}")
-    suffix = ("?" + "&".join(q)) if q else ""
-    return RedirectResponse(f"/admin/vision-cutover{suffix}", status_code=303)
+    return common.flash_redirect("/admin/vision-cutover", msg, err)
 
 
 @router.post("/run")

@@ -23,6 +23,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from .. import config, db, security, validation
 from ..providers import registry
 from ..render import templates
+from . import common
 
 log = logging.getLogger("mise.admin.validation")
 router = APIRouter(prefix="/admin/validation", dependencies=[Depends(security.require_admin)])
@@ -121,13 +122,7 @@ async def validation_view(request: Request, msg: str = "", err: str = ""):
 
 
 def _redirect(msg: str = "", err: str = "") -> RedirectResponse:
-    q = []
-    if msg:
-        q.append(f"msg={msg}")
-    if err:
-        q.append(f"err={err}")
-    suffix = ("?" + "&".join(q)) if q else ""
-    return RedirectResponse(f"/admin/validation{suffix}", status_code=303)
+    return common.flash_redirect("/admin/validation", msg, err)
 
 
 @router.post("/items")

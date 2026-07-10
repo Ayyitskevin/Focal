@@ -260,7 +260,6 @@ async def home(request: Request):
         "events": events,
         "week": week,
         "tz": scheduling.config.TIMEZONE,
-        "gcal": gcal.status(),
         "g_error": _GERR.get(request.query_params.get("gerr")),
     }
     ctx.update(_sched_overview(events, week))

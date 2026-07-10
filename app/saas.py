@@ -854,11 +854,6 @@ def current_tenant() -> dict | None:
     return _TENANT_CTX.get()
 
 
-def current_tenant_id() -> int | None:
-    tenant = current_tenant()
-    return int(tenant["id"]) if tenant else None
-
-
 def validate_slug(slug: str) -> str:
     slug = (slug or "").strip().lower()
     if not _SLUG_RE.match(slug):
