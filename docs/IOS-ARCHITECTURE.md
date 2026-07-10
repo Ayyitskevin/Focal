@@ -1,6 +1,6 @@
 # Mise for iOS — architecture and delivery plan
 
-Status: Milestone 1 authentication implemented; owner read-only companion next
+Status: Milestones 1–2 implemented; client delivery next
 Minimum OS: iOS 17 / iPadOS 17
 UI: SwiftUI
 State: Observation-based MVVM with async/await
@@ -230,7 +230,7 @@ of reusing the current bearer token.
   Rely on ATS and a correctly managed public TLS chain.
 - Reject redirects for `/api/v1` so a 303 login page cannot masquerade as a 200 API
   response and authorization cannot be redirected unexpectedly.
-- Rate-limit `/api/v1` explicitly. The current limiter does not include that prefix.
+- Keep `/api/v1` on explicit auth and general API rate buckets as the route surface grows.
 - Resource queries bind child and parent IDs and reapply published/ready/cull gates.
 - High-value commands include actor/session/device in the audit event.
 - Stripe checkout remains hosted for the first release. The app displays server
@@ -264,7 +264,7 @@ of reusing the current bearer token.
 - Keychain session persistence and actor-serialized refresh
 - endpoint catalog and mocked transport tests
 
-### Milestone 1 — backend contract and authentication (implemented in this PR)
+### Milestone 1 — backend contract and authentication (complete)
 
 - red-light security/schema PR: `/api/v1` router, API session/token tables,
   rotation/revocation, rate limits, tenant/billing allowlists, Pydantic/OpenAPI
@@ -272,7 +272,7 @@ of reusing the current bearer token.
 - gallery/portal/workspace/document capability exchanges
 - app session state, workspace setup, biometric app lock
 
-### Milestone 2 — owner read-only companion
+### Milestone 2 — owner read-only companion (implemented in this PR)
 
 - dashboard, projects, clients, gallery manifests, calendar agenda
 - cache-first repositories and stale-state UI
@@ -296,9 +296,9 @@ of reusing the current bearer token.
 - AI run/cull/content previews and explicit commands
 - telemetry, performance budgets, TestFlight rollout, App Store privacy artifacts
 
-## 11. Decisions still needed before Milestone 1
+## 11. Product decisions still open
 
-These do not block the foundation:
+These do not block the implemented foundation and owner companion:
 
 1. Production root domain, bundle ID, Apple team ID, and final app/display name.
 2. Whether owner login remains password-only or adds owner email as an identifier.

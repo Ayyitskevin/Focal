@@ -46,6 +46,7 @@ final class AuthenticationCoordinator {
     private let originStore: WorkspaceOriginStore
     private let installationIdentity: InstallationIdentity
     private var activeWorkspace: WorkspaceEnvironment?
+    private(set) var ownerRepository: OwnerRepository?
     private var unlockOnActivation = false
     private var applicationIsActive = true
     private var hasRestored = false
@@ -88,9 +89,11 @@ final class AuthenticationCoordinator {
                 return
             }
             activeWorkspace = workspace
+            configureOwnerRepository(for: session.context, workspace: workspace)
             await enterRestoredSession(session.context)
         } catch {
             await workspace.session.invalidate()
+            ownerRepository = nil
             originStore.clear()
             errorMessage = "Your saved session could not be restored. Sign in again."
             phase = .signedOut
@@ -127,6 +130,7 @@ final class AuthenticationCoordinator {
         clearCredentialInputs(keepingSharedAccessInput: false)
         errorMessage = nil
         activeWorkspace = nil
+        ownerRepository = nil
         flow.showClientLink()
     }
 
@@ -136,6 +140,7 @@ final class AuthenticationCoordinator {
         workspaceInput = ""
         errorMessage = nil
         activeWorkspace = nil
+        ownerRepository = nil
         flow.reset()
     }
 
@@ -263,6 +268,10 @@ final class AuthenticationCoordinator {
         workDescription = "Signing out"
         errorMessage = nil
 
+        if let ownerRepository {
+            await ownerRepository.purgeCache()
+        }
+
         if let activeWorkspace {
             do {
                 _ = try await activeWorkspace.apiClient.send(MiseEndpoints.Auth.logout)
@@ -274,6 +283,7 @@ final class AuthenticationCoordinator {
 
         originStore.clear()
         self.activeWorkspace = nil
+        ownerRepository = nil
         clearCredentialInputs(keepingSharedAccessInput: false)
         workspaceInput = ""
         flow.reset()
@@ -381,6 +391,7 @@ final class AuthenticationCoordinator {
         workspace: WorkspaceEnvironment
     ) {
         activeWorkspace = workspace
+        configureOwnerRepository(for: session.context, workspace: workspace)
         originStore.save(workspace.origin)
         clearCredentialInputs(keepingSharedAccessInput: false)
         if applicationIsActive {
@@ -394,6 +405,23 @@ final class AuthenticationCoordinator {
                 unlockOnActivation = true
             }
         }
+    }
+
+    private func configureOwnerRepository(
+        for context: CurrentSession,
+        workspace: WorkspaceEnvironment
+    ) {
+        guard
+            context.principal.kind == .studioOwner,
+            context.principal.allows("studio:read")
+        else {
+            ownerRepository = nil
+            return
+        }
+        ownerRepository = OwnerRepository(
+            client: workspace.apiClient,
+            cache: TenantJSONCache(cacheNamespace: context.workspace.cacheNamespace)
+        )
     }
 
     private func enterRestoredSession(_ context: CurrentSession) async {

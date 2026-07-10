@@ -1,10 +1,26 @@
 import Foundation
 
+struct APIResponseMetadata: Equatable, Sendable {
+    let etag: String?
+    let lastModified: String?
+    let receivedAt: Date
+}
+
+struct APIResponse<Value: Sendable>: Sendable {
+    let value: Value
+    let metadata: APIResponseMetadata
+}
+
 protocol APIClientProtocol: Sendable {
     func send<Response: Decodable & Sendable>(
         _ endpoint: APIEndpoint<Response>
     ) async throws -> Response
+
+    func sendWithMetadata<Response: Decodable & Sendable>(
+        _ endpoint: APIEndpoint<Response>
+    ) async throws -> APIResponse<Response>
 }
+
 protocol RequestAuthorizing: Sendable {
     func bearerToken() async throws -> String?
     func refreshBearerToken(rejectedToken: String) async throws -> String?
@@ -42,6 +58,12 @@ actor APIClient: APIClientProtocol {
     func send<Response: Decodable & Sendable>(
         _ endpoint: APIEndpoint<Response>
     ) async throws -> Response {
+        try await sendWithMetadata(endpoint).value
+    }
+
+    func sendWithMetadata<Response: Decodable & Sendable>(
+        _ endpoint: APIEndpoint<Response>
+    ) async throws -> APIResponse<Response> {
         let token: String?
         switch endpoint.authentication {
         case .none:
@@ -63,7 +85,7 @@ actor APIClient: APIClientProtocol {
         _ endpoint: APIEndpoint<Response>,
         bearerToken: String?,
         mayRefresh: Bool
-    ) async throws -> Response {
+    ) async throws -> APIResponse<Response> {
         let request = try makeRequest(endpoint, bearerToken: bearerToken)
 
         let data: Data
@@ -172,7 +194,7 @@ actor APIClient: APIClientProtocol {
         _ type: Response.Type,
         data: Data,
         response: HTTPURLResponse
-    ) throws -> Response {
+    ) throws -> APIResponse<Response> {
         let status = response.statusCode
         let requestID = response.value(forHTTPHeaderField: "X-Request-ID")
 
@@ -189,23 +211,33 @@ actor APIClient: APIClientProtocol {
         }
 
         if (200..<300).contains(status) {
+            let value: Response
             if Response.self == EmptyResponse.self, data.isEmpty {
-                return EmptyResponse() as! Response
+                value = EmptyResponse() as! Response
+            } else {
+                let contentType = response.value(forHTTPHeaderField: "Content-Type")?.lowercased()
+                guard
+                    contentType?.contains("application/json") == true
+                        || contentType?.contains("+json") == true
+                else {
+                    throw APIError.unexpectedContentType(contentType)
+                }
+
+                do {
+                    value = try MiseJSON.decoder().decode(Response.self, from: data)
+                } catch {
+                    throw APIError.decoding(String(describing: error))
+                }
             }
 
-            let contentType = response.value(forHTTPHeaderField: "Content-Type")?.lowercased()
-            guard
-                contentType?.contains("application/json") == true
-                    || contentType?.contains("+json") == true
-            else {
-                throw APIError.unexpectedContentType(contentType)
-            }
-
-            do {
-                return try MiseJSON.decoder().decode(Response.self, from: data)
-            } catch {
-                throw APIError.decoding(String(describing: error))
-            }
+            return APIResponse(
+                value: value,
+                metadata: APIResponseMetadata(
+                    etag: response.value(forHTTPHeaderField: "ETag"),
+                    lastModified: response.value(forHTTPHeaderField: "Last-Modified"),
+                    receivedAt: Date()
+                )
+            )
         }
 
         let problem = decodeProblem(data)?.addingRequestID(requestID)

@@ -6,9 +6,7 @@ struct RootView: View {
     @State private var authentication: AuthenticationCoordinator
 
     init(environment: AppEnvironment) {
-        _authentication = State(
-            initialValue: AuthenticationCoordinator(environment: environment)
-        )
+        _authentication = State(initialValue: AuthenticationCoordinator(environment: environment))
     }
 
     var body: some View {
@@ -21,31 +19,21 @@ struct RootView: View {
             case let .signedIn(session):
                 SignedInShell(
                     session: session,
+                    ownerRepository: authentication.ownerRepository,
                     isSigningOut: authentication.isWorking,
                     signOut: { await authentication.signOut() }
                 )
             case let .locked(session, biometricKind):
-                AppLockView(
-                    model: authentication,
-                    session: session,
-                    biometricKind: biometricKind
-                )
+                AppLockView(model: authentication, session: session, biometricKind: biometricKind)
             }
         }
-        .overlay {
-            if scenePhase != .active {
-                PrivacyShield()
-            }
-        }
+        .overlay { if scenePhase != .active { PrivacyShield() } }
         .task { await authentication.restore() }
-        .onChange(of: scenePhase) { _, newPhase in
-            switch newPhase {
-            case .active:
-                Task { await authentication.sceneDidBecomeActive() }
-            case .inactive, .background:
-                authentication.sceneDidEnterBackground()
-            @unknown default:
-                break
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .active: Task { await authentication.sceneDidBecomeActive() }
+            case .inactive, .background: authentication.sceneDidEnterBackground()
+            @unknown default: break
             }
         }
     }
@@ -67,15 +55,13 @@ private struct PrivacyShield: View {
 private struct LoadingSessionView: View {
     var body: some View {
         ZStack {
-            Color(uiColor: .systemGroupedBackground)
-                .ignoresSafeArea()
+            Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
             VStack(spacing: 16) {
                 Image(systemName: "camera.aperture")
                     .font(.system(size: 44, weight: .medium))
                     .foregroundStyle(.tint)
                     .accessibilityHidden(true)
-                ProgressView("Opening Mise…")
-                    .controlSize(.large)
+                ProgressView("Opening Mise…").controlSize(.large)
             }
             .accessibilityElement(children: .combine)
         }
@@ -85,45 +71,70 @@ private struct LoadingSessionView: View {
 @MainActor
 private struct SignedInShell: View {
     let session: CurrentSession
+    let ownerRepository: OwnerRepository?
+    let isSigningOut: Bool
+    let signOut: @MainActor () async -> Void
+
+    var body: some View {
+        if session.principal.kind == .studioOwner, let repository = ownerRepository {
+            OwnerCompanionView(
+                session: session,
+                repository: repository,
+                isSigningOut: isSigningOut,
+                signOut: signOut
+            )
+        } else if session.principal.kind != .studioOwner {
+            GuestConnectedView(session: session, isSigningOut: isSigningOut, signOut: signOut)
+        } else {
+            ContentUnavailableView {
+                Label("Studio data unavailable", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text("Sign out and reconnect to this studio.")
+            } actions: {
+                Button("Sign out", role: .destructive) { Task { await signOut() } }
+                    .disabled(isSigningOut)
+            }
+        }
+    }
+}
+
+@MainActor
+private struct GuestConnectedView: View {
+    let session: CurrentSession
     let isSigningOut: Bool
     let signOut: @MainActor () async -> Void
 
     var body: some View {
         NavigationStack {
-            List {
-                Section("Workspace") {
-                    LabeledContent("Studio", value: session.workspace.displayName)
-                    LabeledContent("Signed in as", value: session.principal.displayName)
-                    LabeledContent("Access", value: session.principal.kind.displayName)
-                }
-
-                Section {
-                    ContentUnavailableView {
-                        Label("Workspace connected", systemImage: "checkmark.seal")
-                    } description: {
-                        Text("Your secure native session is ready for Mise features.")
-                    }
-                    .frame(maxWidth: .infinity)
-                    .listRowBackground(Color.clear)
-                }
-            }
-            .listStyle(.insetGrouped)
-            .navigationTitle("Mise")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Sign out", role: .destructive) {
-                        Task { await signOut() }
-                    }
+            ContentUnavailableView {
+                Label(title, systemImage: icon)
+            } description: {
+                Text("You’re securely connected to \(session.workspace.displayName). This limited session cannot open studio-owner data.")
+            } actions: {
+                Button("Sign out", role: .destructive) { Task { await signOut() } }
                     .disabled(isSigningOut)
-                }
             }
-            .overlay {
-                if isSigningOut {
-                    ProgressView("Signing out…")
-                        .padding(20)
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-                }
-            }
+            .navigationTitle(session.principal.kind.displayName)
+        }
+    }
+
+    private var title: String {
+        switch session.principal.kind {
+        case .galleryGuest: "Gallery access connected"
+        case .portalGuest: "Client portal connected"
+        case .workspaceGuest: "Project workspace connected"
+        case .documentGuest: "Document access connected"
+        default: "Limited access connected"
+        }
+    }
+
+    private var icon: String {
+        switch session.principal.kind {
+        case .galleryGuest: "photo.on.rectangle"
+        case .portalGuest: "person.crop.circle.badge.checkmark"
+        case .workspaceGuest: "briefcase"
+        case .documentGuest: "doc.text"
+        default: "lock.shield"
         }
     }
 }

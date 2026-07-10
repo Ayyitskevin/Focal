@@ -1,9 +1,10 @@
-# Mise mobile API v1 — proposed contract
+# Mise mobile API v1 contract
 
 This document is the contract targeted by the native app. Milestone 1 implements
 tenant discovery, every authentication/capability route below, session management,
-and the scoped OpenAPI document. The feature reads and commands remain the planned
-Milestones 2–4 contract; they are not yet exposed by the backend.
+and the scoped OpenAPI document. Milestone 2 adds the owner dashboard, client and
+project collections, gallery manifests, event types, and booking agenda. The
+remaining reads and commands stay in the planned Milestones 3–4 contract.
 
 ## Conventions
 
@@ -150,6 +151,10 @@ client-wide session.
 | `GET /api/v1/ai/runs` | `Page<AIRun>` |
 | `GET /api/v1/galleries/{id}/cull` | paged cull deck/results |
 
+The Milestone 2 endpoints are available only to the exact `studio_owner`
+principal with `studio:read`. Client/project detail, document, slot, AI-run, and
+cull-result reads remain reserved contract surface until their delivery slices.
+
 Collections default to 25 and cap at 100. Cursors carry ordering state but no
 authorization; authorization is reevaluated on every page.
 
@@ -247,6 +252,10 @@ Never expose gallery/portal PINs, `stored` filenames, or server paths. Media URL
 must enforce bearer scope, gallery publication/expiry, asset parentage/readiness,
 and the cull delivery gate. Support Range requests for video and conditional/private
 caching. Do not put bearer credentials in signed URL query parameters.
+
+Milestone 2 deliberately emits `null` for every media link. Authenticated thumbnail,
+preview, video, and download routes arrive with the client-delivery slice rather
+than exposing the existing browser/file boundary to the native app.
 
 ## Offline/cache metadata
 
