@@ -5,6 +5,7 @@ Mise — self-hosted F&B photography delivery · FastAPI + HTMX · port 8400
 """
 
 import logging
+import secrets
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -13,7 +14,19 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import alerts, bootstrap, config, csrf, db, jobs, ratelimit, saas, scheduler, service_api
+from . import (
+    alerts,
+    bootstrap,
+    config,
+    csrf,
+    db,
+    jobs,
+    mobile_api,
+    ratelimit,
+    saas,
+    scheduler,
+    service_api,
+)
 from .admin import (
     activity,
     ai_cost,
@@ -102,6 +115,13 @@ app = FastAPI(
     openapi_url=None,
 )
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
+app.add_api_route(
+    "/api/v1",
+    mobile_api.mount_root_not_found,
+    methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    include_in_schema=False,
+)
+app.mount("/api/v1", mobile_api.app, name="mobile_api")
 
 
 # Inline <script>/style= attributes and on*-handlers are pervasive in the
@@ -160,8 +180,14 @@ async def tenant_context(request: Request, call_next):
 
 @app.middleware("http")
 async def common_headers(request: Request, call_next):
+    if request.url.path == "/api/v1" or request.url.path.startswith("/api/v1/"):
+        # Generated at the outermost application boundary so tenant/rate-limit
+        # short-circuits and mounted API handlers share one correlation id.
+        request.state.request_id = f"req_{secrets.token_hex(12)}"
     resp = await call_next(request)
     p = request.url.path
+    if p == "/api/v1" or p.startswith("/api/v1/"):
+        resp.headers.setdefault("X-Request-ID", request.state.request_id)
     if not (
         p in site.INDEXABLE
         or (config.SAAS_MODE and p in saas.MARKETING_INDEXABLE)
@@ -211,7 +237,24 @@ async def unhandled_errors(request: Request, exc: Exception):
         f"{request.method} {request.url.path}|{type(exc).__name__}",
         f"{type(exc).__name__} on {request.method} {request.url.path}: {str(exc)[:300]}",
     )
-    if "text/html" in request.headers.get("accept", ""):
+    is_mobile_api = request.url.path == "/api/v1" or request.url.path.startswith("/api/v1/")
+    if is_mobile_api:
+        request_id = getattr(request.state, "request_id", f"req_{secrets.token_hex(12)}")
+        resp = JSONResponse(
+            {
+                "type": "https://mise.example/problems/server-internal",
+                "title": "Internal server error",
+                "status": 500,
+                "code": "server.internal",
+                "detail": "The server could not complete the request.",
+                "request_id": request_id,
+                "errors": [],
+            },
+            status_code=500,
+            media_type="application/problem+json",
+        )
+        resp.headers["X-Request-ID"] = request_id
+    elif "text/html" in request.headers.get("accept", ""):
         resp = templates.TemplateResponse(
             request,
             "public/error.html",

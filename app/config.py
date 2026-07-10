@@ -431,6 +431,11 @@ RATE_LIMITS = {
     "download": (int(os.environ.get("MISE_RL_DOWNLOAD", "30")), RATE_LIMIT_WINDOW),
     "public": (int(os.environ.get("MISE_RL_PUBLIC", "120")), RATE_LIMIT_WINDOW),
     "admin": (int(os.environ.get("MISE_RL_ADMIN", "120")), RATE_LIMIT_WINDOW),
+    # Native clients legitimately make more small JSON requests than the HTMX UI,
+    # but credential exchanges stay in a separate, much tighter bucket so a noisy
+    # authenticated session cannot dilute brute-force protection.
+    "api": (int(os.environ.get("MISE_RL_API", "300")), RATE_LIMIT_WINDOW),
+    "api_auth": (int(os.environ.get("MISE_RL_API_AUTH", "20")), RATE_LIMIT_WINDOW),
     # Hosted signup provisions a whole tenant instance (DB file + media root), so it
     # gets its own tight hourly bucket (ADR 0050) — 5/hour/IP, not the generous
     # per-minute public bucket.
