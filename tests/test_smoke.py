@@ -5298,7 +5298,7 @@ def test_client_lifetime_rollup(admin):
 
 
 def test_testimonials(admin):
-    g = db.one("SELECT * FROM galleries ORDER BY id LIMIT 1")
+    g, photo = _ready_photo_gallery(admin, title="Testimonial Showcase")
 
     with TestClient(app) as pub:
         # baseline: home, services, work-detail (when published) have NO testimonials block
@@ -5358,9 +5358,7 @@ def test_testimonials(admin):
 
     # publish the case study + verify the gallery-scoped testimonial shows there
     admin.post(
-        f"/admin/galleries/{g['id']}/assets/"
-        f"{db.one('SELECT id FROM assets WHERE gallery_id=? AND kind=' + chr(34) + 'photo' + chr(34), (g['id'],))['id']}"
-        "/portfolio",
+        f"/admin/galleries/{g['id']}/assets/{photo['id']}/portfolio",
         follow_redirects=False,
     )
     admin.post(
