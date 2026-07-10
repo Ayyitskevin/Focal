@@ -82,6 +82,37 @@ enum MiseEndpoints {
             )
         }
 
+
+        static func detail(id: Int64) -> APIEndpoint<ClientDetail> {
+            APIEndpoint(method: .get, path: "/api/v1/clients/\(id)")
+        }
+
+        static func create(
+            _ body: ClientMutationRequest,
+            idempotencyKey: UUID
+        ) throws -> APIEndpoint<ClientDetail> {
+            try .json(
+                method: .post,
+                path: "/api/v1/clients",
+                body: body,
+                idempotencyKey: idempotencyKey
+            )
+        }
+
+        static func update(
+            id: Int64,
+            body: ClientMutationRequest,
+            etag: String,
+            idempotencyKey: UUID
+        ) throws -> APIEndpoint<ClientDetail> {
+            try .json(
+                method: .patch,
+                path: "/api/v1/clients/\(id)",
+                body: body,
+                headers: ["If-Match": etag],
+                idempotencyKey: idempotencyKey
+            )
+        }
         private static func pagination(cursor: String?, limit: Int) -> [APIQueryItem] {
             [
                 APIQueryItem(name: "cursor", value: cursor),
@@ -105,6 +136,37 @@ enum MiseEndpoints {
             )
         }
 
+
+        static func detail(id: Int64) -> APIEndpoint<ProjectDetail> {
+            APIEndpoint(method: .get, path: "/api/v1/projects/\(id)")
+        }
+
+        static func create(
+            _ body: ProjectCreateRequest,
+            idempotencyKey: UUID
+        ) throws -> APIEndpoint<ProjectDetail> {
+            try .json(
+                method: .post,
+                path: "/api/v1/projects",
+                body: body,
+                idempotencyKey: idempotencyKey
+            )
+        }
+
+        static func update(
+            id: Int64,
+            body: ProjectMutationRequest,
+            etag: String,
+            idempotencyKey: UUID
+        ) throws -> APIEndpoint<ProjectDetail> {
+            try .json(
+                method: .patch,
+                path: "/api/v1/projects/\(id)",
+                body: body,
+                headers: ["If-Match": etag],
+                idempotencyKey: idempotencyKey
+            )
+        }
         static func proposals(projectID: Int64) -> APIEndpoint<APIPage<Proposal>> {
             APIEndpoint(
                 method: .get,
@@ -123,6 +185,54 @@ enum MiseEndpoints {
             APIEndpoint(
                 method: .get,
                 path: "/api/v1/projects/\(projectID)/invoices"
+            )
+        }
+    }
+
+    enum Tasks {
+        static let list = APIEndpoint<TaskCollection>(method: .get, path: "/api/v1/tasks")
+
+        static func detail(id: Int64) -> APIEndpoint<TaskDetail> {
+            APIEndpoint(method: .get, path: "/api/v1/tasks/\(id)")
+        }
+
+        static func create(
+            _ body: TaskCreateRequest,
+            idempotencyKey: UUID
+        ) throws -> APIEndpoint<TaskDetail> {
+            try .json(
+                method: .post,
+                path: "/api/v1/tasks",
+                body: body,
+                idempotencyKey: idempotencyKey
+            )
+        }
+
+        static func update(
+            id: Int64,
+            body: TaskMutationRequest,
+            etag: String,
+            idempotencyKey: UUID
+        ) throws -> APIEndpoint<TaskDetail> {
+            try .json(
+                method: .patch,
+                path: "/api/v1/tasks/\(id)",
+                body: body,
+                headers: ["If-Match": etag],
+                idempotencyKey: idempotencyKey
+            )
+        }
+
+        static func delete(
+            id: Int64,
+            etag: String,
+            idempotencyKey: UUID
+        ) -> APIEndpoint<TaskDetail> {
+            APIEndpoint(
+                method: .delete,
+                path: "/api/v1/tasks/\(id)",
+                headers: ["If-Match": etag],
+                idempotencyKey: idempotencyKey
             )
         }
     }

@@ -16,9 +16,15 @@ struct ResourceSnapshot<Value: Codable & Sendable>: Sendable {
     }
 }
 
+struct EditableResource<Value: Codable & Sendable>: Sendable {
+    let value: Value
+    let etag: String
+}
+
 enum OwnerRepositoryError: LocalizedError, Sendable {
     case invalidPagination
     case missingConditionalValue
+    case missingEntityTag
 
     var errorDescription: String? {
         switch self {
@@ -26,6 +32,8 @@ enum OwnerRepositoryError: LocalizedError, Sendable {
             "The server returned an invalid page cursor."
         case .missingConditionalValue:
             "The server validated a cache item that is no longer available."
+        case .missingEntityTag:
+            "The server did not provide a version for this item. Reload it and try again."
         }
     }
 }
@@ -39,14 +47,15 @@ actor OwnerRepository {
         static let projects = "projects.v1"
         static let galleries = "galleries.v1"
         static let bookings = "bookings.v1"
+        static let tasks = "tasks.v1"
 
         static func gallery(_ id: Int64) -> String {
             "gallery.\(id).v1"
         }
     }
 
-    private let client: any APIClientProtocol
-    private let cache: TenantJSONCache
+    let client: any APIClientProtocol
+    let cache: TenantJSONCache
 
     init(client: any APIClientProtocol, cache: TenantJSONCache) {
         self.client = client
@@ -226,7 +235,7 @@ actor OwnerRepository {
         }
     }
 
-    private func sendWithMetadata<Response: Decodable & Sendable>(
+    func sendWithMetadata<Response: Decodable & Sendable>(
         _ endpoint: APIEndpoint<Response>
     ) async throws -> APIResponse<Response> {
         do {

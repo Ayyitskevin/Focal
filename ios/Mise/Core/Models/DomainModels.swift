@@ -159,6 +159,30 @@ struct ClientSummary: Codable, Hashable, Sendable, Identifiable {
     let createdAt: Date
 }
 
+struct ClientDetail: Codable, Hashable, Sendable, Identifiable {
+    let id: Int64
+    let name: String
+    let company: String?
+    let email: String?
+    let phone: String?
+    let notes: String?
+    let usageRights: String?
+    let market: String
+    let projectCount: Int
+    let portalPublished: Bool
+    let createdAt: Date
+}
+
+struct ClientMutationRequest: Codable, Hashable, Sendable {
+    let name: String
+    let company: String?
+    let email: String?
+    let phone: String?
+    let notes: String?
+    let usageRights: String?
+    let market: String
+}
+
 struct ProjectSummary: Codable, Hashable, Sendable, Identifiable {
     let id: Int64
     let clientID: Int64
@@ -169,6 +193,60 @@ struct ProjectSummary: Codable, Hashable, Sendable, Identifiable {
     let shootOn: LocalDate?
     let workspacePublished: Bool
     let createdAt: Date
+}
+
+struct ProjectDetail: Codable, Hashable, Sendable, Identifiable {
+    let id: Int64
+    let clientID: Int64
+    let clientDisplayName: String
+    let title: String
+    let status: ProjectStatus
+    let notes: String?
+    let galleryID: Int64?
+    let shootOn: LocalDate?
+    let workspacePublished: Bool
+    let createdAt: Date
+}
+
+struct ProjectCreateRequest: Codable, Hashable, Sendable {
+    let clientID: Int64
+    let title: String
+}
+
+struct ProjectMutationRequest: Codable, Hashable, Sendable {
+    let title: String
+    let status: ProjectStatus
+    let notes: String?
+    let shootOn: LocalDate?
+}
+
+struct TaskDetail: Codable, Hashable, Sendable, Identifiable {
+    let id: Int64
+    let title: String
+    let dueOn: LocalDate?
+    let projectID: Int64?
+    let projectTitle: String?
+    let done: Bool
+    let isOverdue: Bool
+    let createdAt: Date
+    let completedAt: Date?
+}
+
+struct TaskCollection: Codable, Hashable, Sendable {
+    let items: [TaskDetail]
+}
+
+struct TaskCreateRequest: Codable, Hashable, Sendable {
+    let title: String
+    let dueOn: LocalDate?
+    let projectID: Int64?
+}
+
+struct TaskMutationRequest: Codable, Hashable, Sendable {
+    let title: String
+    let dueOn: LocalDate?
+    let projectID: Int64?
+    let done: Bool
 }
 
 struct GalleryDeliveryState: APIStringValue {

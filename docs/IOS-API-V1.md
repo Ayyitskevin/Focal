@@ -5,8 +5,9 @@ tenant discovery, every authentication/capability route below, session managemen
 and the scoped OpenAPI document. Milestone 2 adds the owner dashboard, client and
 project collections, gallery manifests, event types, and booking agenda. Milestone 3
 adds capability-bound gallery delivery plus portal, workspace, and document reads.
-The remaining owner detail reads and commands stay in the planned Milestone 4
-contract.
+Milestone 4A adds owner client/project details and bounded client, project, and task
+commands. Policy-sensitive booking, proposal, money, and legal commands remain
+planned.
 
 ## Conventions
 
@@ -185,6 +186,30 @@ cull-result reads remain reserved contract surface until their delivery slices.
 
 Collections default to 25 and cap at 100. Cursors carry ordering state but no
 authorization; authorization is reevaluated on every page.
+
+### Implemented owner commands (Milestone 4A)
+
+| Method/path | Semantics |
+| --- | --- |
+| `GET /api/v1/clients/{id}` | editable client representation and `ETag` |
+| `POST /api/v1/clients` | create a bounded mobile client record |
+| `PATCH /api/v1/clients/{id}` | update bounded client fields with `If-Match` |
+| `GET /api/v1/projects/{id}` | editable project representation and `ETag` |
+| `POST /api/v1/projects` | create a project for a tenant-local client |
+| `PATCH /api/v1/projects/{id}` | update title, stage, notes, and shoot date with `If-Match` |
+| `GET /api/v1/tasks` | bounded owner task collection |
+| `GET /api/v1/tasks/{id}` | editable task representation and `ETag` |
+| `POST /api/v1/tasks` | create a task |
+| `PATCH /api/v1/tasks/{id}` | update or complete a task with `If-Match` |
+| `DELETE /api/v1/tasks/{id}` | delete a task with `If-Match` |
+
+All commands require the exact owner `studio:write` capability and a UUID
+`Idempotency-Key`. A key is bound to the authenticated API session, operation, and
+request digest. Identical retries replay the original JSON response; reuse with a
+different command or payload returns `409`. Updates/deletes also require the latest
+strong `ETag` in `If-Match`; stale versions return `409` without mutation. Business
+data, audit evidence, and the replay record share one transaction. Project workflow
+effects are recoverable from the replay record after a post-commit dispatch failure.
 
 ## Initial commands
 

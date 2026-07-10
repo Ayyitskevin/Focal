@@ -1,6 +1,6 @@
 # Mise for iOS — architecture and delivery plan
 
-Status: Milestones 1–3 implemented; safe mutations next
+Status: Milestones 1–4A implemented; scheduling and operations next
 Minimum OS: iOS 17 / iPadOS 17
 UI: SwiftUI
 State: Observation-based MVVM with async/await
@@ -292,11 +292,16 @@ safely recover an expired rotating bearer session without an application-owned
 reauthorization design; the implemented transfer is cancellable, foreground,
 file-protected, and explicitly initiated by the client.
 
-### Milestone 4 — safe mutations
+### Milestone 4A — safe owner mutations (complete)
 
-- CRM/project edits, tasks, booking/cancel/reschedule, proposal decisions
-- idempotency, optimistic queues where safe, audit coverage
-- native e-sign only after legal/security review
+- native client/project editors and task CRUD
+- session-bound idempotency replay, representation ETags, mandatory `If-Match`
+- business mutation, audit row, replay record, and workflow marker committed atomically
+- cache reconciliation after success; no unsafe offline write queue
+
+### Milestone 4B — policy-sensitive mutations (planned)
+
+- booking/cancel/reschedule and proposal decisions after notification/policy review
 
 ### Milestone 5 — operations
 

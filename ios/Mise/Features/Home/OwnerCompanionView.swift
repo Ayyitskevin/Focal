@@ -6,6 +6,7 @@ enum OwnerDestination: String, CaseIterable, Identifiable {
     case projects
     case galleries
     case calendar
+    case tasks
 
     var id: String { rawValue }
     var title: String { rawValue.prefix(1).uppercased() + String(rawValue.dropFirst()) }
@@ -17,6 +18,7 @@ enum OwnerDestination: String, CaseIterable, Identifiable {
         case .projects: "briefcase"
         case .galleries: "photo.on.rectangle"
         case .calendar: "calendar"
+        case .tasks: "checklist"
         }
     }
 }
@@ -30,6 +32,7 @@ struct OwnerCompanionView: View {
     @State private var projects: OwnerResourceModel<[ProjectSummary]>
     @State private var galleries: OwnerResourceModel<[GallerySummary]>
     @State private var bookings: OwnerResourceModel<[Booking]>
+    @State private var tasks: OwnerResourceModel<[TaskDetail]>
 
     let session: CurrentSession
     let repository: OwnerRepository
@@ -70,6 +73,11 @@ struct OwnerCompanionView: View {
             staleAfter: 15 * 60,
             cached: { try await repository.cachedBookings() },
             remote: { try await repository.refreshBookings() }
+        ))
+        _tasks = State(initialValue: OwnerResourceModel(
+            staleAfter: 15 * 60,
+            cached: { try await repository.cachedTasks() },
+            remote: { try await repository.refreshTasks() }
         ))
     }
 
@@ -133,9 +141,9 @@ struct OwnerCompanionView: View {
         case .home:
             HomeView(model: home) { selection = $0 }
         case .clients:
-            ClientsView(model: clients)
+            ClientsView(model: clients, repository: repository)
         case .projects:
-            ProjectsView(model: projects)
+            ProjectsView(model: projects, clientsModel: clients, repository: repository)
         case .galleries:
             GalleriesView(model: galleries, repository: repository)
         case .calendar:
@@ -143,6 +151,8 @@ struct OwnerCompanionView: View {
                 model: bookings,
                 timeZoneIdentifier: session.workspace.timeZone
             )
+        case .tasks:
+            TasksView(model: tasks, repository: repository)
         }
     }
 }

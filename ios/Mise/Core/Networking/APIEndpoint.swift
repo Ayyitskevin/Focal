@@ -52,14 +52,17 @@ struct APIEndpoint<Response: Decodable & Sendable>: Sendable {
         method: HTTPMethod,
         path: String,
         body: Body,
+        headers: [String: String] = [:],
         authentication: AuthenticationRequirement = .bearer,
         idempotencyKey: UUID? = nil,
         etag: String? = nil
     ) throws -> APIEndpoint<Response> {
-        APIEndpoint(
+        var resolvedHeaders = headers
+        resolvedHeaders["Content-Type"] = "application/json"
+        return APIEndpoint(
             method: method,
             path: path,
-            headers: ["Content-Type": "application/json"],
+            headers: resolvedHeaders,
             body: try MiseJSON.encoder().encode(body),
             authentication: authentication,
             idempotencyKey: idempotencyKey,

@@ -48,6 +48,11 @@ and avoiding it in the foundation keeps auth/session behavior auditable.
   grid/lightbox, visitor favorites, threaded video review notes, protected explicit
   downloads, and cache-first portal/workspace/document summaries. Signing and
   payment stay on same-origin studio webpages.
+- Milestone 4A adds audited owner mutations for clients, projects, and tasks.
+  Every command uses a session-bound idempotency key; updates and deletes require
+  an `ETag`/`If-Match` version. Cached reads remain available offline, while writes
+  require the network and preserve form input when the server reports a conflict.
+  Booking, proposal, money, and legal mutations remain deferred.
 - Gallery media uses the active session's single rotating authenticator. Server
   media URLs are accepted only when their origin and exact capability path match
   the active workspace; redirects are rejected and bearer tokens never enter URLs.

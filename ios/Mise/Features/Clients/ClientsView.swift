@@ -2,6 +2,9 @@ import SwiftUI
 
 struct ClientsView: View {
     let model: OwnerResourceModel<[ClientSummary]>
+    let repository: OwnerRepository
+    @State private var showingNewClient = false
+
     @State private var query = ""
 
     var body: some View {
@@ -19,6 +22,21 @@ struct ClientsView: View {
         )
         .navigationTitle("Clients")
         .searchable(text: $query, prompt: "Name, company, or email")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("New client", systemImage: "plus") {
+                    showingNewClient = true
+                }
+            }
+        }
+        .sheet(isPresented: $showingNewClient) {
+            NavigationStack {
+                ClientEditorView(repository: repository) {
+                    showingNewClient = false
+                    await model.refresh()
+                }
+            }
+        }
     }
 
     private func clientList(_ clients: [ClientSummary]) -> some View {
@@ -29,6 +47,11 @@ struct ClientsView: View {
                     .listRowBackground(Color.clear)
             } else {
                 ForEach(matches) { client in
+                    NavigationLink {
+                        ClientEditorView(repository: repository, clientID: client.id) {
+                            await model.refresh()
+                        }
+                    } label: {
                     VStack(alignment: .leading, spacing: 5) {
                         HStack {
                             Text(client.name).font(.headline)
@@ -48,6 +71,7 @@ struct ClientsView: View {
                     }
                     .padding(.vertical, 4)
                     .accessibilityElement(children: .combine)
+                    }
                 }
             }
         }
