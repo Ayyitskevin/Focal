@@ -17,6 +17,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from .. import db, mailer, security, sms
 from ..render import templates
+from . import common
 
 log = logging.getLogger("mise.admin.inbox")
 router = APIRouter(prefix="/admin/inbox", dependencies=[Depends(security.require_admin)])
@@ -48,15 +49,6 @@ _AVATARS = [
 ]
 
 
-def _initials(name: str) -> str:
-    parts = [p for p in (name or "").split() if p]
-    if not parts:
-        return "#"
-    if len(parts) == 1:
-        return parts[0][:2].upper()
-    return (parts[0][0] + parts[-1][0]).upper()
-
-
 def _channel(inq) -> dict:
     """How the lead arrived — booking form, text, or general inquiry."""
     if inq["kind"] == "booking":
@@ -84,7 +76,7 @@ def _thread_row(inq, active_id):
     return {
         "id": inq["id"],
         "name": inq["business"] or inq["name"] or "Unknown",
-        "initials": _initials(inq["business"] or inq["name"]),
+        "initials": common.initials(inq["business"] or inq["name"], empty="#"),
         "av_bg": av[0],
         "av_color": av[1],
         "time": inq["created_at"],
@@ -170,7 +162,7 @@ def _active_ctx(inq) -> dict:
         "id": inq["id"],
         "name": inq["business"] or inq["name"] or "Unknown",
         "contact_name": inq["name"],
-        "initials": _initials(inq["business"] or inq["name"]),
+        "initials": common.initials(inq["business"] or inq["name"], empty="#"),
         "av_bg": av[0],
         "av_color": av[1],
         "email": inq["email"],

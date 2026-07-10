@@ -466,7 +466,7 @@ async def log_delivery(
     """Manually log a deliverable provided this (or another) period. Advisory
     tracking only — never touches invoices/billing, never auto-credited from
     galleries (the count is Kevin's, by doctrine)."""
-    d = get_plan(plan_id)  # noqa: F841  # noqa: F841
+    get_plan(plan_id)  # raises 404 if the plan is gone; return value unused
     label = label.strip()
     if not label:
         raise HTTPException(status_code=400, detail="label required")

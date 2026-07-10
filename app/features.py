@@ -126,14 +126,6 @@ def sms_enabled() -> bool:
     return bool(config.QUO_API_KEY and config.QUO_NUMBER) and operator_context()
 
 
-def google_calendar_enabled() -> bool:
-    return bool(config.GOOGLE_CLIENT_ID and config.GOOGLE_CLIENT_SECRET)
-
-
-def reopen_notify_enabled() -> bool:
-    return bool(config.REOPEN_NOTIFY_URL and config.REOPEN_NOTIFY_TOKEN)
-
-
 def hermes_enabled() -> bool:
     return bool(config.HERMES_ARM_URL)
 

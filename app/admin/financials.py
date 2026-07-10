@@ -47,15 +47,6 @@ def _usd0(cents: int) -> str:
     return "$" + f"{round(cents / 100):,}"
 
 
-def _initials(name: str) -> str:
-    parts = [p for p in (name or "").split() if p]
-    if not parts:
-        return "?"
-    if len(parts) == 1:
-        return parts[0][:2].upper()
-    return (parts[0][0] + parts[-1][0]).upper()
-
-
 def _range_bounds(key: str) -> tuple[str, str]:
     """(start, end) ISO dates, end exclusive. Default quarter."""
     today = dt.date.today()
@@ -277,7 +268,7 @@ async def client_pnl(request: Request, sort: str = "revenue"):
         rows.append(
             {
                 "name": c["company"] or c["name"],
-                "initials": _initials(c["company"] or c["name"]),
+                "initials": common.initials(c["company"] or c["name"]),
                 "av": _AV_COLORS[i % len(_AV_COLORS)],
                 "projects": c["n_projects"],
                 "revenue": _usd0(c["revenue_cents"]),
