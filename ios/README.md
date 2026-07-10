@@ -1,0 +1,49 @@
+# Mise iOS
+
+The checked-in project is generated with XcodeGen so project-file churn does not
+obscure source reviews.
+
+## Requirements
+
+- macOS with the current stable Xcode capable of targeting iOS 17
+- XcodeGen 2.45.4 or newer
+- an iOS 17+ simulator or device
+
+## Generate and run
+
+1. Set the hosted platform root in `Config/Debug.xcconfig`. The current value is a
+   non-production placeholder. A hosted slug such as `north-star` resolves beneath
+   this root; users enter a full origin for custom or self-hosted servers.
+2. If the bundle identifier or signing team differs, update `project.yml`.
+3. From this directory, run:
+
+       xcodegen generate
+       open Mise.xcodeproj
+
+4. Select the Mise scheme and an iOS 17+ destination.
+5. Run the MiseTests test plan from Xcode or:
+
+       xcodebuild test \
+         -project Mise.xcodeproj \
+         -scheme Mise \
+         -destination 'platform=iOS Simulator,name=iPhone 16'
+
+The core foundation intentionally uses URLSession, Security, LocalAuthentication,
+SwiftUI, and Observation with no third-party runtime dependency. Swift Charts is
+part of SwiftUI and can be added to the dashboard feature. Evaluate Kingfisher when
+the gallery UI lands; the API client already supports authenticated media requests,
+and avoiding it in the foundation keeps auth/session behavior auditable.
+
+## Configuration notes
+
+- Release configuration refuses a non-HTTPS server URL.
+- `MiseServerBaseURL` is the hosted platform root and should ultimately be supplied
+  by CI per environment. It is not a tenant origin.
+- Milestone 1 implements tenant discovery, owner password sign-in, exact-capability
+  shared client access, Keychain-backed sessions, and biometric re-entry. Custom
+  and self-hosted origins are entered in the app and remain isolated per origin.
+- Do not add access tokens, refresh tokens, PINs, Stripe secrets, or APNs keys to
+  xcconfig files.
+
+See `../docs/IOS-ARCHITECTURE.md` and `../docs/IOS-API-V1.md` for the product and
+backend plan.

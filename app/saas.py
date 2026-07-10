@@ -1468,6 +1468,11 @@ def _platform_path(path: str) -> bool:
             "/sitemap.xml",
         }
         or path.startswith("/static/")
+        # API callers must always receive an API response. Redirecting an unknown
+        # root-host request to /pricing would turn auth/discovery failures into an
+        # HTML 303 that a native client cannot safely interpret.
+        or path == "/api/v1"
+        or path.startswith("/api/v1/")
         or path in {"/admin/login", "/admin/logout", "/admin/saas"}
         or path.startswith("/admin/saas/")
         or path in {"/webhooks/stripe", "/webhooks/stripe/saas"}
@@ -1484,7 +1489,36 @@ def _billing_allowed_path(path: str) -> bool:
         or path in {"/admin/login", "/admin/logout", "/admin/forgot", "/admin/reset", "/healthz"}
         or path in {"/admin/export-studio", "/admin/delete-studio"}
         or path.startswith("/static/")
+        # Keep the narrow session recovery surface reachable while a hosted studio
+        # is billing-locked. Feature/content routes remain blocked with 402.
+        or path
+        in {
+            "/api/v1/tenant",
+            "/api/v1/auth/studio/login",
+            "/api/v1/auth/refresh",
+            "/api/v1/auth/logout",
+            "/api/v1/me",
+        }
+        or path.startswith("/api/v1/auth/sessions")
         or path in {"/webhooks/stripe", "/webhooks/stripe/saas"}
+    )
+
+
+def _api_problem(request: Request, status: int, code: str, title: str, detail: str) -> JSONResponse:
+    """Problem response for failures that happen before the mounted API runs."""
+
+    return JSONResponse(
+        {
+            "type": f"https://mise.example/problems/{code.replace('.', '-')}",
+            "title": title,
+            "status": status,
+            "code": code,
+            "detail": detail,
+            "request_id": getattr(request.state, "request_id", None),
+            "errors": [],
+        },
+        status_code=status,
+        media_type="application/problem+json",
     )
 
 
@@ -1503,6 +1537,14 @@ async def tenant_middleware(request: Request, call_next):
     # serving it would re-provision an empty data dir via ensure_tenant_database and
     # let the old password log in to the husk (ADR 0051).
     if not tenant or tenant.get("deleted_at"):
+        if path == "/api/v1" or path.startswith("/api/v1/"):
+            return _api_problem(
+                request,
+                404,
+                "tenant.not_found",
+                "Studio not found",
+                "This studio is unavailable.",
+            )
         if "text/html" in request.headers.get("accept", ""):
             return templates.TemplateResponse(
                 request,
@@ -1523,6 +1565,14 @@ async def tenant_middleware(request: Request, call_next):
             # neutral page (never the raw "subscription required" JSON, which both
             # dumps a blob and blames the studio's billing). Non-browser callers keep
             # the JSON 402 contract — mirror the unknown-tenant handling above.
+            if path == "/api/v1" or path.startswith("/api/v1/"):
+                return _api_problem(
+                    request,
+                    402,
+                    "tenant.subscription_required",
+                    "Studio unavailable",
+                    "This studio is temporarily unavailable.",
+                )
             if "text/html" in request.headers.get("accept", ""):
                 return templates.TemplateResponse(
                     request,

@@ -1,0 +1,6 @@
+Mise.xcodeproj/
+.build/
+DerivedData/
+*.xcworkspace/
+**/xcuserdata/
+*.xcuserstate

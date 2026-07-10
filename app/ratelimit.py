@@ -34,6 +34,12 @@ def _bucket_for(path: str, method: str = "GET") -> str | None:
         if method == "POST":
             return "signup"
         return "admin" if path.startswith("/admin") else None
+    if path in {"/api/v1/auth/studio/login", "/api/v1/auth/refresh"} or path.startswith(
+        "/api/v1/client-auth/"
+    ):
+        return "api_auth"
+    if path == "/api/v1" or path.startswith("/api/v1/"):
+        return "api"
     if "/download" in path:
         return "download"
     if path.startswith("/admin"):
@@ -70,6 +76,21 @@ def check(request: Request, path: str) -> Response | None:
         retry = int(dq[0] + window - now) + 1
         log.warning("rate limit hit: %s bucket=%s ip=%s", path, bucket, ip)
         headers = {"Retry-After": str(retry)}
+        if path == "/api/v1" or path.startswith("/api/v1/"):
+            return JSONResponse(
+                {
+                    "type": "https://mise.example/problems/rate-limited",
+                    "title": "Too many requests",
+                    "status": 429,
+                    "code": "request.rate_limited",
+                    "detail": "Too many requests — slow down.",
+                    "request_id": getattr(request.state, "request_id", None),
+                    "errors": [],
+                },
+                status_code=429,
+                headers=headers,
+                media_type="application/problem+json",
+            )
         if "text/html" in request.headers.get("accept", ""):
             # A person in a browser (a client on their gallery, not a script)
             # deserves the branded page, not a JSON blob at their worst moment.
