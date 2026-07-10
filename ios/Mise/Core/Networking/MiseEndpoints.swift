@@ -215,12 +215,16 @@ enum MiseEndpoints {
         }
 
         static func bookings(
-            cursor: String? = nil
+            cursor: String? = nil,
+            limit: Int = 25
         ) -> APIEndpoint<APIPage<Booking>> {
             APIEndpoint(
                 method: .get,
                 path: "/api/v1/bookings",
-                queryItems: [APIQueryItem(name: "cursor", value: cursor)]
+                queryItems: [
+                    APIQueryItem(name: "cursor", value: cursor),
+                    APIQueryItem(name: "limit", value: String(min(max(limit, 1), 100))),
+                ]
             )
         }
 

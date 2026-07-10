@@ -1,6 +1,6 @@
 # ADR 0066 — Native API opaque session boundary
 
-**Status:** Proposed (red-light security/schema PR; human acceptance required)
+**Status:** Accepted
 **Date:** 2026-07-10
 **Deciders:** Kevin (owner), iOS/full-stack architect
 

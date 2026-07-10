@@ -7,6 +7,7 @@ enum HTTPMethod: String, Sendable {
     case patch = "PATCH"
     case delete = "DELETE"
 }
+
 enum AuthenticationRequirement: Equatable, Sendable {
     case none
     case bearer
@@ -60,6 +61,21 @@ struct APIEndpoint<Response: Decodable & Sendable>: Sendable {
             path: path,
             headers: ["Content-Type": "application/json"],
             body: try MiseJSON.encoder().encode(body),
+            authentication: authentication,
+            idempotencyKey: idempotencyKey,
+            etag: etag
+        )
+    }
+
+    /// Returns an otherwise identical conditional endpoint.
+    /// Keeping validators here prevents feature code from mutating raw headers.
+    func revalidating(with etag: String?) -> APIEndpoint<Response> {
+        APIEndpoint(
+            method: method,
+            path: path,
+            queryItems: queryItems,
+            headers: headers,
+            body: body,
             authentication: authentication,
             idempotencyKey: idempotencyKey,
             etag: etag

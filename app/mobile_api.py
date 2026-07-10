@@ -18,7 +18,15 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import alerts, config, mobile_auth, saas, urls
+from . import (
+    alerts,
+    config,
+    mobile_auth,
+    mobile_gallery_calendar_api,
+    mobile_owner_api,
+    saas,
+    urls,
+)
 from .mobile_api_schemas import (
     APIProblem,
     AuthSession,
@@ -591,3 +599,10 @@ def revoke_session(request: Request, session_id: str) -> Response:
     if not mobile_auth.revoke_session(request, owner, session_id):
         raise HTTPException(status_code=404, detail="Session not found.")
     return Response(status_code=204, headers={"Cache-Control": "no-store"})
+
+
+# Feature routers stay independent of this module so authentication failures,
+# validation problems, and unexpected errors still pass through this mounted
+# application's single JSON/problem boundary.
+app.include_router(mobile_owner_api.router)
+app.include_router(mobile_gallery_calendar_api.router)

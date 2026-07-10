@@ -149,6 +149,65 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(headers.withValue { $0["If-None-Match"] }, #""gallery-42""#)
     }
 
+    func testReturnsCacheMetadataWithDecodedValue() async throws {
+        MockURLProtocol.setHandler { request in
+            (
+                Self.response(
+                    url: request.url!,
+                    status: 200,
+                    headers: [
+                        "Content-Type": "application/json",
+                        "ETag": #""gallery-43""#,
+                        "Last-Modified": "Fri, 10 Jul 2026 14:30:00 GMT",
+                    ]
+                ),
+                Data(#"{"asset_id":201,"selected":true}"#.utf8)
+            )
+        }
+        let client = makeClient()
+        let endpoint = APIEndpoint<FavoriteState>(
+            method: .get,
+            path: "/api/v1/test/cache-metadata",
+            authentication: .none
+        )
+        let startedAt = Date()
+
+        let response = try await client.sendWithMetadata(endpoint)
+
+        XCTAssertTrue(response.value.selected)
+        XCTAssertEqual(response.metadata.etag, #""gallery-43""#)
+        XCTAssertEqual(response.metadata.lastModified, "Fri, 10 Jul 2026 14:30:00 GMT")
+        XCTAssertGreaterThanOrEqual(response.metadata.receivedAt, startedAt)
+    }
+
+    func testSurfacesNotModifiedValidatorWithoutDecodingABody() async throws {
+        MockURLProtocol.setHandler { request in
+            (
+                Self.response(
+                    url: request.url!,
+                    status: 304,
+                    headers: ["ETag": #""gallery-44""#]
+                ),
+                Data()
+            )
+        }
+        let client = makeClient()
+        let endpoint = APIEndpoint<FavoriteState>(
+            method: .get,
+            path: "/api/v1/test/not-modified",
+            authentication: .none
+        )
+
+        do {
+            _ = try await client.sendWithMetadata(endpoint)
+            XCTFail("Expected a not-modified result.")
+        } catch let APIError.notModified(etag) {
+            XCTAssertEqual(etag, #""gallery-44""#)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     func testOmitsNilQueryItems() async throws {
         let receivedURL = LockedBox<URL?>(nil)
         MockURLProtocol.setHandler { request in
