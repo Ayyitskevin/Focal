@@ -261,6 +261,128 @@ struct GalleryVisionSummary: Codable, Hashable, Sendable {
     let error: String?
 }
 
+struct GalleryCommentStatus: APIStringValue {
+    let rawValue: String
+    init(rawValue: String) { self.rawValue = rawValue }
+
+    static let open = Self(rawValue: "open")
+    static let resolved = Self(rawValue: "resolved")
+}
+
+struct GalleryComment: Codable, Hashable, Sendable, Identifiable {
+    let id: Int64
+    let assetID: Int64
+    let parentID: Int64?
+    let authorRole: String
+    let body: String
+    let timecodeSeconds: Double
+    let status: GalleryCommentStatus
+    let createdAt: Date
+}
+
+struct GalleryCommentCreateRequest: Codable, Hashable, Sendable {
+    let body: String
+    let timecodeSeconds: Double?
+    let parentID: Int64?
+}
+
+struct ClientPortalSummary: Codable, Hashable, Sendable, Identifiable {
+    let id: Int64
+    let clientDisplayName: String
+    let galleries: [ClientPortalGallery]
+    let brandAssets: [ClientBrandAsset]
+    let licenses: [ClientLicense]
+    let usageRightsNote: String?
+}
+
+struct ClientPortalGallery: Codable, Hashable, Sendable, Identifiable {
+    let id: Int64
+    let title: String
+    let slug: String
+    let expiresOn: LocalDate?
+    let createdAt: Date
+}
+
+struct ClientBrandAsset: Codable, Hashable, Sendable, Identifiable {
+    let id: Int64
+    let filename: String
+    let byteCount: Int64?
+    let createdAt: Date
+}
+
+struct ClientLicense: Codable, Hashable, Sendable {
+    let title: String
+    let scope: String
+    let tier: String
+    let exclusive: Bool
+    let territory: [String]
+    let channels: [String]
+    let term: String
+}
+
+struct ClientWorkspaceSummary: Codable, Hashable, Sendable, Identifiable {
+    let id: Int64
+    let title: String
+    let clientDisplayName: String
+    let resources: [ClientWorkspaceResource]
+}
+
+struct ClientWorkspaceResourceKind: APIStringValue {
+    let rawValue: String
+    init(rawValue: String) { self.rawValue = rawValue }
+
+    static let proposal = Self(rawValue: "proposal")
+    static let contract = Self(rawValue: "contract")
+    static let invoice = Self(rawValue: "invoice")
+    static let gallery = Self(rawValue: "gallery")
+}
+
+struct ClientWorkspaceResource: Codable, Hashable, Sendable, Identifiable {
+    let kind: ClientWorkspaceResourceKind
+    let id: Int64
+    let title: String
+    let status: String
+    let slug: String?
+    let total: Money?
+    let dueOn: LocalDate?
+    let actionURL: URL
+}
+
+struct ClientDocumentKind: APIStringValue {
+    let rawValue: String
+    init(rawValue: String) { self.rawValue = rawValue }
+
+    static let proposal = Self(rawValue: "proposal")
+    static let contract = Self(rawValue: "contract")
+    static let invoice = Self(rawValue: "invoice")
+}
+
+struct ClientDocumentSummary: Codable, Hashable, Sendable, Identifiable {
+    let kind: ClientDocumentKind
+    let id: Int64
+    let projectID: Int64
+    let title: String
+    let projectTitle: String
+    let clientDisplayName: String
+    let status: String
+    let detail: String?
+    let lineItems: [LineItem]
+    let total: Money?
+    let deposit: Money?
+    let paid: Money?
+    let balance: Money?
+    let payments: [Payment]
+    let paymentCount: Int
+    let paymentsTruncated: Bool
+    let dueOn: LocalDate?
+    let sentAt: Date?
+    let viewedAt: Date?
+    let completedAt: Date?
+    let documentETag: String?
+    let canAct: Bool
+    let actionURL: URL
+}
+
 struct LineItem: Codable, Hashable, Sendable {
     let label: String
     let quantity: Int

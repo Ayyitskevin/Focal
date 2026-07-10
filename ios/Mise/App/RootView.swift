@@ -20,6 +20,7 @@ struct RootView: View {
                 SignedInShell(
                     session: session,
                     ownerRepository: authentication.ownerRepository,
+                    clientDeliveryEnvironment: authentication.clientDeliveryEnvironment,
                     isSigningOut: authentication.isWorking,
                     signOut: { await authentication.signOut() }
                 )
@@ -72,6 +73,7 @@ private struct LoadingSessionView: View {
 private struct SignedInShell: View {
     let session: CurrentSession
     let ownerRepository: OwnerRepository?
+    let clientDeliveryEnvironment: ClientDeliveryEnvironment?
     let isSigningOut: Bool
     let signOut: @MainActor () async -> Void
 
@@ -80,6 +82,15 @@ private struct SignedInShell: View {
             OwnerCompanionView(
                 session: session,
                 repository: repository,
+                isSigningOut: isSigningOut,
+                signOut: signOut
+            )
+        } else if session.principal.kind != .studioOwner,
+                  let clientDeliveryEnvironment
+        {
+            ClientDeliveryShellView(
+                session: session,
+                environment: clientDeliveryEnvironment,
                 isSigningOut: isSigningOut,
                 signOut: signOut
             )

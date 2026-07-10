@@ -423,9 +423,10 @@ TRUSTED_PROXY_NETS = _parse_proxy_cidrs(
 )
 
 # Per-IP request rate limits (max requests / window seconds). Deliberately generous
-# — real galleries never approach these; the media/thumbnail grid is exempt entirely
-# (see ratelimit._bucket_for) and logged-in admins are exempt so deploys/testing
-# never trip them. Tune via env without a code change if a bucket proves too tight.
+# — real galleries never approach these; browser static media is exempt while the
+# bearer-authenticated native media surface has its own high-capacity bucket.
+# Logged-in admins are exempt so deploys/testing never trip them. Tune via env
+# without a code change if a bucket proves too tight.
 RATE_LIMIT_WINDOW = int(os.environ.get("MISE_RL_WINDOW", "60"))
 RATE_LIMITS = {
     "download": (int(os.environ.get("MISE_RL_DOWNLOAD", "30")), RATE_LIMIT_WINDOW),
@@ -435,6 +436,10 @@ RATE_LIMITS = {
     # but credential exchanges stay in a separate, much tighter bucket so a noisy
     # authenticated session cannot dilute brute-force protection.
     "api": (int(os.environ.get("MISE_RL_API", "300")), RATE_LIMIT_WINDOW),
+    # Enough headroom for a native gallery grid and Range-capable video preview,
+    # while still preventing a valid capability token from driving unbounded DB
+    # freshness checks and filesystem resolution.
+    "api_media": (int(os.environ.get("MISE_RL_API_MEDIA", "1200")), RATE_LIMIT_WINDOW),
     "api_auth": (int(os.environ.get("MISE_RL_API_AUTH", "20")), RATE_LIMIT_WINDOW),
     # Hosted signup provisions a whole tenant instance (DB file + media root), so it
     # gets its own tight hourly bucket (ADR 0050) — 5/hour/IP, not the generous

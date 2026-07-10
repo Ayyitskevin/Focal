@@ -44,6 +44,13 @@ and avoiding it in the foundation keeps auth/session behavior auditable.
   and self-hosted origins are entered in the app and remain isolated per origin.
 - Milestone 2 adds the cache-first owner dashboard, clients, projects, gallery
   manifests, and upcoming-booking agenda with adaptive iPhone/iPad navigation.
+- Milestone 3 adds exact-capability client delivery: an authenticated native gallery
+  grid/lightbox, visitor favorites, threaded video review notes, protected explicit
+  downloads, and cache-first portal/workspace/document summaries. Signing and
+  payment stay on same-origin studio webpages.
+- Gallery media uses the active session's single rotating authenticator. Server
+  media URLs are accepted only when their origin and exact capability path match
+  the active workspace; redirects are rejected and bearer tokens never enter URLs.
 - Do not add access tokens, refresh tokens, PINs, Stripe secrets, or APNs keys to
   xcconfig files.
 

@@ -49,3 +49,12 @@ def test_mobile_credential_exchanges_have_a_dedicated_rate_bucket() -> None:
     assert ratelimit._bucket_for("/api/v1/tenant", "GET") == "api"
     assert ratelimit._bucket_for("/api/v1/me", "GET") == "api"
     assert ratelimit._bucket_for("/api/v1/auth/logout", "POST") == "api"
+
+
+def test_mobile_gallery_derivatives_use_high_capacity_bucket_and_originals_stay_limited() -> None:
+    base = "/api/v1/client/gallery/assets/17"
+    for variant in ("thumbnail", "preview", "poster"):
+        assert ratelimit._bucket_for(f"{base}/{variant}", "GET") == "api_media"
+    assert ratelimit._bucket_for(f"{base}/download", "GET") == "download"
+    assert ratelimit._bucket_for(f"{base}/favorite", "PUT") == "api"
+    assert ratelimit._bucket_for(f"{base}/comments", "POST") == "api"

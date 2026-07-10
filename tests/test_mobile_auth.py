@@ -362,6 +362,35 @@ def test_gallery_guest_is_visitor_scoped_and_pin_rotation_invalidates(self_hoste
     )
 
 
+def test_gallery_expiry_uses_studio_day_for_issue_and_session_revalidation(
+    self_hosted, monkeypatch
+):
+    gallery_id = db.run(
+        """INSERT INTO galleries (slug, title, pin, published, type, require_pin, expires_at)
+           VALUES (?,?,?,?,?,?,?)""",
+        ("studio-clock-gallery", "Gallery", "2468", 1, "gallery", 1, "2026-07-10"),
+    )
+    # UTC has crossed midnight, but the studio's local delivery day has not.
+    monkeypatch.setattr(
+        mobile_auth,
+        "_now",
+        lambda: dt.datetime(2026, 7, 11, 0, 30, tzinfo=dt.UTC),
+    )
+    monkeypatch.setattr(mobile_auth, "_studio_today", lambda: dt.date(2026, 7, 10))
+    pair = mobile_auth.issue_gallery_session(self_hosted, "studio-clock-gallery", "2468")
+    assert pair.principal.resource_id == gallery_id
+    assert (
+        mobile_auth.authenticate_access(self_hosted, pair.access_token).session_id
+        == pair.session_id
+    )
+
+    monkeypatch.setattr(mobile_auth, "_studio_today", lambda: dt.date(2026, 7, 11))
+    _assert_error(
+        "auth.invalid_token",
+        lambda: mobile_auth.authenticate_access(self_hosted, pair.access_token),
+    )
+
+
 def test_shared_access_principals_keep_exact_resource_scopes(self_hosted):
     client_id, project_id = _seed_project()
     portal_id = db.run(

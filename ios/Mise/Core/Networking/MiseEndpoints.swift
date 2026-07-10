@@ -171,6 +171,53 @@ enum MiseEndpoints {
         }
     }
 
+    enum ClientDelivery {
+        static func gallery(etag: String? = nil) -> APIEndpoint<GalleryDetail> {
+            APIEndpoint(
+                method: .get,
+                path: "/api/v1/client/gallery",
+                etag: etag
+            )
+        }
+
+        static func favorite(assetID: Int64, selected: Bool) -> APIEndpoint<FavoriteState> {
+            APIEndpoint(
+                method: selected ? .put : .delete,
+                path: "/api/v1/client/gallery/assets/\(assetID)/favorite"
+            )
+        }
+
+        static func comments(assetID: Int64) -> APIEndpoint<[GalleryComment]> {
+            APIEndpoint(
+                method: .get,
+                path: "/api/v1/client/gallery/assets/\(assetID)/comments"
+            )
+        }
+
+        static func addComment(
+            assetID: Int64,
+            body: GalleryCommentCreateRequest
+        ) throws -> APIEndpoint<GalleryComment> {
+            try .json(
+                method: .post,
+                path: "/api/v1/client/gallery/assets/\(assetID)/comments",
+                body: body
+            )
+        }
+
+        static func portal(etag: String? = nil) -> APIEndpoint<ClientPortalSummary> {
+            APIEndpoint(method: .get, path: "/api/v1/client/portal", etag: etag)
+        }
+
+        static func workspace(etag: String? = nil) -> APIEndpoint<ClientWorkspaceSummary> {
+            APIEndpoint(method: .get, path: "/api/v1/client/workspace", etag: etag)
+        }
+
+        static func document(etag: String? = nil) -> APIEndpoint<ClientDocumentSummary> {
+            APIEndpoint(method: .get, path: "/api/v1/client/document", etag: etag)
+        }
+    }
+
     enum Documents {
         static func decideProposal(
             id: Int64,

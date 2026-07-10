@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 struct AppEnvironment: Sendable {
     let configuration: AppConfiguration
@@ -46,7 +47,9 @@ struct AppEnvironment: Sendable {
         return WorkspaceEnvironment(
             origin: origin,
             apiClient: apiClient,
-            session: session
+            session: session,
+            networkSession: networkSession,
+            clientVersion: configuration.clientVersion
         )
     }
 
@@ -72,4 +75,76 @@ struct WorkspaceEnvironment: Sendable {
     let origin: URL
     let apiClient: APIClient
     let session: SessionAuthenticator
+    fileprivate let networkSession: URLSession
+    fileprivate let clientVersion: String
+
+    @MainActor
+    func clientDelivery(
+        workspaceCacheNamespace: String,
+        principalID: String,
+        sessionID: String?
+    ) -> ClientDeliveryEnvironment {
+        // Tenant-local resource IDs overlap, and each shared link has narrower
+        // authority than its tenant. Cache and export identity includes both.
+        let capabilityNamespace = [
+            workspaceCacheNamespace,
+            "capability",
+            principalID,
+            "session",
+            sessionID ?? "legacy-session",
+        ].joined(separator: "\0")
+        let cache = TenantJSONCache(cacheNamespace: capabilityNamespace)
+        let accessState = ClientDeliveryAccessState()
+        let lifetime = ClientDeliveryLifetime()
+        let media = AuthenticatedMediaClient(
+            origin: origin,
+            clientVersion: clientVersion,
+            session: networkSession,
+            authorizer: session,
+            cacheNamespace: capabilityNamespace,
+            lifetime: lifetime,
+            onSessionEnded: {
+                try? await cache.removeAll()
+                await accessState.end()
+            }
+        )
+        let repository = ClientDeliveryRepository(
+            client: apiClient,
+            cache: cache,
+            lifetime: lifetime,
+            onSessionEnded: {
+                await media.purge()
+                await accessState.end()
+            }
+        )
+        return ClientDeliveryEnvironment(
+            repository: repository,
+            media: media,
+            accessState: accessState,
+            lifetime: lifetime
+        )
+    }
+}
+
+struct ClientDeliveryEnvironment: Sendable {
+    let repository: ClientDeliveryRepository
+    let media: AuthenticatedMediaClient
+    let accessState: ClientDeliveryAccessState
+    let lifetime: ClientDeliveryLifetime
+
+    func purge() async {
+        await lifetime.end()
+        await repository.purgeCache()
+        await media.purge()
+    }
+}
+
+@MainActor
+@Observable
+final class ClientDeliveryAccessState {
+    private(set) var sessionEnded = false
+
+    func end() {
+        sessionEnded = true
+    }
 }

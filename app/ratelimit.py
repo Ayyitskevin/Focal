@@ -1,11 +1,13 @@
 """In-memory per-IP sliding-window rate limiter (single uvicorn worker).
 
-Guards abuse-prone routes (downloads/ZIP builds, public form POSTs, admin) WITHOUT
-touching the thumbnail grid — a gallery legitimately bursts dozens of /media/
-requests on load, so those are exempt. Logged-in admins are exempt so deploys and
-post-deploy testing never trip it. State is in-process: it resets on restart, which
-is fine for rate limiting and avoids a DB write on every request (which would itself
-be a DoS amplifier). Single worker means one shared view of the window.
+Guards abuse-prone routes (downloads/ZIP builds, public form POSTs, admin) while
+giving the authenticated native thumbnail/video surface a dedicated high-capacity
+bucket. Browser static media remains exempt because it does not run the bearer,
+database, and path-resolution work of the native route. Logged-in admins are
+exempt so deploys and post-deploy testing never trip it. State is in-process: it
+resets on restart, which is fine for rate limiting and avoids a DB write on every
+request (which would itself be a DoS amplifier). Single worker means one shared
+view of the window.
 """
 
 import logging
@@ -38,6 +40,15 @@ def _bucket_for(path: str, method: str = "GET") -> str | None:
         "/api/v1/client-auth/"
     ):
         return "api_auth"
+    mobile_gallery_media = "/api/v1/client/gallery/assets/"
+    if method == "GET" and path.startswith(mobile_gallery_media):
+        variant = path.rsplit("/", 1)[-1]
+        if variant in {"thumbnail", "preview", "poster"}:
+            # Native grids and Range-capable video previews legitimately burst,
+            # but each request still validates bearer state and resolves a file.
+            return "api_media"
+        if variant == "download":
+            return "download"
     if path == "/api/v1" or path.startswith("/api/v1/"):
         return "api"
     if "/download" in path:

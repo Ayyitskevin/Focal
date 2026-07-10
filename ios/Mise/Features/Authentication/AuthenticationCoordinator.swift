@@ -47,6 +47,7 @@ final class AuthenticationCoordinator {
     private let installationIdentity: InstallationIdentity
     private var activeWorkspace: WorkspaceEnvironment?
     private(set) var ownerRepository: OwnerRepository?
+    private(set) var clientDeliveryEnvironment: ClientDeliveryEnvironment?
     private var unlockOnActivation = false
     private var applicationIsActive = true
     private var hasRestored = false
@@ -82,22 +83,78 @@ final class AuthenticationCoordinator {
         }
 
         let workspace = environment.workspace(at: origin)
+        var savedSession: AuthSession?
         do {
-            guard let session = try await workspace.session.sessionSnapshot() else {
+            guard let storedSession = try await workspace.session.sessionSnapshot() else {
                 originStore.clear()
                 phase = .signedOut
                 return
             }
+            savedSession = storedSession
+            // Do not publish protected disk snapshots until the stored access
+            // token is locally usable (or has refreshed successfully). This
+            // keeps an already-expired Keychain session behind the loading gate.
+            let session: AuthSession
+            do {
+                guard try await workspace.session.bearerToken() != nil,
+                      let refreshed = try await workspace.session.sessionSnapshot()
+                else {
+                    throw SessionError.expired
+                }
+                session = refreshed
+            } catch {
+                guard Self.isRecoverableRestoreFailure(error),
+                      storedSession.refreshTokenIsUsable(at: Date())
+                else {
+                    throw error
+                }
+                // A still-refreshable offline session may render its protected
+                // capability cache. The first remote load will keep the same
+                // snapshot and surface its ordinary offline state.
+                session = storedSession
+            }
             activeWorkspace = workspace
-            configureOwnerRepository(for: session.context, workspace: workspace)
+            configureRepositories(for: session.context, workspace: workspace)
             await enterRestoredSession(session.context)
+        } catch is CancellationError {
+            // View/task cancellation is not a credential failure. Keep Keychain
+            // and protected data intact so a later root task can retry restore.
+            hasRestored = false
         } catch {
+            if Task.isCancelled {
+                // Some URL loading paths surface cancellation as a transport
+                // error rather than CancellationError.
+                hasRestored = false
+                return
+            }
+            if let savedSession {
+                await purgeStoredSessionData(savedSession, workspace: workspace)
+            }
             await workspace.session.invalidate()
             ownerRepository = nil
+            clientDeliveryEnvironment = nil
             originStore.clear()
             errorMessage = "Your saved session could not be restored. Sign in again."
             phase = .signedOut
         }
+    }
+
+    private func purgeStoredSessionData(
+        _ session: AuthSession,
+        workspace: WorkspaceEnvironment
+    ) async {
+        if session.principal.kind == .studioOwner {
+            try? await TenantJSONCache(
+                cacheNamespace: session.workspace.cacheNamespace
+            ).removeAll()
+            return
+        }
+        let clientData = workspace.clientDelivery(
+            workspaceCacheNamespace: session.workspace.cacheNamespace,
+            principalID: session.principal.id,
+            sessionID: session.sessionID
+        )
+        await clientData.purge()
     }
 
     func discoverWorkspace() async {
@@ -131,6 +188,7 @@ final class AuthenticationCoordinator {
         errorMessage = nil
         activeWorkspace = nil
         ownerRepository = nil
+        clientDeliveryEnvironment = nil
         flow.showClientLink()
     }
 
@@ -141,6 +199,7 @@ final class AuthenticationCoordinator {
         errorMessage = nil
         activeWorkspace = nil
         ownerRepository = nil
+        clientDeliveryEnvironment = nil
         flow.reset()
     }
 
@@ -271,6 +330,9 @@ final class AuthenticationCoordinator {
         if let ownerRepository {
             await ownerRepository.purgeCache()
         }
+        if let clientDeliveryEnvironment {
+            await clientDeliveryEnvironment.purge()
+        }
 
         if let activeWorkspace {
             do {
@@ -284,6 +346,7 @@ final class AuthenticationCoordinator {
         originStore.clear()
         self.activeWorkspace = nil
         ownerRepository = nil
+        clientDeliveryEnvironment = nil
         clearCredentialInputs(keepingSharedAccessInput: false)
         workspaceInput = ""
         flow.reset()
@@ -350,6 +413,16 @@ final class AuthenticationCoordinator {
         }
     }
 
+    private static func isRecoverableRestoreFailure(_ error: Error) -> Bool {
+        guard let apiError = error as? APIError else { return false }
+        switch apiError {
+        case .transport, .rateLimited, .server:
+            return true
+        default:
+            return false
+        }
+    }
+
     private static func isValidPIN(_ value: String) -> Bool {
         let bytes = Array(value.utf8)
         return bytes.count == 4 && bytes.allSatisfy { byte in
@@ -391,7 +464,7 @@ final class AuthenticationCoordinator {
         workspace: WorkspaceEnvironment
     ) {
         activeWorkspace = workspace
-        configureOwnerRepository(for: session.context, workspace: workspace)
+        configureRepositories(for: session.context, workspace: workspace)
         originStore.save(workspace.origin)
         clearCredentialInputs(keepingSharedAccessInput: false)
         if applicationIsActive {
@@ -407,21 +480,58 @@ final class AuthenticationCoordinator {
         }
     }
 
-    private func configureOwnerRepository(
+    private func configureRepositories(
         for context: CurrentSession,
         workspace: WorkspaceEnvironment
     ) {
-        guard
-            context.principal.kind == .studioOwner,
-            context.principal.allows("studio:read")
-        else {
+        if context.principal.kind == .studioOwner,
+           context.principal.allows("studio:read")
+        {
+            ownerRepository = OwnerRepository(
+                client: workspace.apiClient,
+                cache: TenantJSONCache(cacheNamespace: context.workspace.cacheNamespace)
+            )
+        } else {
             ownerRepository = nil
-            return
         }
-        ownerRepository = OwnerRepository(
-            client: workspace.apiClient,
-            cache: TenantJSONCache(cacheNamespace: context.workspace.cacheNamespace)
-        )
+
+        let kind = context.principal.kind
+        if kind == .galleryGuest || kind == .portalGuest || kind == .workspaceGuest
+            || kind == .documentGuest,
+           Self.hasClientReadScope(context.principal)
+        {
+            clientDeliveryEnvironment = workspace.clientDelivery(
+                workspaceCacheNamespace: context.workspace.cacheNamespace,
+                principalID: context.principal.id,
+                sessionID: context.sessionID
+            )
+        } else {
+            clientDeliveryEnvironment = nil
+        }
+    }
+
+    private static func hasClientReadScope(_ principal: Principal) -> Bool {
+        let identity = principal.id.split(separator: ":", omittingEmptySubsequences: false)
+        let prefix: String
+        let expectedReadScope: String
+        switch principal.kind {
+        case .galleryGuest where identity.count == 2 && identity[0] == "gallery_guest":
+            prefix = "gallery:"
+            expectedReadScope = "gallery:\(identity[1]):read"
+        case .portalGuest where identity.count == 2 && identity[0] == "portal_guest":
+            prefix = "portal:"
+            expectedReadScope = "portal:\(identity[1]):read"
+        case .workspaceGuest where identity.count == 2 && identity[0] == "workspace_guest":
+            prefix = "workspace:"
+            expectedReadScope = "workspace:\(identity[1]):read"
+        case .documentGuest where identity.count == 3 && identity[0] == "document_guest":
+            prefix = "document:"
+            expectedReadScope = "document:\(identity[1]):\(identity[2]):read"
+        default: return false
+        }
+        return !principal.scopes.isEmpty
+            && principal.scopes.allSatisfy { $0.hasPrefix(prefix) }
+            && principal.scopes.contains(expectedReadScope)
     }
 
     private func enterRestoredSession(_ context: CurrentSession) async {

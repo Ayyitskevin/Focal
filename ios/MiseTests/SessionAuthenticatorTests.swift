@@ -96,7 +96,8 @@ final class SessionAuthenticatorTests: XCTestCase {
                 displayName: "Studio",
                 email: nil,
                 scopes: ["studio:read"]
-            )
+            ),
+            sessionID: "session-1"
         )
     }
 }

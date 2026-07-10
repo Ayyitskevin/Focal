@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from fastapi import Request
 
 from . import config, db, security, urls
+from .admin import studio as admin_studio
 
 ACCESS_TTL = dt.timedelta(minutes=15)
 REFRESH_TTL = dt.timedelta(days=30)
@@ -50,6 +51,12 @@ _DEVICE_NAME_MAX = 120
 _DEVICE_PLATFORM_MAX = 32
 _DEVICE_APP_VERSION_MAX = 64
 _TOKEN_BYTES = 32
+
+
+def _studio_today() -> dt.date:
+    """Use Mise's canonical studio-day boundary for gallery expiry."""
+
+    return admin_studio._today()
 
 
 class MobileAuthError(Exception):
@@ -433,7 +440,7 @@ def issue_gallery_session(
     gallery = db.one("SELECT * FROM galleries WHERE slug=?", ((slug or "").strip(),))
     if not gallery or not gallery["published"]:
         raise MobileAuthError(404, "gallery.not_found", "Gallery not found.")
-    if gallery["expires_at"] and gallery["expires_at"] < _now().date().isoformat():
+    if gallery["expires_at"] and gallery["expires_at"] < _studio_today().isoformat():
         raise MobileAuthError(410, "gallery.expired", "The gallery has expired.")
     link_only_drop = gallery["type"] == "drop" and not gallery["require_pin"]
     if not link_only_drop:
@@ -593,7 +600,7 @@ def _current_credential_source(con: sqlite3.Connection, row: sqlite3.Row) -> str
         ).fetchone()
         if not resource or not resource["published"]:
             return None
-        if resource["expires_at"] and resource["expires_at"] < _now().date().isoformat():
+        if resource["expires_at"] and resource["expires_at"] < _studio_today().isoformat():
             return None
         return resource["pin"] or ""
 

@@ -1,6 +1,6 @@
 import Foundation
 
-enum HTTPMethod: String, Sendable {
+enum HTTPMethod: String, Equatable, Sendable {
     case get = "GET"
     case post = "POST"
     case put = "PUT"

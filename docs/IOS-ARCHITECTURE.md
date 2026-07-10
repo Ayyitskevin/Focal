@@ -1,6 +1,6 @@
 # Mise for iOS — architecture and delivery plan
 
-Status: Milestones 1–2 implemented; client delivery next
+Status: Milestones 1–3 implemented; safe mutations next
 Minimum OS: iOS 17 / iPadOS 17
 UI: SwiftUI
 State: Observation-based MVVM with async/await
@@ -272,17 +272,25 @@ of reusing the current bearer token.
 - gallery/portal/workspace/document capability exchanges
 - app session state, workspace setup, biometric app lock
 
-### Milestone 2 — owner read-only companion (implemented in this PR)
+### Milestone 2 — owner read-only companion (complete)
 
 - dashboard, projects, clients, gallery manifests, calendar agenda
 - cache-first repositories and stale-state UI
 - iPhone/iPad navigation, dark mode, accessibility baseline
 
-### Milestone 3 — client delivery
+### Milestone 3 — client delivery (implemented in this PR)
 
-- gallery grid/lightbox, favorites, video comments, background downloads
-- portal/workspace and document summaries
-- web fallback for legal signing and Stripe checkout
+- capability-bound gallery grid/lightbox, favorites, threaded video comments,
+  and protected foreground downloads
+- authenticated thumbnail, preview, poster, original, conditional, and Range
+  delivery without bearer credentials in URLs
+- portal/workspace and document summaries with capability-specific offline caches
+- same-origin web fallback for legal signing and Stripe checkout
+
+Durable background media transfer remains deferred. A background task cannot
+safely recover an expired rotating bearer session without an application-owned
+reauthorization design; the implemented transfer is cancellable, foreground,
+file-protected, and explicitly initiated by the client.
 
 ### Milestone 4 — safe mutations
 
@@ -298,7 +306,7 @@ of reusing the current bearer token.
 
 ## 11. Product decisions still open
 
-These do not block the implemented foundation and owner companion:
+These do not block the implemented foundation, owner companion, or client delivery:
 
 1. Production root domain, bundle ID, Apple team ID, and final app/display name.
 2. Whether owner login remains password-only or adds owner email as an identifier.

@@ -3,8 +3,10 @@
 This document is the contract targeted by the native app. Milestone 1 implements
 tenant discovery, every authentication/capability route below, session management,
 and the scoped OpenAPI document. Milestone 2 adds the owner dashboard, client and
-project collections, gallery manifests, event types, and booking agenda. The
-remaining reads and commands stay in the planned Milestones 3–4 contract.
+project collections, gallery manifests, event types, and booking agenda. Milestone 3
+adds capability-bound gallery delivery plus portal, workspace, and document reads.
+The remaining owner detail reads and commands stay in the planned Milestone 4
+contract.
 
 ## Conventions
 
@@ -131,6 +133,32 @@ Each shared-access response uses an exact principal kind and narrow scope. A por
 exchange must not unlock its galleries; a workspace exchange must not become a
 client-wide session.
 
+## Client delivery reads
+
+Client delivery routes derive their resource exclusively from the bearer principal.
+They accept no gallery, portal, project, document, tenant, or slug identifier as
+authority:
+
+| Method/path | Exact principal | Response |
+| --- | --- | --- |
+| `GET /api/v1/client/gallery` | `gallery_guest` | guest-safe `GalleryDetail` |
+| `GET /api/v1/client/gallery/assets/{assetId}/thumbnail` | `gallery_guest` read | JPEG thumbnail |
+| `GET /api/v1/client/gallery/assets/{assetId}/preview` | `gallery_guest` read | JPEG or Range-capable MP4 |
+| `GET /api/v1/client/gallery/assets/{assetId}/poster` | `gallery_guest` read | video poster JPEG |
+| `GET /api/v1/client/gallery/assets/{assetId}/download` | `gallery_guest` download | original attachment |
+| `GET /api/v1/client/portal` | `portal_guest` | gallery/brand/usage-rights metadata |
+| `GET /api/v1/client/workspace` | `workspace_guest` | non-draft child resource cards |
+| `GET /api/v1/client/document` | exact `document_guest` variant | proposal, contract, or invoice summary |
+
+Portal gallery cards deliberately contain no action URL or media link: portal
+authority is non-transitive. Workspace cards contain only the same fixed child
+links exposed by the existing browser workspace. Document reads never mark a
+document viewed and never accept, sign, or charge; they return a same-origin HTTPS
+fallback for the existing server-owned action page. Invoice totals, payments, and
+balance are assembled from authoritative integer-cent rows without exposing Stripe
+identifiers. Contract bodies are bounded and integrity-checked before the native
+summary advertises an available action.
+
 ## Initial read endpoints
 
 | Method/path | Response |
@@ -162,9 +190,10 @@ authorization; authorization is reevaluated on every page.
 
 | Method/path | Semantics |
 | --- | --- |
-| `PUT /api/v1/galleries/{g}/assets/{a}/favorite` | idempotently select |
-| `DELETE /api/v1/galleries/{g}/assets/{a}/favorite` | idempotently unselect |
-| `POST /api/v1/galleries/{g}/assets/{a}/comments` | add video comment/reply |
+| `PUT /api/v1/client/gallery/assets/{a}/favorite` | idempotently select for the bound visitor |
+| `DELETE /api/v1/client/gallery/assets/{a}/favorite` | idempotently unselect for the bound visitor |
+| `GET /api/v1/client/gallery/assets/{a}/comments` | bounded visible video comment thread |
+| `POST /api/v1/client/gallery/assets/{a}/comments` | add a timecoded video comment/reply |
 | `POST /api/v1/proposals/{id}/accept` | server-authoritative transition |
 | `POST /api/v1/proposals/{id}/decline` | server-authoritative transition |
 | `POST /api/v1/contracts/{id}/sign` | hash/version checked signature evidence |
@@ -232,10 +261,10 @@ authorized media variants under `links`. This is the canonical wire shape:
           "is_favorite": true,
           "favorite_count": 7,
           "links": {
-            "thumbnail_url": "https://studio.example.com/api/v1/media/galleries/17/assets/201/thumbnail",
-            "preview_url": "https://studio.example.com/api/v1/media/galleries/17/assets/201/preview",
+            "thumbnail_url": "https://studio.example.com/api/v1/client/gallery/assets/201/thumbnail",
+            "preview_url": "https://studio.example.com/api/v1/client/gallery/assets/201/preview",
             "poster_url": null,
-            "download_url": "https://studio.example.com/api/v1/media/galleries/17/assets/201/download"
+            "download_url": "https://studio.example.com/api/v1/client/gallery/assets/201/download"
           },
           "alt_text": "A couple during their ceremony",
           "keywords": ["ceremony", "couple"],
@@ -253,9 +282,12 @@ must enforce bearer scope, gallery publication/expiry, asset parentage/readiness
 and the cull delivery gate. Support Range requests for video and conditional/private
 caching. Do not put bearer credentials in signed URL query parameters.
 
-Milestone 2 deliberately emits `null` for every media link. Authenticated thumbnail,
-preview, video, and download routes arrive with the client-delivery slice rather
-than exposing the existing browser/file boundary to the native app.
+The owner `GET /galleries/{id}` manifest deliberately continues to emit `null`
+for every media link. The capability-bound `GET /client/gallery` manifest emits
+only variants that physically exist beneath the tenant media root. Each media
+request rechecks the exact bearer resource, visitor binding, gallery publication
+and expiry, ready status, asset parent, section parent, cull gate, and requested
+download scope. Missing or unsafe files fail closed.
 
 ## Offline/cache metadata
 
@@ -264,7 +296,8 @@ Successful detail/collection responses should include:
 - `ETag` derived from a representation revision
 - `Last-Modified` where meaningful
 - `Cache-Control: private, no-cache` for manifests (store allowed, revalidate)
-- `Cache-Control: private, max-age=...` plus ETag for immutable media variants
+- `Cache-Control: private, max-age=86400` plus ETag for derivative media variants
+- `Cache-Control: private, no-cache` for original downloads
 
 A 304 contains no body. Destructive changes need tombstones or a server sync feed
 before `updated_since` can safely replace full collection reconciliation.

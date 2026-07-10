@@ -48,6 +48,7 @@ struct Principal: Codable, Hashable, Sendable {
 struct CurrentSession: Codable, Hashable, Sendable {
     let workspace: WorkspaceContext
     let principal: Principal
+    let sessionID: String?
 }
 
 struct AuthSession: Codable, Hashable, Sendable {
@@ -58,9 +59,10 @@ struct AuthSession: Codable, Hashable, Sendable {
     let refreshTokenExpiresAt: Date?
     let workspace: WorkspaceContext
     let principal: Principal
+    let sessionID: String?
 
     var context: CurrentSession {
-        CurrentSession(workspace: workspace, principal: principal)
+        CurrentSession(workspace: workspace, principal: principal, sessionID: sessionID)
     }
 
     func accessTokenIsUsable(at date: Date, leeway: TimeInterval = 60) -> Bool {
