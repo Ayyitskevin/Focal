@@ -278,7 +278,7 @@ of reusing the current bearer token.
 - cache-first repositories and stale-state UI
 - iPhone/iPad navigation, dark mode, accessibility baseline
 
-### Milestone 3 — client delivery (implemented in this PR)
+### Milestone 3 — client delivery (complete)
 
 - capability-bound gallery grid/lightbox, favorites, threaded video comments,
   and protected foreground downloads

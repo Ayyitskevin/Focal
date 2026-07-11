@@ -6,7 +6,8 @@ and the scoped OpenAPI document. Milestone 2 adds the owner dashboard, client an
 project collections, gallery manifests, event types, and booking agenda. Milestone 3
 adds capability-bound gallery delivery plus portal, workspace, and document reads.
 Milestone 4A adds owner client/project details and bounded client, project, and task
-commands. Policy-sensitive booking, proposal, money, and legal commands remain
+commands. Milestone 4B adds owner booking management and exact-capability proposal
+decisions. Client booking creation, money commands, and native legal signing remain
 planned.
 
 ## Conventions
@@ -230,14 +231,10 @@ job queue in the same transaction, leased by workers, retried after transient
 failure, and recovered after restart. Client booking creation is intentionally not
 part of this slice because no dedicated mobile booking/anti-abuse credential exists.
 
-## Command roadmap
+## Remaining command roadmap
 
 | Method/path | Semantics |
 | --- | --- |
-| `PUT /api/v1/client/gallery/assets/{a}/favorite` | idempotently select for the bound visitor |
-| `DELETE /api/v1/client/gallery/assets/{a}/favorite` | idempotently unselect for the bound visitor |
-| `GET /api/v1/client/gallery/assets/{a}/comments` | bounded visible video comment thread |
-| `POST /api/v1/client/gallery/assets/{a}/comments` | add a timecoded video comment/reply |
 | `POST /api/v1/contracts/{id}/sign` | hash/version checked signature evidence |
 | `POST /api/v1/invoices/{id}/checkout` | return server-created hosted checkout URL |
 | `POST /api/v1/bookings` | atomically revalidate slot and create booking |

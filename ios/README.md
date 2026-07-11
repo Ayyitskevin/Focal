@@ -52,13 +52,13 @@ and avoiding it in the foundation keeps auth/session behavior auditable.
   Every command uses a session-bound idempotency key; updates and deletes require
   an `ETag`/`If-Match` version. Cached reads remain available offline, while writes
   require the network and preserve form input when the server reports a conflict.
-  Booking, proposal, money, and legal mutations remain deferred.
-- Gallery media uses the active session's single rotating authenticator. Server
+  Money and native legal mutations remain deferred.
 - Milestone 4B adds owner booking cancellation/rescheduling and exact-capability
   client proposal decisions. These commands use strong versions and stable retry
   keys; notification/workflow effects are persisted to the tenant job queue.
   Booking creation remains on the public scheduler until a dedicated mobile
   booking credential can preserve its anti-abuse controls.
+- Gallery media uses the active session's single rotating authenticator. Server
   media URLs are accepted only when their origin and exact capability path match
   the active workspace; redirects are rejected and bearer tokens never enter URLs.
 - Do not add access tokens, refresh tokens, PINs, Stripe secrets, or APNs keys to
