@@ -6,12 +6,13 @@ extension OwnerRepository {
     }
 
     func cachedCullPage(galleryID: Int64) async throws -> ResourceSnapshot<CullPage>? {
-        guard let record = try await cache.read(
+        let ticket = try await cacheLifetimeTicket()
+        let record = try await cache.read(
             cullCacheKey(galleryID: galleryID),
             as: CullPage.self
-        ) else {
-            return nil
-        }
+        )
+        try await requireActiveCacheLifetime(ticket)
+        guard let record else { return nil }
         try Self.validateCullPage(record.value, galleryID: galleryID)
         return ResourceSnapshot(
             value: record.value,
@@ -21,8 +22,10 @@ extension OwnerRepository {
     }
 
     func refreshCullPage(galleryID: Int64) async throws -> ResourceSnapshot<CullPage> {
+        let ticket = try await cacheLifetimeTicket()
         let key = cullCacheKey(galleryID: galleryID)
         let cached = try await cache.read(key, as: CullPage.self)
+        try await requireActiveCacheLifetime(ticket)
         do {
             let response = try await sendWithMetadata(
                 MiseEndpoints.Galleries.cull(
@@ -31,6 +34,7 @@ extension OwnerRepository {
                     etag: cached?.etag
                 )
             )
+            try await requireActiveCacheLifetime(ticket)
             try Self.validateCullPage(response.value, galleryID: galleryID)
             let record = try await cache.write(
                 response.value,
@@ -38,12 +42,14 @@ extension OwnerRepository {
                 etag: response.metadata.etag,
                 storedAt: response.metadata.receivedAt
             )
+            try await requireActiveCacheLifetime(ticket)
             return ResourceSnapshot(
                 value: record.value,
                 storedAt: record.storedAt,
                 source: .network
             )
         } catch let APIError.notModified(responseETag) {
+            try await requireActiveCacheLifetime(ticket)
             guard cached != nil,
                   let touched = try await cache.touch(
                       key,
@@ -54,6 +60,7 @@ extension OwnerRepository {
                 throw OwnerRepositoryError.missingConditionalValue
             }
             try Self.validateCullPage(touched.value, galleryID: galleryID)
+            try await requireActiveCacheLifetime(ticket)
             return ResourceSnapshot(
                 value: touched.value,
                 storedAt: touched.storedAt,
@@ -67,6 +74,7 @@ extension OwnerRepository {
         cursor: String
     ) async throws -> CullPage {
         guard !cursor.isEmpty else { throw OwnerRepositoryError.invalidPagination }
+        let ticket = try await cacheLifetimeTicket()
         let page = try await sendWithMetadata(
             MiseEndpoints.Galleries.cull(
                 galleryID: galleryID,
@@ -74,6 +82,7 @@ extension OwnerRepository {
                 limit: 50
             )
         ).value
+        try await requireActiveCacheLifetime(ticket)
         try Self.validateCullPage(page, galleryID: galleryID)
         return page
     }
@@ -84,6 +93,7 @@ extension OwnerRepository {
         action: CullAction,
         idempotencyKey: UUID
     ) async throws -> CullItem {
+        let ticket = try await cacheLifetimeTicket()
         guard item.galleryID == galleryID else {
             throw APIError.unexpectedResponse
         }
@@ -97,6 +107,7 @@ extension OwnerRepository {
                 idempotencyKey: idempotencyKey
             )
         )
+        try await requireActiveCacheLifetime(ticket)
         let updated = response.value
         try Self.validateCullItem(updated, galleryID: galleryID)
         let expectedState: CullState?

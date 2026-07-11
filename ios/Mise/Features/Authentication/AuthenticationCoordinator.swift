@@ -519,7 +519,8 @@ final class AuthenticationCoordinator {
             ownerMediaEnvironment = ownerMedia
             ownerRepository = OwnerRepository(
                 client: workspace.apiClient,
-                cache: TenantJSONCache(cacheNamespace: context.workspace.cacheNamespace),
+                cache: ownerMedia.cache,
+                lifetime: ownerMedia.lifetime,
                 onSessionEnded: {
                     await ownerMedia.purge()
                 }

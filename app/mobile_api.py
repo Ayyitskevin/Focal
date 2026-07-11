@@ -20,6 +20,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from . import (
     alerts,
     config,
+    mobile_ai_runs_api,
     mobile_auth,
     mobile_client_delivery_api,
     mobile_cull_api,
@@ -566,6 +567,7 @@ def revoke_session(request: Request, session_id: str) -> Response:
 # validation problems, and unexpected errors still pass through this mounted
 # application's single JSON/problem boundary.
 app.include_router(mobile_devices_api.router)
+app.include_router(mobile_ai_runs_api.router)
 app.include_router(mobile_owner_api.router)
 app.include_router(mobile_gallery_calendar_api.router)
 app.include_router(mobile_client_delivery_api.router)

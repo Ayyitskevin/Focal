@@ -105,12 +105,13 @@ struct WorkspaceEnvironment: Sendable {
             routeProfile: .ownerCull,
             lifetime: lifetime,
             onSessionEnded: {
-                try? await cache.removeAll()
+                try? await cache.endAccessAndRemoveAll()
                 await accessState.end()
             }
         )
         return OwnerMediaEnvironment(
             media: media,
+            cache: cache,
             accessState: accessState,
             lifetime: lifetime
         )
@@ -167,10 +168,12 @@ struct WorkspaceEnvironment: Sendable {
 
 struct OwnerMediaEnvironment: Sendable {
     let media: AuthenticatedMediaClient
+    let cache: TenantJSONCache
     let accessState: OwnerMediaAccessState
     let lifetime: ClientDeliveryLifetime
 
     func purge() async {
+        try? await cache.endAccessAndRemoveAll()
         await lifetime.end()
         await media.purge()
         await accessState.end()

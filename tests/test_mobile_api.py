@@ -123,6 +123,7 @@ def test_tenant_discovery_and_openapi_are_scoped_native_contracts(mobile_client)
         "/galleries/{gallery_id}/cull/assets/{asset_id}/thumbnail",
         "/galleries/{gallery_id}/cull/assets/{asset_id}/preview",
         "/galleries/{gallery_id}/assets/{asset_id}/cull",
+        "/ai/runs",
         "/event-types",
         "/bookings",
         "/bookings/{booking_id}",
@@ -167,6 +168,72 @@ def test_tenant_discovery_and_openapi_are_scoped_native_contracts(mobile_client)
         retry["content"]["application/problem+json"]["schema"]["$ref"]
         == "#/components/schemas/APIProblem"
     )
+    activity = schema["paths"]["/ai/runs"]["get"]
+    activity_headers = {
+        parameter["name"]: parameter
+        for parameter in activity["parameters"]
+        if parameter["in"] == "header"
+    }
+    assert set(activity_headers) == {"Authorization", "If-None-Match"}
+    assert activity_headers["Authorization"]["required"] is True
+    assert activity_headers["If-None-Match"]["required"] is False
+    activity_query = {
+        parameter["name"]: parameter
+        for parameter in activity["parameters"]
+        if parameter["in"] == "query"
+    }
+    assert set(activity_query) == {"cursor", "limit"}
+    cursor_string = next(
+        option
+        for option in activity_query["cursor"]["schema"]["anyOf"]
+        if option["type"] == "string"
+    )
+    assert cursor_string["maxLength"] == 1024
+    assert activity_query["limit"]["schema"]["minimum"] == 1
+    assert activity_query["limit"]["schema"]["maximum"] == 100
+    assert {"200", "304", "401", "403", "422", "429", "500"} <= set(activity["responses"])
+    assert (
+        activity["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
+        == "#/components/schemas/AIRunPage"
+    )
+    for status in ("401", "403", "422", "429", "500"):
+        assert (
+            activity["responses"][status]["content"]["application/problem+json"]["schema"]["$ref"]
+            == "#/components/schemas/APIProblem"
+        )
+    for status in ("200", "304"):
+        response_headers = activity["responses"][status]["headers"]
+        assert set(response_headers) == {"Cache-Control", "ETag", "Vary"}
+        assert response_headers["Cache-Control"]["schema"]["const"] == "private, no-cache"
+        assert response_headers["Vary"]["schema"]["const"] == "Authorization"
+    assert activity["responses"]["429"]["headers"]["Retry-After"]["schema"] == {
+        "type": "integer",
+        "minimum": 0,
+    }
+    activity_item = schema["components"]["schemas"]["AIRunItem"]
+    assert set(activity_item["properties"]) == {
+        "id",
+        "capability",
+        "provider",
+        "status",
+        "review",
+        "latency_ms",
+        "cost_micro_usd",
+        "tokens",
+        "subject",
+        "created_at",
+    }
+    assert set(activity_item["properties"]["provider"]["enum"]) == {
+        "argus",
+        "qwen",
+        "odysseus",
+        "dionysus",
+        "aphrodite",
+        "other",
+    }
+    assert set(schema["components"]["schemas"]["AIActivitySubject"]["properties"]) == {
+        "kind",
+    }
 
 
 def test_owner_login_me_device_list_refresh_replay_and_logout(mobile_client):

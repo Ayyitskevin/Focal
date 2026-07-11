@@ -42,6 +42,7 @@ struct HomeView: View {
                         QuickLink(title: "Projects", icon: "briefcase", destination: .projects, action: navigate)
                         QuickLink(title: "Galleries", icon: "photo.on.rectangle", destination: .galleries, action: navigate)
                         QuickLink(title: "Calendar", icon: "calendar", destination: .calendar, action: navigate)
+                        QuickLink(title: "AI activity", icon: "sparkles", destination: .ai, action: navigate)
                     }
                 }
 

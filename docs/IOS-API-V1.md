@@ -10,7 +10,8 @@ commands. Milestone 4B adds owner booking management and exact-capability propos
 decisions. Client booking creation, money commands, and native legal signing remain
 planned. Milestone 5A adds the owner-only APNs device and notification contract.
 Milestone 5B.1 adds the flag-gated native owner cull review, protected derivatives,
-and reversible keep/cut/restore command.
+and reversible keep/cut/restore command. Milestone 5B.2 adds a privacy-bounded,
+read-only owner AI activity ledger.
 
 ## Conventions
 
@@ -276,11 +277,75 @@ summary advertises an available action.
 | `GET /api/v1/galleries/{id}/cull` | implemented owner cull review page (`CullPage`) |
 
 Owner endpoints in this table require the exact `studio_owner` principal with
-`studio:read`. Native cull review is implemented in Milestone 5B.1. The general
-AI-run ledger remains reserved contract surface; it is not part of the cull slice.
+`studio:read`. Native cull review is implemented in Milestone 5B.1 and the AI-run
+ledger read is implemented in Milestone 5B.2.
 
 Collections default to 25 and cap at 100. Cursors carry ordering state but no
 authorization; authorization is reevaluated on every page.
+
+### Native owner AI activity (Milestone 5B.2)
+
+`GET /api/v1/ai/runs?limit=25&cursor=...` is an owner-only, read-only projection
+over the append-only AI provenance ledger. The request host selects the tenant
+database; no tenant, subject, provider, or principal selector is accepted. Results
+are ordered by run ID descending and use an opaque, signed cursor bound to the
+authenticated tenant. The limit defaults to 25 and is constrained to 1–100.
+Only `cursor` and `limit` are allowed, at most once each; unknown or duplicate
+query parameters fail with `422 request.validation_failed` instead of being ignored.
+
+The route deliberately has no detail endpoint, server filter, or command. The app
+loads at most five 100-item pages and filters that latest-500 window locally. It
+never polls, queues an offline AI command, or treats a successful run as approval.
+
+    {
+      "items": [
+        {
+          "id": 82,
+          "capability": "vision",
+          "provider": "argus",
+          "status": "ok",
+          "review": "human_review",
+          "latency_ms": 1842,
+          "cost_micro_usd": 2400,
+          "tokens": 1180,
+          "subject": {
+            "kind": "gallery"
+          },
+          "created_at": "2026-07-11T14:30:00Z"
+        }
+      ],
+      "next_cursor": null,
+      "has_more": false
+    }
+
+`cost_micro_usd` is a non-negative integer count of one-millionth US dollars; a
+missing provider report remains `null`, never zero. Invalid or negative metrics are
+omitted. Unknown stored capabilities, statuses, and review classes map to `other`
+or `unknown`. Provider is a closed normalized family (`argus`, `qwen`, `odysseus`,
+`dionysus`, `aphrodite`, or `other`); arbitrary stored provider text and the raw
+model column are never exposed. A subject contains only a closed generic kind
+(`gallery`, `caption`, or `other`); the app supplies the localized label.
+Tenant-local subject resource IDs, client-related titles, and mutable gallery data
+are not exposed. Keeping the projection entirely append-only also lets the
+first-page validator safely revalidate the bounded native feed. Unrecognized stored
+subjects map to `other`.
+
+The response never includes raw `error`, `model`, `correlation_id`,
+`idempotency_key`, raw subject columns, prompts, generated output, captions,
+validation notes, filenames, paths, provider run/job IDs, review URLs, endpoints,
+payload fragments, or secrets.
+Raw provider failures can contain upstream bodies, filesystem paths, or personal
+data; truncation is not redaction. The normalized `status` is the entire failure
+signal on this boundary.
+
+Every `200` response uses `Cache-Control: private, no-cache`,
+`Vary: Authorization`, and a strong representation `ETag`. `If-None-Match` can
+return `304` with the same private headers. Authentication and tenant binding are
+rechecked on every page. Malformed limits or cursors return the standard `422`
+problem, and a cursor from another tenant is invalid even when both databases have
+overlapping run IDs. The ETag includes a server projection version; changing any
+normalization/redaction rule must bump it so a cached multi-page feed is rebuilt.
+See the [AI activity operations runbook](IOS-AI-ACTIVITY-OPERATIONS.md).
 
 ### Implemented owner commands (Milestone 4A)
 

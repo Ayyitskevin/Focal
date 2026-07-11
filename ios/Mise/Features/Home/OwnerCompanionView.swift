@@ -7,9 +7,20 @@ enum OwnerDestination: String, CaseIterable, Identifiable {
     case galleries
     case calendar
     case tasks
+    case ai
 
     var id: String { rawValue }
-    var title: String { rawValue.prefix(1).uppercased() + String(rawValue.dropFirst()) }
+    var title: String {
+        switch self {
+        case .home: "Home"
+        case .clients: "Clients"
+        case .projects: "Projects"
+        case .galleries: "Galleries"
+        case .calendar: "Calendar"
+        case .tasks: "Tasks"
+        case .ai: "AI activity"
+        }
+    }
 
     var icon: String {
         switch self {
@@ -19,6 +30,7 @@ enum OwnerDestination: String, CaseIterable, Identifiable {
         case .galleries: "photo.on.rectangle"
         case .calendar: "calendar"
         case .tasks: "checklist"
+        case .ai: "sparkles"
         }
     }
 }
@@ -33,12 +45,14 @@ struct OwnerCompanionView: View {
     @State private var galleries: OwnerResourceModel<[GallerySummary]>
     @State private var bookings: OwnerResourceModel<[Booking]>
     @State private var tasks: OwnerResourceModel<[TaskDetail]>
+    @State private var aiActivity: OwnerResourceModel<AIActivityFeed>
     @State private var homePath: [OwnerRoute] = []
     @State private var clientsPath: [OwnerRoute] = []
     @State private var projectsPath: [OwnerRoute] = []
     @State private var galleriesPath: [OwnerRoute] = []
     @State private var calendarPath: [OwnerRoute] = []
     @State private var tasksPath: [OwnerRoute] = []
+    @State private var aiPath: [OwnerRoute] = []
     @State private var showingNotificationSettings = false
 
     let session: CurrentSession
@@ -94,6 +108,11 @@ struct OwnerCompanionView: View {
             staleAfter: 15 * 60,
             cached: { try await repository.cachedTasks() },
             remote: { try await repository.refreshTasks() }
+        ))
+        _aiActivity = State(initialValue: OwnerResourceModel(
+            staleAfter: 5 * 60,
+            cached: { try await repository.cachedAIActivity() },
+            remote: { try await repository.refreshAIActivity() }
         ))
     }
 
@@ -177,6 +196,7 @@ struct OwnerCompanionView: View {
         case .galleries: $galleriesPath
         case .calendar: $calendarPath
         case .tasks: $tasksPath
+        case .ai: $aiPath
         }
     }
 
@@ -252,6 +272,11 @@ struct OwnerCompanionView: View {
             )
         case .tasks:
             TasksView(model: tasks, repository: repository)
+        case .ai:
+            AIActivityView(
+                model: aiActivity,
+                timeZoneIdentifier: session.workspace.timeZone
+            )
         }
     }
 }

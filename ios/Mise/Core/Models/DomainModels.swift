@@ -639,21 +639,90 @@ struct BookingRescheduleRequest: Codable, Hashable, Sendable {
     let timeZone: String
 }
 
+struct AICapability: APIStringValue {
+    let rawValue: String
+    init(rawValue: String) { self.rawValue = rawValue }
+
+    static let vision = Self(rawValue: "vision")
+    static let content = Self(rawValue: "content")
+    static let products = Self(rawValue: "products")
+    static let other = Self(rawValue: "other")
+}
+
+struct AIProvider: APIStringValue {
+    let rawValue: String
+    init(rawValue: String) { self.rawValue = rawValue }
+
+    static let argus = Self(rawValue: "argus")
+    static let qwen = Self(rawValue: "qwen")
+    static let odysseus = Self(rawValue: "odysseus")
+    static let dionysus = Self(rawValue: "dionysus")
+    static let aphrodite = Self(rawValue: "aphrodite")
+    static let other = Self(rawValue: "other")
+}
+
+struct AIRunStatus: APIStringValue {
+    let rawValue: String
+    init(rawValue: String) { self.rawValue = rawValue }
+
+    static let ok = Self(rawValue: "ok")
+    static let disabled = Self(rawValue: "disabled")
+    static let providerError = Self(rawValue: "provider_error")
+    static let invalidResponse = Self(rawValue: "invalid_response")
+    static let unknown = Self(rawValue: "unknown")
+}
+
+struct AIReviewRequirement: APIStringValue {
+    let rawValue: String
+    init(rawValue: String) { self.rawValue = rawValue }
+
+    static let none = Self(rawValue: "none")
+    static let humanReview = Self(rawValue: "human_review")
+    static let explicitCommit = Self(rawValue: "explicit_commit")
+    static let unknown = Self(rawValue: "unknown")
+}
+
+struct AIActivitySubjectKind: APIStringValue {
+    let rawValue: String
+    init(rawValue: String) { self.rawValue = rawValue }
+
+    static let gallery = Self(rawValue: "gallery")
+    static let caption = Self(rawValue: "caption")
+    static let other = Self(rawValue: "other")
+}
+
+struct AIActivitySubject: Codable, Hashable, Sendable {
+    let kind: AIActivitySubjectKind
+
+    var title: String {
+        switch kind {
+        case .gallery: "Gallery"
+        case .caption: "Caption draft"
+        default: "Studio AI task"
+        }
+    }
+}
+
 struct AIRun: Codable, Hashable, Sendable, Identifiable {
     let id: Int64
-    let capability: String
-    let provider: String
-    let status: String
-    let review: String
-    let model: String?
-    let latencyMilliseconds: Int?
-    let costUSD: Decimal?
-    let tokens: Int?
-    let error: String?
-    let subjectType: String?
-    let subjectID: Int64?
-    let correlationID: String?
+    let capability: AICapability
+    let provider: AIProvider
+    let status: AIRunStatus
+    let review: AIReviewRequirement
+    let latencyMs: Int64?
+    let costMicroUSD: Int64?
+    let tokens: Int64?
+    let subject: AIActivitySubject?
     let createdAt: Date
+
+    var needsAttention: Bool {
+        status != .ok || review != .none
+    }
+}
+
+struct AIActivityFeed: Codable, Hashable, Sendable {
+    let runs: [AIRun]
+    let hasOlderRuns: Bool
 }
 
 struct CullItem: Codable, Hashable, Sendable, Identifiable {

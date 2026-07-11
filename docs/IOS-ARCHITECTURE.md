@@ -1,7 +1,8 @@
 # Mise for iOS — architecture and delivery plan
 
-Status: Milestones 1–5A implementation complete; Milestone 5B.1 native cull
-implementation staged; current-Xcode and physical-device release validation pending
+Status: Milestones 1–5A implementation complete; Milestone 5B.1 native cull and
+Milestone 5B.2 native AI activity implementations staged; current-Xcode and
+physical-device release validation pending
 Minimum OS: iOS 17 / iPadOS 17
 UI: SwiftUI
 State: Observation-based MVVM with async/await
@@ -179,7 +180,8 @@ Offline is cache-first for safe reads, deliberately narrow for writes.
 | Contract signatures/payments | never complete offline; server-confirmed only |
 | Booking | draft selection offline, but revalidate and book online atomically |
 | AI commands | online command; cache result/status for later display |
-| Owner cull review | cache the first metadata page; media and decisions require an active online owner session |
+| Owner AI activity | validated latest-500 metadata cache; read-only offline display |
+| Owner cull review | first-page cache; media/decisions require an online owner session |
 
 Every persisted/cache key includes `workspace.cacheNamespace` plus the tenant-local
 entity ID. Logout, session revocation, or workspace change purges private cached
@@ -217,6 +219,35 @@ the opaque `mediaRevision` changes with stored/derivative identity and keys that
 cache without exposing a path. Images are not durable offline downloads. Logout,
 terminal API or media authentication, session revocation, and workspace change end
 the shared owner-media lifetime and purge private owner data.
+
+### Native owner AI activity boundary
+
+Milestone 5B.2 exposes operational provenance without exposing model content or
+provider diagnostics:
+
+- `GET /api/v1/ai/runs` requires the exact owner principal and selects the tenant
+  only from the authenticated host. An HMAC-signed keyset cursor is tenant-bound.
+- The server projects closed status/capability/review/provider vocabularies,
+  non-negative metrics, integer micro-USD, a generic subject class, and a UTC
+  timestamp. It never serializes a database row.
+- Raw errors, correlation/idempotency identifiers, prompts, outputs, paths, provider
+  payloads, remote job identifiers, review URLs, filenames, and credentials are not
+  part of the DTO. Status is the complete failure signal.
+- `OwnerRepository` conditionally revalidates page one, loads no more than five
+  100-item pages, detects repeated cursors and duplicate/out-of-order IDs, and writes
+  the tenant cache only after the whole bounded refresh succeeds. A sixth page is
+  represented only by `hasOlderRuns`.
+- The SwiftUI feed filters the bounded local window by capability and attention
+  state. It can inspect activity but cannot approve, publish, apply, retry, or start
+  an AI operation.
+
+The cache contains only normalized owner operational metadata, but still uses the
+existing protected tenant namespace and terminal-auth purge. Subject resource IDs,
+client-related titles, and other mutable joined data are omitted so an append-only
+first-page validator can safely revalidate the complete bounded feed. There is no
+polling or offline command queue. The read contract intentionally has no detail
+route or server-side filtering in this slice; the smaller surface is sufficient for
+the bounded native feed.
 
 ## 7. Push notifications and deep links
 
@@ -380,14 +411,28 @@ file-protected, and explicitly initiated by the client.
 - remaining acceptance evidence: current-Xcode generation/build/tests, signed archive
   inspection, real-device media/session testing, and internal TestFlight rehearsal
 
+#### Milestone 5B.2 — native owner AI activity (implementation staged)
+
+- exact-owner, host-selected, privacy-projected AI run list with tenant-bound signed
+  cursors, strong ETags, and no diagnostic or generated-content fields
+- cache-first native activity feed, local capability/attention filters, accessible
+  status and review labels, and a hard latest-500 window
+- complete-refresh-only protected cache, first-page conditional revalidation,
+  pagination validation, and an owner-session cache actor shared with protected
+  media that atomically seals against late writes before terminal-auth/logout purge
+- focused backend/Swift contract tests and the
+  [AI activity runbook](IOS-AI-ACTIVITY-OPERATIONS.md)
+- remaining acceptance evidence: current-Xcode generation/build/tests, VoiceOver and
+  accessibility-size inspection, offline/reauth device checks, and TestFlight rehearsal
+
 #### Remaining Milestone 5B and App Store operations
 
-- AI run ledger and content-generation previews/commands remain future slices; AI
-  drafts must stay human-reviewed and must never auto-publish
+- Content-generation previews/commands remain future slices; AI drafts must stay
+  human-reviewed and must never auto-publish
 - privacy-safe telemetry, performance budgets, TestFlight rollout, and App Store
   submission evidence
 
-Milestone 5B.1 does not complete the broader AI roadmap or App Store release. The
+Milestones 5B.1–5B.2 do not complete the broader AI roadmap or App Store release. The
 Milestone 5A physical APNs/TestFlight checks also remain required before submission.
 
 ## 11. Product decisions still open

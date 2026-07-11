@@ -493,12 +493,18 @@ enum MiseEndpoints {
 
     enum AI {
         static func runs(
-            cursor: String? = nil
+            cursor: String? = nil,
+            limit: Int = 100,
+            etag: String? = nil
         ) -> APIEndpoint<APIPage<AIRun>> {
             APIEndpoint(
                 method: .get,
                 path: "/api/v1/ai/runs",
-                queryItems: [APIQueryItem(name: "cursor", value: cursor)]
+                queryItems: [
+                    APIQueryItem(name: "cursor", value: cursor),
+                    APIQueryItem(name: "limit", value: String(min(max(limit, 1), 100))),
+                ],
+                etag: etag
             )
         }
     }

@@ -2,8 +2,10 @@
 
 This runbook is the release and incident checklist for Milestone 5B.1. It covers
 the native owner review deck, protected derivatives, and reversible human
-keep/cut/restore decisions. It does not complete the general AI run ledger,
-content-generation tools, telemetry program, APNs acceptance, or App Store release.
+keep/cut/restore decisions. It does not cover the separate read-only AI activity
+ledger, content-generation tools, the telemetry program, APNs acceptance, or App
+Store release. The AI activity ledger runbook is
+[IOS-AI-ACTIVITY-OPERATIONS.md](IOS-AI-ACTIVITY-OPERATIONS.md).
 
 AI scores are suggestions. A human decision is the only action that changes client
 delivery, and a cut never deletes or rewrites an original.
@@ -227,6 +229,6 @@ and rollback rehearsal. Milestone 5B.1 is not release-complete until current-Xco
 generation/tests, a signed archive, real-device session/media testing, and an
 internal TestFlight rehearsal have evidence.
 
-General AI run/content features, privacy-safe production telemetry, App Store
-metadata/screenshots/review, and the Milestone 5A physical APNs and production
-TestFlight checks remain separate unfinished work.
+Content-generation features, privacy-safe production telemetry, App Store metadata,
+screenshots/review, and the Milestone 5A physical APNs and production TestFlight
+checks remain separate unfinished work.

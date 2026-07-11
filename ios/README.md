@@ -75,6 +75,14 @@ and avoiding it in the foundation keeps auth/session behavior auditable.
   keep/cut/restore decisions. Decisions are never queued offline, and the app has no
   owner-cull original/download route. `MISE_CULL_UI` remains false by default and
   controls the web deck, native routes, and client-delivery gate together.
+- Milestone 5B.2 stages a read-only owner AI activity feed. The backend exposes only
+  normalized provenance metadata through a tenant-bound cursor and never returns
+  raw errors, model names, prompts, outputs, correlation/idempotency values, paths,
+  or provider payloads. The app conditionally revalidates page one, caches only a
+  complete latest-500 window under the protected tenant namespace, and filters
+  locally. Owner logout atomically seals and purges the shared session cache so late
+  responses cannot recreate tenant data. The feed cannot start, retry, approve,
+  publish, or apply an AI operation.
 - Gallery media uses the active session's single rotating authenticator. Server
   media URLs are accepted only when their origin and exact capability path match
   the active workspace; redirects are rejected and bearer tokens never enter URLs.
@@ -82,10 +90,11 @@ and avoiding it in the foundation keeps auth/session behavior auditable.
   xcconfig files.
 
 Simulator tests validate request construction and routing, but APNs acceptance does
-not. The 5B.1 source and tests also have not yet been validated with current Xcode,
-on a physical device, or through TestFlight. Before distributing a build, complete
-the [push checks](../docs/IOS-PUSH-OPERATIONS.md) and
-[native cull checks](../docs/IOS-AI-CULL-OPERATIONS.md).
+not. The 5B.1–5B.2 source and tests also have not yet been validated with current
+Xcode, on a physical device, or through TestFlight. Before distributing a build,
+complete the [push checks](../docs/IOS-PUSH-OPERATIONS.md) and
+[native cull checks](../docs/IOS-AI-CULL-OPERATIONS.md), plus the
+[AI activity checks](../docs/IOS-AI-ACTIVITY-OPERATIONS.md).
 
 See the [architecture](../docs/IOS-ARCHITECTURE.md) and
 [API contract](../docs/IOS-API-V1.md) for the product and backend plan.

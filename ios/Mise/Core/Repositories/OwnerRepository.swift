@@ -52,14 +52,17 @@ actor OwnerRepository {
     let client: any APIClientProtocol
     let cache: TenantJSONCache
     private let onSessionEnded: @Sendable () async -> Void
+    private let lifetime: ClientDeliveryLifetime
 
     init(
         client: any APIClientProtocol,
         cache: TenantJSONCache,
+        lifetime: ClientDeliveryLifetime = ClientDeliveryLifetime(),
         onSessionEnded: @escaping @Sendable () async -> Void = {}
     ) {
         self.client = client
         self.cache = cache
+        self.lifetime = lifetime
         self.onSessionEnded = onSessionEnded
     }
 
@@ -130,14 +133,31 @@ actor OwnerRepository {
     }
 
     func purgeCache() async {
-        try? await cache.removeAll()
+        try? await cache.endAccessAndRemoveAll()
+        await lifetime.end()
+    }
+
+    func cacheLifetimeTicket() async throws -> UInt64 {
+        guard let ticket = await lifetime.ticket() else {
+            throw APIError.unauthenticated(nil)
+        }
+        return ticket
+    }
+
+    func requireActiveCacheLifetime(_ ticket: UInt64) async throws {
+        guard await lifetime.isActive(ticket) else {
+            throw APIError.unauthenticated(nil)
+        }
     }
 
     private func cached<Value: Codable & Sendable>(
         _ key: String,
         as type: Value.Type
     ) async throws -> ResourceSnapshot<Value>? {
-        guard let record = try await cache.read(key, as: type) else { return nil }
+        let ticket = try await cacheLifetimeTicket()
+        let record = try await cache.read(key, as: type)
+        try await requireActiveCacheLifetime(ticket)
+        guard let record else { return nil }
         return ResourceSnapshot(
             value: record.value,
             storedAt: record.storedAt,
@@ -151,12 +171,31 @@ actor OwnerRepository {
         etag: String? = nil,
         storedAt: Date = Date()
     ) async throws -> ResourceSnapshot<Value> {
+        let ticket = try await cacheLifetimeTicket()
+        return try await persist(
+            value,
+            key: key,
+            etag: etag,
+            storedAt: storedAt,
+            lifetimeTicket: ticket
+        )
+    }
+
+    private func persist<Value: Codable & Sendable>(
+        _ value: Value,
+        key: String,
+        etag: String?,
+        storedAt: Date,
+        lifetimeTicket: UInt64
+    ) async throws -> ResourceSnapshot<Value> {
+        try await requireActiveCacheLifetime(lifetimeTicket)
         let record = try await cache.write(
             value,
             key: key,
             etag: etag,
             storedAt: storedAt
         )
+        try await requireActiveCacheLifetime(lifetimeTicket)
         return ResourceSnapshot(
             value: record.value,
             storedAt: record.storedAt,
@@ -168,7 +207,9 @@ actor OwnerRepository {
         key: String,
         endpoint: APIEndpoint<Value>
     ) async throws -> ResourceSnapshot<Value> {
+        let ticket = try await cacheLifetimeTicket()
         let cached = try await cache.read(key, as: Value.self)
+        try await requireActiveCacheLifetime(ticket)
         do {
             let response = try await sendWithMetadata(
                 endpoint.revalidating(with: cached?.etag)
@@ -177,9 +218,11 @@ actor OwnerRepository {
                 response.value,
                 key: key,
                 etag: response.metadata.etag,
-                storedAt: response.metadata.receivedAt
+                storedAt: response.metadata.receivedAt,
+                lifetimeTicket: ticket
             )
         } catch let APIError.notModified(responseETag) {
+            try await requireActiveCacheLifetime(ticket)
             guard cached != nil else {
                 throw OwnerRepositoryError.missingConditionalValue
             }
@@ -190,6 +233,7 @@ actor OwnerRepository {
             ) else {
                 throw OwnerRepositoryError.missingConditionalValue
             }
+            try await requireActiveCacheLifetime(ticket)
             return ResourceSnapshot(
                 value: touched.value,
                 storedAt: touched.storedAt,
@@ -201,6 +245,7 @@ actor OwnerRepository {
     private func fetchAll<Element: Codable & Hashable & Sendable>(
         endpoint: @Sendable (String?) -> APIEndpoint<APIPage<Element>>
     ) async throws -> [Element] {
+        let ticket = try await cacheLifetimeTicket()
         var items: [Element] = []
         var cursor: String?
         var seenCursors = Set<String>()
@@ -208,7 +253,9 @@ actor OwnerRepository {
 
         repeat {
             try Task.checkCancellation()
+            try await requireActiveCacheLifetime(ticket)
             let page = try await send(endpoint(cursor))
+            try await requireActiveCacheLifetime(ticket)
             items.append(contentsOf: page.items)
             pageCount += 1
 
@@ -251,14 +298,14 @@ actor OwnerRepository {
         if let apiError = error as? APIError,
            case .unauthenticated = apiError
         {
-            try? await cache.removeAll()
+            await purgeCache()
             await onSessionEnded()
             return
         }
         guard let sessionError = error as? SessionError else { return }
         switch sessionError {
         case .expired, .identityChanged, .workspaceMismatch:
-            try? await cache.removeAll()
+            await purgeCache()
             await onSessionEnded()
         }
     }

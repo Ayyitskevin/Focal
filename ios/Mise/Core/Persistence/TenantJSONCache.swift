@@ -7,6 +7,10 @@ struct TenantCacheRecord<Value: Codable & Sendable>: Sendable {
     let etag: String?
 }
 
+enum TenantCacheAccessError: Error, Sendable {
+    case ended
+}
+
 /// A small cache for server snapshots, isolated by the backend-provided tenant namespace.
 ///
 /// Raw tenant names and resource keys never become path components. The namespace is
@@ -18,6 +22,7 @@ actor TenantJSONCache {
     private let cacheNamespace: String
     private let fileManager: FileManager
     private let namespaceDirectory: URL
+    private var accessEnded = false
 
     init(
         cacheNamespace: String,
@@ -36,6 +41,7 @@ actor TenantJSONCache {
         _ key: String,
         as type: Value.Type = Value.self
     ) throws -> TenantCacheRecord<Value>? {
+        guard !accessEnded else { return nil }
         let url = fileURL(for: key)
         guard fileManager.fileExists(atPath: url.path) else { return nil }
 
@@ -72,6 +78,7 @@ actor TenantJSONCache {
         etag: String?,
         storedAt: Date = Date()
     ) throws -> TenantCacheRecord<Value> {
+        guard !accessEnded else { throw TenantCacheAccessError.ended }
         try prepareDirectory()
         let envelope = TenantCacheEnvelope(
             schemaVersion: Self.schemaVersion,
@@ -119,14 +126,30 @@ actor TenantJSONCache {
     }
 
     func remove(_ key: String) throws {
+        guard !accessEnded else { return }
         let url = fileURL(for: key)
         guard fileManager.fileExists(atPath: url.path) else { return }
         try fileManager.removeItem(at: url)
     }
 
     func removeAll() throws {
+        guard !accessEnded else { return }
+        try removeAllFiles()
+    }
+
+    private func removeAllFiles() throws {
         guard fileManager.fileExists(atPath: namespaceDirectory.path) else { return }
         try fileManager.removeItem(at: namespaceDirectory)
+    }
+
+    /// Permanently closes this session's cache actor and removes its namespace.
+    /// Because file writes and this method are synchronous actor operations, a
+    /// racing write either finishes first and is removed here, or runs second and
+    /// is rejected before recreating the directory.
+    func endAccessAndRemoveAll() throws {
+        guard !accessEnded else { return }
+        accessEnded = true
+        try removeAllFiles()
     }
 
     private func prepareDirectory() throws {

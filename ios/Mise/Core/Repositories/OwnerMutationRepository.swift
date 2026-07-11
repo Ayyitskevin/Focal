@@ -2,20 +2,24 @@ import Foundation
 
 extension OwnerRepository {
     func cachedTasks() async throws -> ResourceSnapshot<[TaskDetail]>? {
-        guard let record = try await cache.read("tasks.v1", as: [TaskDetail].self) else {
-            return nil
-        }
+        let ticket = try await cacheLifetimeTicket()
+        let record = try await cache.read("tasks.v1", as: [TaskDetail].self)
+        try await requireActiveCacheLifetime(ticket)
+        guard let record else { return nil }
         return ResourceSnapshot(value: record.value, storedAt: record.storedAt, source: .cache)
     }
 
     func refreshTasks() async throws -> ResourceSnapshot<[TaskDetail]> {
+        let ticket = try await cacheLifetimeTicket()
         let response = try await sendWithMetadata(MiseEndpoints.Tasks.list)
+        try await requireActiveCacheLifetime(ticket)
         let record = try await cache.write(
             response.value.items,
             key: "tasks.v1",
             etag: response.metadata.etag,
             storedAt: response.metadata.receivedAt
         )
+        try await requireActiveCacheLifetime(ticket)
         return ResourceSnapshot(value: record.value, storedAt: record.storedAt, source: .network)
     }
 
