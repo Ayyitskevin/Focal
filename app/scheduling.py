@@ -21,7 +21,7 @@ import datetime as dt
 import logging
 from zoneinfo import ZoneInfo
 
-from . import config, db, gcal, security
+from . import config, db, gcal, push_notifications, security
 
 log = logging.getLogger("mise.scheduling")
 
@@ -251,6 +251,12 @@ def book(
     notes: str,
     visitor_tz: str,
     exclude_id: int | None = None,
+    *,
+    venue_address: str = "",
+    dish_count: str = "",
+    parking_notes: str = "",
+    style_refs: str = "",
+    onsite_contact: str = "",
 ) -> tuple[int, str]:
     """Atomically claim a slot. Returns (booking_id, manage_token).
 
@@ -264,6 +270,13 @@ def book(
         raise SlotTaken("malformed time")
     end_utc = start_utc + dt.timedelta(minutes=et["duration_min"])
     day_local = start_utc.astimezone(_biz_tz()).date()
+    day_start = dt.datetime.combine(day_local, dt.time(), _biz_tz()).astimezone(_UTC)
+    day_end = dt.datetime.combine(
+        day_local + dt.timedelta(days=1), dt.time(), _biz_tz()
+    ).astimezone(_UTC)
+    # Fetch external availability immediately before the serialized DB check, but
+    # never hold SQLite's write lock across a network request.
+    busy = gcal.free_busy(day_start, day_end)
     token = security.new_slug(20)
 
     con = db.connect()
@@ -272,15 +285,17 @@ def book(
         con.execute("BEGIN IMMEDIATE")
         ref = now_utc()
         open_starts = {
-            _fmt_utc(s) for s in _slots_utc(con, et, day_local, ref, exclude_id=exclude_id)
+            _fmt_utc(s) for s in _slots_utc(con, et, day_local, ref, busy, exclude_id=exclude_id)
         }
         if start_utc_str not in open_starts:
             con.execute("ROLLBACK")
             raise SlotTaken("slot no longer available")
         cur = con.execute(
-            """INSERT INTO bookings (token, event_type_id, name, email, phone,
-                                     notes, start_utc, end_utc, tz, reschedule_of)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            """INSERT INTO bookings
+               (token, event_type_id, name, email, phone, notes, start_utc,
+                end_utc, tz, reschedule_of, venue_address, dish_count,
+                parking_notes, style_refs, onsite_contact)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 token,
                 et["id"],
@@ -292,11 +307,52 @@ def book(
                 _fmt_utc(end_utc),
                 visitor_tz,
                 exclude_id,
+                venue_address,
+                dish_count,
+                parking_notes,
+                style_refs,
+                onsite_contact,
             ),
         )
         bid = cur.lastrowid
+        assert bid is not None
+        job_ids: list[int] = []
+        if exclude_id is None:
+            title, body = push_notifications.alert_copy("new_bookings")
+            job_ids = push_notifications.enqueue_owner_event_tx(
+                con,
+                dedupe_key=f"booking.confirmed:{bid}",
+                category="new_bookings",
+                route=f"/app/bookings/{bid}",
+                title=title,
+                body=body,
+            )
+        else:
+            replaced = con.execute(
+                """UPDATE bookings SET status='cancelled', cancel_reason='Rescheduled',
+                          cancelled_at=datetime('now')
+                     WHERE id=? AND status='confirmed'""",
+                (exclude_id,),
+            ).rowcount
+            if replaced != 1:
+                con.execute("ROLLBACK")
+                raise SlotTaken("source booking is no longer confirmed")
+            title, body = push_notifications.alert_copy("booking_changes")
+            job_ids = push_notifications.enqueue_owner_event_tx(
+                con,
+                dedupe_key=f"booking.rescheduled:{exclude_id}:{bid}",
+                category="booking_changes",
+                route=f"/app/bookings/{bid}",
+                title=title,
+                body=body,
+            )
         con.execute("COMMIT")
-        return bid, token
+        try:
+            push_notifications.kick(job_ids)
+        except Exception:
+            # The durable event remains queued for the notification sweeper.
+            log.exception("booking %s notification kick failed", bid)
+        return int(bid), token
     except SlotTaken:
         raise
     except Exception:
@@ -320,17 +376,48 @@ def booking_by_token(token: str):
 
 
 def cancel(token: str, reason: str = "") -> bool:
-    """Cancel a confirmed booking. Returns True only if a row actually flipped
-    (so a double-click or stale link cannot fire two cancellations)."""
+    """Atomically cancel and enqueue the matching owner-visible client event."""
     con = db.connect()
+    con.isolation_level = None
+    job_ids: list[int] = []
+    booking_id: int | None = None
     try:
-        cur = con.execute(
+        con.execute("BEGIN IMMEDIATE")
+        row = con.execute(
+            "SELECT id FROM bookings WHERE token=? AND status='confirmed'",
+            (token,),
+        ).fetchone()
+        if row is None:
+            con.execute("ROLLBACK")
+            return False
+        booking_id = int(row["id"])
+        con.execute(
             """UPDATE bookings SET status='cancelled', cancel_reason=?,
-                      cancelled_at=datetime('now')
-               WHERE token=? AND status='confirmed'""",
-            (reason, token),
+                      cancelled_at=datetime('now') WHERE id=?""",
+            (reason, booking_id),
         )
-        con.commit()
-        return cur.rowcount > 0
+        title, body = push_notifications.alert_copy("booking_changes")
+        job_ids = push_notifications.enqueue_owner_event_tx(
+            con,
+            dedupe_key=f"booking.cancelled:{booking_id}",
+            category="booking_changes",
+            route=f"/app/bookings/{booking_id}",
+            title=title,
+            body=body,
+        )
+        con.execute("COMMIT")
+    except Exception:
+        try:
+            con.execute("ROLLBACK")
+        except Exception:
+            pass
+        raise
     finally:
         con.close()
+
+    try:
+        push_notifications.kick(job_ids)
+    except Exception:
+        # The durable event remains queued for the notification sweeper.
+        log.exception("booking %s change notification kick failed", booking_id)
+    return True

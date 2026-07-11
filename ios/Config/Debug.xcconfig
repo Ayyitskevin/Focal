@@ -1,2 +1,5 @@
 MISE_SERVER_BASE_URL = https:/$()/mise.example
+MISE_APNS_ENVIRONMENT = sandbox
+MISE_APS_ENTITLEMENT = development
+MISE_ASSOCIATED_DOMAIN = mise.example
 PRODUCT_NAME = Mise Dev

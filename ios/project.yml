@@ -39,9 +39,17 @@ targets:
         CFBundleVersion: "1"
         UILaunchScreen: {}
         UIApplicationSceneManifest:
-          UIApplicationSupportsMultipleScenes: true
+          UIApplicationSupportsMultipleScenes: false
         NSFaceIDUsageDescription: "Use Face ID to unlock your Mise studio."
         MiseServerBaseURL: "$(MISE_SERVER_BASE_URL)"
+        MiseAPNsEnvironment: "$(MISE_APNS_ENVIRONMENT)"
+    entitlements:
+      path: Mise/Supporting/Mise.entitlements
+      properties:
+        aps-environment: "$(MISE_APS_ENTITLEMENT)"
+        com.apple.developer.associated-domains:
+          - "applinks:$(MISE_ASSOCIATED_DOMAIN)"
+          - "applinks:*.$(MISE_ASSOCIATED_DOMAIN)"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ayyitskevin.mise

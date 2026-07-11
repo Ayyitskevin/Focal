@@ -1,16 +1,34 @@
 import SwiftUI
 
 struct GalleryDetailView: View {
-    let gallery: GallerySummary
+    private let galleryID: Int64
+    private let fallbackTitle: String
+    private let initialAssetID: Int64?
     @State private var model: OwnerResourceModel<GalleryDetail>
     @State private var selectedAsset: GalleryAsset?
 
     init(repository: OwnerRepository, gallery: GallerySummary) {
-        self.gallery = gallery
+        self.init(
+            repository: repository,
+            galleryID: gallery.id,
+            title: gallery.title,
+            initialAssetID: nil
+        )
+    }
+
+    init(
+        repository: OwnerRepository,
+        galleryID: Int64,
+        title: String = "Gallery",
+        initialAssetID: Int64? = nil
+    ) {
+        self.galleryID = galleryID
+        fallbackTitle = title
+        self.initialAssetID = initialAssetID
         _model = State(initialValue: OwnerResourceModel(
             staleAfter: 60 * 60,
-            cached: { try await repository.cachedGallery(id: gallery.id) },
-            remote: { try await repository.refreshGallery(id: gallery.id) }
+            cached: { try await repository.cachedGallery(id: galleryID) },
+            remote: { try await repository.refreshGallery(id: galleryID) }
         ))
     }
 
@@ -27,7 +45,7 @@ struct GalleryDetailView: View {
                 )
             }
         )
-        .navigationTitle(gallery.title)
+        .navigationTitle(model.state.snapshot?.value.summary.title ?? fallbackTitle)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $selectedAsset) { asset in
             AssetPreview(asset: asset)
@@ -52,6 +70,23 @@ struct GalleryDetailView: View {
             .padding(3)
         }
         .refreshable { await model.refresh() }
+        .onAppear {
+            selectInitialAsset(from: detail)
+        }
+        .onChange(of: detail.assets.map(\.id)) { _, _ in
+            selectInitialAsset(from: detail)
+        }
+    }
+
+    private func selectInitialAsset(from detail: GalleryDetail) {
+        guard selectedAsset == nil, let initialAssetID,
+              let asset = detail.assets.first(where: {
+                  $0.id == initialAssetID && $0.galleryID == galleryID
+              })
+        else {
+            return
+        }
+        selectedAsset = asset
     }
 }
 

@@ -4,9 +4,19 @@ import SwiftUI
 struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var authentication: AuthenticationCoordinator
+    let notifications: NotificationCoordinator
 
-    init(environment: AppEnvironment) {
-        _authentication = State(initialValue: AuthenticationCoordinator(environment: environment))
+    init(
+        environment: AppEnvironment,
+        installationIdentity: InstallationIdentity,
+        notifications: NotificationCoordinator
+    ) {
+        self.notifications = notifications
+        _authentication = State(initialValue: AuthenticationCoordinator(
+            environment: environment,
+            installationIdentity: installationIdentity,
+            notificationCoordinator: notifications
+        ))
     }
 
     var body: some View {
@@ -21,21 +31,66 @@ struct RootView: View {
                     session: session,
                     ownerRepository: authentication.ownerRepository,
                     clientDeliveryEnvironment: authentication.clientDeliveryEnvironment,
+                    notifications: notifications,
                     isSigningOut: authentication.isWorking,
-                    signOut: { await authentication.signOut() }
+                    signOut: { _ = await authentication.signOut() }
                 )
             case let .locked(session, biometricKind):
                 AppLockView(model: authentication, session: session, biometricKind: biometricKind)
             }
         }
         .overlay { if scenePhase != .active { PrivacyShield() } }
-        .task { await authentication.restore() }
+        .task {
+            await authentication.restore()
+            authentication.processDeferredIncomingURL()
+        }
+        .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+            if let url = activity.webpageURL {
+                authentication.handleIncomingURL(url)
+            }
+        }
+        .onOpenURL { url in
+            authentication.handleIncomingURL(url)
+        }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
-            case .active: Task { await authentication.sceneDidBecomeActive() }
+            case .active:
+                Task {
+                    await authentication.sceneDidBecomeActive()
+                    await notifications.sceneDidBecomeActive()
+                }
             case .inactive, .background: authentication.sceneDidEnterBackground()
             @unknown default: break
             }
+        }
+        .alert(
+            "Switch client access?",
+            isPresented: Binding(
+                get: { authentication.hasPendingSharedAccessSwitch },
+                set: { if !$0 { authentication.cancelSharedAccessSwitch() } }
+            )
+        ) {
+            Button("Cancel", role: .cancel) { authentication.cancelSharedAccessSwitch() }
+            Button("Sign out and switch", role: .destructive) {
+                Task { await authentication.confirmSharedAccessSwitch() }
+            }
+        } message: {
+            Text("Mise will sign out before opening this separate client capability. Your current credentials are never reused.")
+        }
+        .alert(item: Binding(
+            get: { notifications.router.workspaceSwitchRequest },
+            set: { if $0 == nil { notifications.router.dismissWorkspaceSwitch() } }
+        )) { request in
+            Alert(
+                title: Text("Open another studio?"),
+                message: Text("Mise must sign out before connecting to \(request.origin.host ?? "that studio")."),
+                primaryButton: .destructive(Text("Sign out and continue")) {
+                    Task { await authentication.confirmOwnerWorkspaceSwitch(request) }
+                },
+                secondaryButton: .cancel {
+                    notifications.router.dismissWorkspaceSwitch()
+                }
+            )
         }
     }
 }
@@ -74,6 +129,7 @@ private struct SignedInShell: View {
     let session: CurrentSession
     let ownerRepository: OwnerRepository?
     let clientDeliveryEnvironment: ClientDeliveryEnvironment?
+    let notifications: NotificationCoordinator
     let isSigningOut: Bool
     let signOut: @MainActor () async -> Void
 
@@ -82,6 +138,8 @@ private struct SignedInShell: View {
             OwnerCompanionView(
                 session: session,
                 repository: repository,
+                notifications: notifications,
+                router: notifications.router,
                 isSigningOut: isSigningOut,
                 signOut: signOut
             )

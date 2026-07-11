@@ -3,6 +3,7 @@ import Foundation
 struct AppConfiguration: Sendable {
     let serverBaseURL: URL
     let clientVersion: String
+    let apnsEnvironment: APNsEnvironment
 
     init(bundle: Bundle = .main) throws {
         guard
@@ -47,6 +48,20 @@ struct AppConfiguration: Sendable {
             bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
         let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
         clientVersion = "\(shortVersion) (\(build))"
+
+        guard let rawEnvironment = bundle.object(
+            forInfoDictionaryKey: "MiseAPNsEnvironment"
+        ) as? String else {
+            throw ConfigurationError.invalidAPNsEnvironment
+        }
+        switch rawEnvironment.lowercased() {
+        case APNsEnvironment.sandbox.rawValue:
+            apnsEnvironment = .sandbox
+        case APNsEnvironment.production.rawValue:
+            apnsEnvironment = .production
+        default:
+            throw ConfigurationError.invalidAPNsEnvironment
+        }
     }
 
     private static func isLoopbackHTTP(_ url: URL) -> Bool {
@@ -58,6 +73,7 @@ extension AppConfiguration {
     enum ConfigurationError: LocalizedError {
         case missingServerURL
         case insecureServerURL
+        case invalidAPNsEnvironment
 
         var errorDescription: String? {
             switch self {
@@ -65,6 +81,8 @@ extension AppConfiguration {
                 "MiseServerBaseURL must be a server origin without credentials, a path, or a query."
             case .insecureServerURL:
                 "Mise requires HTTPS outside a loopback debug environment."
+            case .invalidAPNsEnvironment:
+                "MiseAPNsEnvironment must be sandbox or production."
             }
         }
     }

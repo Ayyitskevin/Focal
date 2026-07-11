@@ -8,7 +8,6 @@ as authority.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 from enum import Enum
 
@@ -23,13 +22,13 @@ from . import (
     config,
     mobile_auth,
     mobile_client_delivery_api,
+    mobile_devices_api,
     mobile_gallery_calendar_api,
     mobile_gallery_delivery_api,
     mobile_owner_api,
     mobile_owner_mutation_api,
     mobile_policy_mutation_api,
-    saas,
-    urls,
+    mobile_workspace,
 )
 from .mobile_api_schemas import (
     APIProblem,
@@ -62,9 +61,11 @@ _PROBLEM_RESPONSES = {
     401: {"model": APIProblem, "description": "Authentication failed"},
     403: {"model": APIProblem, "description": "Insufficient scope"},
     404: {"model": APIProblem, "description": "Resource not found"},
+    409: {"model": APIProblem, "description": "Version conflict"},
     410: {"model": APIProblem, "description": "Capability expired"},
     422: {"model": APIProblem, "description": "Request validation failed"},
     429: {"model": APIProblem, "description": "Rate limited"},
+    503: {"model": APIProblem, "description": "Service unavailable"},
 }
 
 
@@ -119,6 +120,7 @@ def _problem_title(status: int) -> str:
         422: "Request validation failed",
         429: "Too many requests",
         500: "Internal server error",
+        503: "Service unavailable",
     }.get(status, "Request failed")
 
 
@@ -232,54 +234,8 @@ def _enum_value(value: str | Enum) -> str:
     return str(value.value) if isinstance(value, Enum) else str(value)
 
 
-def _request_origin(request: Request) -> str:
-    origin = urls.origin_from_url(urls.request_origin(request))
-    if origin is None:
-        raise mobile_auth.MobileAuthError(
-            400,
-            "request.invalid_origin",
-            "A valid request host is required.",
-        )
-    return origin
-
-
-def _tenant_metadata(request: Request, *, canonical: bool) -> dict:
-    request_origin = _request_origin(request)
-    if config.SAAS_MODE:
-        tenant = saas.current_tenant()
-        if not tenant or tenant.get("deleted_at"):
-            raise mobile_auth.MobileAuthError(
-                404,
-                "tenant.not_found",
-                "This studio is unavailable.",
-            )
-        origin = request_origin
-        stable_identity = f"hosted\0{int(tenant['id'])}\0{origin}"
-        return {
-            "cache_namespace": "workspace_"
-            + hashlib.sha256(stable_identity.encode()).hexdigest()[:24],
-            "slug": tenant["slug"],
-            "display_name": tenant["studio_name"],
-            "origin": origin,
-            "brand_accent_hex": (tenant.get("brand_accent") or "#2F5C45").upper(),
-            "owner_email": tenant.get("owner_email"),
-            "studio_password": True,
-        }
-
-    configured_origin = urls.origin_from_url(config.BASE_URL)
-    origin = configured_origin if canonical and configured_origin else request_origin
-    stable_identity = f"self-hosted\0{origin}"
-    return {
-        "cache_namespace": "workspace_" + hashlib.sha256(stable_identity.encode()).hexdigest()[:24],
-        "slug": None,
-        "display_name": config.SITE_NAME,
-        "origin": origin,
-        "brand_accent_hex": "#2F5C45",
-        # Self-hosted Mise has a password principal, not a durable owner account;
-        # a configured mail sender must not be presented as authenticated identity.
-        "owner_email": None,
-        "studio_password": bool(config.ADMIN_PASSWORD),
-    }
+_request_origin = mobile_workspace.request_origin
+_tenant_metadata = mobile_workspace.tenant_metadata
 
 
 def _tenant_descriptor(request: Request) -> TenantDescriptor:
@@ -608,6 +564,7 @@ def revoke_session(request: Request, session_id: str) -> Response:
 # Feature routers stay independent of this module so authentication failures,
 # validation problems, and unexpected errors still pass through this mounted
 # application's single JSON/problem boundary.
+app.include_router(mobile_devices_api.router)
 app.include_router(mobile_owner_api.router)
 app.include_router(mobile_gallery_calendar_api.router)
 app.include_router(mobile_client_delivery_api.router)

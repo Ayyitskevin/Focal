@@ -8,7 +8,7 @@ adds capability-bound gallery delivery plus portal, workspace, and document read
 Milestone 4A adds owner client/project details and bounded client, project, and task
 commands. Milestone 4B adds owner booking management and exact-capability proposal
 decisions. Client booking creation, money commands, and native legal signing remain
-planned.
+planned. Milestone 5A adds the owner-only APNs device and notification contract.
 
 ## Conventions
 
@@ -96,6 +96,7 @@ Success:
       "token_type": "Bearer",
       "access_token_expires_at": "2026-07-09T22:45:00Z",
       "refresh_token_expires_at": "2026-08-08T22:30:00Z",
+      "session_id": "<opaque-session-id>",
       "workspace": {
         "cache_namespace": "tenant_42",
         "slug": "north-star-photo",
@@ -123,7 +124,7 @@ current IP lockout and tenant password verifier.
 | --- | --- |
 | `POST /api/v1/auth/refresh` | rotate refresh token; atomic reuse detection |
 | `POST /api/v1/auth/logout` | revoke current session/token family |
-| `GET /api/v1/me` | return current principal, workspace, session metadata |
+| `GET /api/v1/me` | return token-free current principal and workspace |
 | `GET /api/v1/auth/sessions` | owner device/session list |
 | `DELETE /api/v1/auth/sessions/{id}` | revoke another owner device |
 | `POST /api/v1/client-auth/gallery/unlock` | gallery slug/PIN or link-only exchange |
@@ -134,6 +135,97 @@ current IP lockout and tenant password verifier.
 Each shared-access response uses an exact principal kind and narrow scope. A portal
 exchange must not unlock its galleries; a workspace exchange must not become a
 client-wide session.
+
+## Owner notification device
+
+These routes require the exact `studio_owner` principal with `studio:read`. They
+derive tenant, session, principal, APNs topic, canonical HTTPS origin, and workspace
+cache namespace from the authenticated request. Guest capabilities cannot register.
+
+### `POST /api/v1/devices`
+
+Register or rotate the current APNs token. APNs tokens are variable-length,
+even-length hexadecimal strings; clients must not assume a 64-character token.
+
+    {
+      "installation_id": "a8a06dc2-2034-4e3b-b07d-0cbfd2455b98",
+      "apns_token": "<lowercase-hex>",
+      "environment": "sandbox",
+      "locale": "en-US",
+      "app_version": "1.0 (42)",
+      "preferences": {
+        "new_bookings": true,
+        "booking_changes": true,
+        "proposal_responses": true,
+        "payments": true
+      }
+    }
+
+`preferences` is optional and merges with an existing registration. Ordinary token
+refreshes omit it so an app launch never resets user choices. The installation UUID
+must match the hash bound during login; it is never returned and never appears in a
+device route.
+
+Every supplied preference value must be a JSON Boolean. Strings, integers, and
+explicit `null` are rejected rather than coerced or silently treated as omitted.
+
+Success includes `Cache-Control: no-store` and a strong `ETag`:
+
+    {
+      "environment": "sandbox",
+      "locale": "en-US",
+      "app_version": "1.0 (42)",
+      "preferences": {
+        "new_bookings": true,
+        "booking_changes": true,
+        "proposal_responses": true,
+        "payments": true
+      },
+      "active": true,
+      "registered_at": "2026-07-11T14:00:00Z",
+      "updated_at": "2026-07-11T14:00:00Z"
+    }
+
+The response never includes the installation ID, database ID, session ID, APNs
+token, keyed token hash, token version, ciphertext, topic, or tenant selector.
+
+### Current-device routes
+
+| Method/path | Semantics |
+| --- | --- |
+| `GET /api/v1/devices/current` | return current active registration plus `ETag` |
+| `PATCH /api/v1/devices/current` | merge `{ "preferences": { ... } }`; requires `If-Match` |
+| `DELETE /api/v1/devices/current` | idempotently erase encrypted token material; returns `204` |
+
+The server uses an internal monotonically increasing revision when computing the
+ETag, so two mutations within one SQLite timestamp second cannot recycle a stale
+version. Logout, refresh-token replay, password rotation, explicit session
+revocation, absolute expiry, and permanent APNs token rejection all deactivate the
+bound registration and erase its ciphertext.
+
+### APNs navigation envelope
+
+Lock-screen copy is a fixed generic template. The only custom payload is this exact,
+versioned navigation intent:
+
+    {
+      "mise": {
+        "version": 1,
+        "event_id": "018f632f-735d-7a16-8f31-2fb65d3f6e91",
+        "workspace_origin": "https://north-star.mise.example",
+        "workspace_cache_namespace": "workspace_a0d5...",
+        "principal_kind": "studio_owner",
+        "principal_id": "studio_owner",
+        "route": "/app/bookings/41"
+      }
+    }
+
+Initial emitted routes are `/app/projects/{positiveId}` and
+`/app/bookings/{positiveId}`. `/app/home` is also part of the parser contract. A
+payload contains no tenant ID, bearer/capability credential, client identifier,
+name, contact detail, note, location, amount, or arbitrary URL. The app rechecks
+the active session, scope, exact origin, cache namespace, principal, and typed route
+before performing an ordinary authorized API fetch.
 
 ## Client delivery reads
 

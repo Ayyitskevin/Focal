@@ -16,7 +16,8 @@ struct AppEnvironment: Sendable {
     /// Creates a complete authentication boundary for one canonical tenant origin.
     /// Never reuse this environment for a different host.
     func workspace(at origin: URL) -> WorkspaceEnvironment {
-        let networkSession = makeBearerOnlyURLSession()
+        let apiSession = Self.makeBearerOnlyURLSession(resourceTimeout: 30)
+        let mediaSession = Self.makeBearerOnlyURLSession(resourceTimeout: 60 * 60)
         let persistence = KeychainSessionPersistence(
             service: Bundle.main.bundleIdentifier ?? "com.ayyitskevin.mise",
             account: "authenticated-session.\(Self.originKey(for: origin))"
@@ -27,7 +28,7 @@ struct AppEnvironment: Sendable {
                 baseURL: origin,
                 clientVersion: configuration.clientVersion
             ),
-            session: networkSession
+            session: apiSession
         )
         let refresher = RemoteTokenRefresher(client: anonymousClient)
         let session = SessionAuthenticator(
@@ -40,7 +41,7 @@ struct AppEnvironment: Sendable {
                 baseURL: origin,
                 clientVersion: configuration.clientVersion
             ),
-            session: networkSession,
+            session: apiSession,
             authorizer: session
         )
 
@@ -48,17 +49,18 @@ struct AppEnvironment: Sendable {
             origin: origin,
             apiClient: apiClient,
             session: session,
-            networkSession: networkSession,
+            networkSession: mediaSession,
             clientVersion: configuration.clientVersion
         )
     }
 
-    private static func makeBearerOnlyURLSession() -> URLSession {
+    private static func makeBearerOnlyURLSession(resourceTimeout: TimeInterval) -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpShouldSetCookies = false
         configuration.httpCookieStorage = nil
         configuration.urlCredentialStorage = nil
         configuration.waitsForConnectivity = true
+        configuration.timeoutIntervalForResource = resourceTimeout
         configuration.requestCachePolicy = .useProtocolCachePolicy
         return URLSession(configuration: configuration)
     }

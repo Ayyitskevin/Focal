@@ -1,6 +1,6 @@
 # Mise for iOS — architecture and delivery plan
 
-Status: Milestones 1–4B implemented; operations next
+Status: Milestones 1–5A implementation complete; 5A release validation pending
 Minimum OS: iOS 17 / iPadOS 17
 UI: SwiftUI
 State: Observation-based MVVM with async/await
@@ -157,7 +157,8 @@ The root UI changes with the principal, not just with screen visibility.
 - Galleries: native grid, section progress, favorite, comment, lightbox, download.
 - Documents: proposals, contracts, invoices, receipts.
 - Bookings: available slots and existing booking management when in scope.
-- Settings: notification preferences, cache/download management, privacy, sign out.
+- Settings: cache/download management, privacy, sign out. Client notifications require
+  a future durable client-recipient model and are not part of owner-only Milestone 5A.
 
 Use `NavigationSplitView` for iPad and compact navigation/tab presentation on
 iPhone. Keep route values typed so APNs and universal links resolve through the
@@ -192,23 +193,27 @@ Use server validators instead of polling full payloads:
 
 Backend additions:
 
-- `POST /api/v1/devices`: upsert APNs token, installation ID hash, environment,
-  locale, app version, principal/session, and preferences.
-- `DELETE /api/v1/devices/{installationId}`: unregister on logout.
-- tenant-local notification outbox and delivery log.
-- APNs provider using token-based authentication; background jobs must enter the
-  correct `tenant_runtime` before reading data.
+- `POST /api/v1/devices`: owner-only token upsert. The body contains the current
+  installation UUID, APNs token, APNs environment, locale, and app version; tenant,
+  principal, session, topic, canonical origin, and cache namespace are server-derived.
+- `GET`, `PATCH`, and `DELETE /api/v1/devices/current`: private current-device state,
+  revision-backed preference concurrency, and idempotent deregistration without an
+  installation identifier in the route.
+- tenant-local event and per-device delivery snapshots committed with the booking,
+  proposal, or payment transition that caused them;
+- persistent HTTP/2 APNs transport with ES256 provider tokens, leased delivery,
+  stable APNs/event/collapse IDs, one-minute due-work sweeps, Retry-After-aware
+  backoff, and compare-and-deactivate handling for invalid device tokens.
 
 The app asks for notification permission after the user encounters a meaningful
 benefit, not on first launch. It requests a fresh APNs token each launch and sends
 it to the backend; the app does not treat a cached token as authoritative.
 
-Supported links should use HTTPS universal links:
+Supported owner links use HTTPS universal links:
 
 - `/app/home`
 - `/app/projects/{id}`
 - `/app/galleries/{id}/assets/{id}`
-- `/app/invoices/{id}`
 - `/app/bookings/{id}`
 - existing `/g`, `/portal`, `/w`, `/p`, `/c`, and `/i` links as exchange/fallback
   entry points
@@ -310,9 +315,24 @@ file-protected, and explicitly initiated by the client.
 
 ### Milestone 5 — operations
 
-- APNs device registry/outbox, preferences, deep links
+#### Milestone 5A — native notifications and routing (implementation complete)
+
+- encrypted owner-only APNs device registry, revisioned preferences, and session
+  revocation erasure
+- transactional generic booking/proposal/payment event snapshots and durable
+  per-device APNs delivery
+- contextual permission UI, memory-only token synchronization, strict payload
+  decoder, universal links, locked/cold-launch routing, and workspace confirmation
+- AASA endpoints, associated-domain/APNs entitlements, privacy manifest, and
+  sandbox/TestFlight operations runbook
+- remaining release evidence: current-Xcode test/archive inspection, real-device
+  sandbox delivery, and TestFlight production delivery
+
+#### Milestone 5B — AI and rollout operations (next)
+
 - AI run/cull/content previews and explicit commands
-- telemetry, performance budgets, TestFlight rollout, App Store privacy artifacts
+- privacy-safe telemetry, performance budgets, TestFlight rollout, and App Store
+  submission evidence
 
 ## 11. Product decisions still open
 

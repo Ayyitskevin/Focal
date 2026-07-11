@@ -16,6 +16,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import (
     alerts,
+    associated_domains,
     bootstrap,
     config,
     csrf,
@@ -332,6 +333,7 @@ routers = (
     site.router,
     sms_webhook.router,
     service_api.router,
+    associated_domains.router,
 )
 if config.SAAS_MODE:
     routers = (saas.router,) + routers

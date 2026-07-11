@@ -7,7 +7,7 @@ import logging
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from .. import db, security, workflows
+from .. import db, push_notifications, security, workflows
 from ..render import templates
 
 log = logging.getLogger("mise.public.docs")
@@ -28,6 +28,66 @@ def _proposal_or_404(slug: str) -> "db.sqlite3.Row":
     return d
 
 
+def _apply_proposal_decision(slug: str, decision: str):
+    with db.tx() as con:
+        proposal = con.execute(
+            """SELECT pr.*, p.title AS project_title, c.name AS client_name, c.company
+                 FROM proposals pr
+                 JOIN projects p ON p.id=pr.project_id
+                 JOIN clients c ON c.id=p.client_id
+                WHERE pr.slug=?""",
+            (slug,),
+        ).fetchone()
+        if not proposal or proposal["status"] == "draft":
+            raise HTTPException(status_code=404)
+        if proposal["status"] not in ("sent", "viewed"):
+            detail = (
+                "proposal is not open for acceptance"
+                if decision == "accepted"
+                else "proposal is not open"
+            )
+            raise HTTPException(status_code=400, detail=detail)
+
+        if decision == "accepted":
+            changed = con.execute(
+                """UPDATE proposals SET status='accepted',
+                          accepted_at=datetime('now')
+                     WHERE id=? AND status IN ('sent','viewed')""",
+                (proposal["id"],),
+            ).rowcount
+            verb = "accepted"
+        elif decision == "declined":
+            changed = con.execute(
+                """UPDATE proposals SET status='declined'
+                     WHERE id=? AND status IN ('sent','viewed')""",
+                (proposal["id"],),
+            ).rowcount
+            verb = "declined"
+        else:
+            raise ValueError("unsupported proposal decision")
+        if changed != 1:
+            raise HTTPException(status_code=400, detail="proposal is not open")
+
+        title, body = push_notifications.alert_copy("proposal_responses")
+        job_ids = push_notifications.enqueue_owner_event_tx(
+            con,
+            dedupe_key=f"proposal.{verb}:{proposal['id']}",
+            category="proposal_responses",
+            route=f"/app/projects/{proposal['project_id']}",
+            title=title,
+            body=body,
+        )
+    return proposal, job_ids
+
+
+def _kick_proposal_notifications(proposal_id: int, job_ids: list[int]) -> None:
+    try:
+        push_notifications.kick(job_ids)
+    except Exception:
+        # The durable event remains queued for the notification sweeper.
+        log.exception("proposal %s notification kick failed", proposal_id)
+
+
 @router.get("/p/{slug}", response_class=HTMLResponse)
 async def view_proposal(request: Request, slug: str):
     d = _proposal_or_404(slug)
@@ -43,12 +103,8 @@ async def view_proposal(request: Request, slug: str):
 
 @router.post("/p/{slug}/accept")
 async def accept_proposal(request: Request, slug: str):
-    d = _proposal_or_404(slug)
-    if d["status"] not in ("sent", "viewed"):
-        raise HTTPException(status_code=400, detail="proposal is not open for acceptance")
-    db.run(
-        "UPDATE proposals SET status='accepted', accepted_at=datetime('now') WHERE id=?", (d["id"],)
-    )
+    d, job_ids = _apply_proposal_decision(slug, "accepted")
+    _kick_proposal_notifications(int(d["id"]), job_ids)
     workflows.record_project_event(
         d["project_id"],
         "proposal",
@@ -66,10 +122,8 @@ async def accept_proposal(request: Request, slug: str):
 
 @router.post("/p/{slug}/decline")
 async def decline_proposal(request: Request, slug: str):
-    d = _proposal_or_404(slug)
-    if d["status"] not in ("sent", "viewed"):
-        raise HTTPException(status_code=400, detail="proposal is not open")
-    db.run("UPDATE proposals SET status='declined' WHERE id=?", (d["id"],))
+    d, job_ids = _apply_proposal_decision(slug, "declined")
+    _kick_proposal_notifications(int(d["id"]), job_ids)
     log.info("proposal %s declined from %s", d["id"], security.client_ip(request))
     return RedirectResponse(f"/p/{slug}", status_code=303)
 

@@ -1,5 +1,56 @@
 import SwiftUI
 
+struct BookingRouteView: View {
+    let repository: OwnerRepository
+    let bookingID: Int64
+    let timeZoneIdentifier: String
+    let didChange: @MainActor () async -> Void
+
+    @State private var booking: Booking?
+    @State private var loading = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Group {
+            if let booking {
+                BookingManagementView(
+                    repository: repository,
+                    booking: booking,
+                    timeZoneIdentifier: timeZoneIdentifier,
+                    didChange: didChange
+                )
+            } else if loading {
+                ProgressView("Opening booking…")
+            } else if let errorMessage {
+                ContentUnavailableView {
+                    Label("Booking unavailable", systemImage: "calendar.badge.exclamationmark")
+                } description: {
+                    Text(errorMessage)
+                } actions: {
+                    Button("Try again") { Task { await load() } }
+                }
+            }
+        }
+        .task { await load() }
+    }
+
+    private func load() async {
+        guard !loading, booking == nil else { return }
+        loading = true
+        errorMessage = nil
+        defer { loading = false }
+        do {
+            let resource = try await repository.bookingDetail(id: bookingID)
+            guard resource.value.id == bookingID else {
+                throw APIError.unexpectedResponse
+            }
+            booking = resource.value
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
 struct BookingManagementView: View {
     @Environment(\.dismiss) private var dismiss
 

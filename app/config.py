@@ -208,6 +208,25 @@ GOOGLE_REDIRECT_URI = os.environ.get(
 )
 GOOGLE_CALENDAR_ID = os.environ.get("MISE_GOOGLE_CALENDAR_ID", "primary")
 
+# Apple Push Notification service (native owner companion). The provider remains
+# fully dormant unless every identity/key/topic value and the independent 32-byte
+# token-at-rest encryption key are present. The .p8 key can be supplied as base64
+# (container-friendly) or by a root-readable path, never both.
+APNS_TEAM_ID = os.environ.get("MISE_APNS_TEAM_ID", "").strip()
+APNS_KEY_ID = os.environ.get("MISE_APNS_KEY_ID", "").strip()
+APNS_TOPIC = os.environ.get("MISE_APNS_TOPIC", "").strip()
+APNS_ENVIRONMENT = os.environ.get("MISE_APNS_ENVIRONMENT", "production").strip().lower()
+APNS_PRIVATE_KEY_B64 = os.environ.get("MISE_APNS_PRIVATE_KEY_B64", "").strip()
+APNS_PRIVATE_KEY_PATH = os.environ.get("MISE_APNS_PRIVATE_KEY_PATH", "").strip()
+APNS_TOKEN_ENCRYPTION_KEY = os.environ.get("MISE_APNS_TOKEN_ENCRYPTION_KEY", "").strip()
+APNS_TIMEOUT_SECONDS = float(os.environ.get("MISE_APNS_TIMEOUT_SECONDS", "10"))
+APNS_MAX_ATTEMPTS = int(os.environ.get("MISE_APNS_MAX_ATTEMPTS", "8"))
+APNS_RETRY_BASE_SECONDS = int(os.environ.get("MISE_APNS_RETRY_BASE_SECONDS", "60"))
+APNS_RETRY_MAX_SECONDS = int(os.environ.get("MISE_APNS_RETRY_MAX_SECONDS", "21600"))
+APNS_LEASE_SECONDS = int(os.environ.get("MISE_APNS_LEASE_SECONDS", "300"))
+APNS_SWEEP_SECONDS = int(os.environ.get("MISE_APNS_SWEEP_SECONDS", "60"))
+APNS_RETENTION_DAYS = int(os.environ.get("MISE_APNS_RETENTION_DAYS", "30"))
+
 # Odysseus caption-drafting endpoint (Domain G slices 6b/6c). BOTH url+token must be
 # set to arm the "Draft with AI" button (see caption_ai.is_enabled); either unset =
 # drafting off and the button stays cleanly dormant. Odysseus owns model selection;

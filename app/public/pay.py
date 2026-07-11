@@ -6,11 +6,15 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from .. import alerts, config, db, features, jobs, security, urls, workflows
+from .. import alerts, config, db, features, jobs, push_notifications, security, urls, workflows
 from ..render import templates
 
 log = logging.getLogger("mise.public.pay")
 router = APIRouter()
+
+
+class _DuplicateStripeEvent(RuntimeError):
+    pass
 
 
 def _stripe_field(obj, key: str, default=None):
@@ -246,17 +250,24 @@ def _record_paid_session(event, session):
     # Record the payment and advance invoice + project state as one atomic unit:
     # a crash between these writes would otherwise leave the payment logged but the
     # invoice unpaid, and Stripe's retry would short-circuit on the duplicate event
-    # id (below) without ever repairing it. The INSERT runs first, so a duplicate
-    # event rolls the whole tx back with nothing else written.
+    # id (below) without ever repairing it. The targeted conflict clause makes an
+    # exact Stripe redelivery a no-op before any other business write occurs.
     duplicate = False
+    duplicate_replays_settlement = False
     already_settled = False
+    notification_jobs: list[int] = []
     try:
         with db.tx() as con:
-            con.execute(
+            inserted = con.execute(
                 """INSERT INTO payments (invoice_id, stripe_event_id, stripe_session_id,
-                      amount_cents, kind) VALUES (?,?,?,?,?)""",
+                      amount_cents, kind) VALUES (?,?,?,?,?)
+                   ON CONFLICT(stripe_event_id) DO NOTHING""",
                 (invoice_id, event["id"], session["id"], amount, kind),
             )
+            if inserted.rowcount != 1:
+                # Roll back this no-op transaction, then replay only the idempotent
+                # post-commit workflow path to repair a crash after the first commit.
+                raise _DuplicateStripeEvent
             if not amount_ok:
                 log.error(
                     "stripe session %s underpaid invoice %s: got %s, expected %s (kind=%s) — "
@@ -306,8 +317,32 @@ def _record_paid_session(event, session):
                                          'proposal_sent','contract_signed')""",
                     (d["project_id"],),
                 )
-    except db.sqlite3.IntegrityError:
-        duplicate = True  # Stripe retries. Workflow calls below are idempotent too.
+                paid_state = "deposit_paid" if kind == "deposit" else "paid"
+                title, body = push_notifications.alert_copy("payments")
+                notification_jobs = push_notifications.enqueue_owner_event_tx(
+                    con,
+                    dedupe_key=(f"invoice:{invoice_id}:{paid_state}:{event['id']}"),
+                    category="payments",
+                    route=f"/app/projects/{d['project_id']}",
+                    title=title,
+                    body=body,
+                )
+    except _DuplicateStripeEvent:
+        duplicate = True
+        paid_state = "deposit_paid" if kind == "deposit" else "paid"
+        duplicate_replays_settlement = (
+            db.one(
+                """SELECT 1 FROM mobile_notification_events
+                     WHERE dedupe_key=?""",
+                (f"invoice:{invoice_id}:{paid_state}:{event['id']}",),
+            )
+            is not None
+        )
+    try:
+        push_notifications.kick(notification_jobs)
+    except Exception:
+        # The durable event remains queued for the notification sweeper.
+        log.exception("invoice %s payment notification kick failed", invoice_id)
     if not amount_ok:
         # Money arrived but doesn't cover what this kind owes: the payment row stands
         # (a real charge is never dropped) and the operator has been alerted, but we
@@ -316,6 +351,11 @@ def _record_paid_session(event, session):
         # funnel auto-advance to retainer_paid or a client-facing "deposit received"
         # workflow fire is the exact false-settlement this reconciliation guards.
         return {"ok": True, "underpaid": True, "duplicate": duplicate}
+    if duplicate and not duplicate_replays_settlement:
+        # A redelivery of an underpayment or already-settled second charge has no
+        # transactional settlement snapshot, so there is intentionally no workflow
+        # effect to repair.
+        return {"ok": True, "duplicate": True}
     if already_settled:
         # A second distinct paid session for an obligation already settled = a double
         # charge. The payment is on record (for the receipt + refund trail); alert the

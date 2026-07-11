@@ -5,4 +5,6 @@ itsdangerous==2.2.0
 pillow==12.2.0
 pillow-heif==1.4.0
 python-multipart==0.0.32
+httpx[http2]==0.28.1
+PyJWT[crypto]==2.13.0
 stripe==15.2.1

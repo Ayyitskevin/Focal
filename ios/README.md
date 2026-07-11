@@ -14,14 +14,20 @@ obscure source reviews.
 1. Set the hosted platform root in `Config/Debug.xcconfig`. The current value is a
    non-production placeholder. A hosted slug such as `north-star` resolves beneath
    this root; users enter a full origin for custom or self-hosted servers.
-2. If the bundle identifier or signing team differs, update `project.yml`.
-3. From this directory, run:
+2. Replace `MISE_ASSOCIATED_DOMAIN` in both xcconfig files with the hosted apex
+   that serves Mise's AASA document. Keep Debug on `sandbox`/`development` and
+   Release on `production`/`production` for APNs.
+   Debug must point at a separate backend configured for `MISE_APNS_ENVIRONMENT=sandbox`;
+   one backend intentionally rejects tokens from the other APNs environment.
+3. If the bundle identifier or signing team differs, update `project.yml`, the
+   backend `MISE_APNS_TOPIC`, and the Apple identifier/provisioning profile together.
+4. From this directory, run:
 
        xcodegen generate
        open Mise.xcodeproj
 
-4. Select the Mise scheme and an iOS 17+ destination.
-5. Run the MiseTests test plan from Xcode or:
+5. Select the Mise scheme and an iOS 17+ destination.
+6. Run the MiseTests test plan from Xcode or:
 
        xcodebuild test \
          -project Mise.xcodeproj \
@@ -58,11 +64,20 @@ and avoiding it in the foundation keeps auth/session behavior auditable.
   keys; notification/workflow effects are persisted to the tenant job queue.
   Booking creation remains on the public scheduler until a dedicated mobile
   booking credential can preserve its anti-abuse controls.
+- Milestone 5A adds contextual notification permission, APNs token synchronization,
+  native preferences, strict notification/universal-link routing, associated-domain
+  and APNs entitlements, and the App Store privacy manifest. The installation UUID
+  uses a ThisDeviceOnly Keychain item; APNs tokens remain memory-only. Only owner
+  sessions register in this milestone.
 - Gallery media uses the active session's single rotating authenticator. Server
   media URLs are accepted only when their origin and exact capability path match
   the active workspace; redirects are rejected and bearer tokens never enter URLs.
 - Do not add access tokens, refresh tokens, PINs, Stripe secrets, or APNs keys to
   xcconfig files.
+
+Simulator tests validate request construction and routing, but APNs acceptance does
+not. Before distributing a build, complete the physical-device sandbox and
+TestFlight production checks in `../docs/IOS-PUSH-OPERATIONS.md`.
 
 See `../docs/IOS-ARCHITECTURE.md` and `../docs/IOS-API-V1.md` for the product and
 backend plan.

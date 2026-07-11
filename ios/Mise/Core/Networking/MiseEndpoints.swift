@@ -65,6 +65,36 @@ enum MiseEndpoints {
         )
     }
 
+    enum Devices {
+        static func register(
+            _ body: DeviceRegistrationRequest
+        ) throws -> APIEndpoint<DeviceRegistration> {
+            try .json(method: .post, path: "/api/v1/devices", body: body)
+        }
+
+        static let current = APIEndpoint<DeviceRegistration>(
+            method: .get,
+            path: "/api/v1/devices/current"
+        )
+
+        static func updatePreferences(
+            _ body: NotificationPreferences,
+            etag: String
+        ) throws -> APIEndpoint<DeviceRegistration> {
+            try .json(
+                method: .patch,
+                path: "/api/v1/devices/current",
+                body: NotificationPreferencesUpdate(preferences: body),
+                headers: ["If-Match": etag]
+            )
+        }
+
+        static let unregister = APIEndpoint<EmptyResponse>(
+            method: .delete,
+            path: "/api/v1/devices/current"
+        )
+    }
+
     static let dashboard = APIEndpoint<DashboardSummary>(
         method: .get,
         path: "/api/v1/dashboard"

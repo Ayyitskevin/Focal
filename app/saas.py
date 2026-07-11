@@ -1448,6 +1448,9 @@ MARKETING_INDEXABLE = {
     "/robots.txt",
     "/sitemap.xml",
 }
+_APPLE_ASSOCIATION_PATHS = frozenset(
+    {"/.well-known/apple-app-site-association", "/apple-app-site-association"}
+)
 
 
 def _platform_path(path: str) -> bool:
@@ -1467,6 +1470,7 @@ def _platform_path(path: str) -> bool:
             "/robots.txt",
             "/sitemap.xml",
         }
+        or path in _APPLE_ASSOCIATION_PATHS
         or path.startswith("/static/")
         # API callers must always receive an API response. Redirecting an unknown
         # root-host request to /pricing would turn auth/discovery failures into an
@@ -1500,6 +1504,8 @@ def _billing_allowed_path(path: str) -> bool:
             "/api/v1/me",
         }
         or path.startswith("/api/v1/auth/sessions")
+        or path.startswith("/api/v1/devices")
+        or path in _APPLE_ASSOCIATION_PATHS
         or path in {"/webhooks/stripe", "/webhooks/stripe/saas"}
     )
 

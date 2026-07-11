@@ -85,6 +85,8 @@ def test_tenant_discovery_and_openapi_are_scoped_native_contracts(mobile_client)
     schema = schema_response.json()
     assert schema["info"]["title"] == "Mise Mobile API"
     assert set(schema["paths"]) == {
+        "/devices",
+        "/devices/current",
         "/tenant",
         "/auth/studio/login",
         "/auth/refresh",

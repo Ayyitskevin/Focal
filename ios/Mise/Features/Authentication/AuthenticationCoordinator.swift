@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import UIKit
 
 enum SessionGatePhase {
     case loading
@@ -12,7 +11,9 @@ enum SessionGatePhase {
 @MainActor
 @Observable
 final class AuthenticationCoordinator {
-    private(set) var phase: SessionGatePhase = .loading
+    private(set) var phase: SessionGatePhase = .loading {
+        didSet { notificationCoordinator.router.authenticationDidChange(phase.routerState) }
+    }
     private(set) var flow = AuthenticationFlowState()
     private(set) var isWorking = false
     private(set) var workDescription = ""
@@ -45,21 +46,26 @@ final class AuthenticationCoordinator {
     private let sharedAccessParser: SharedAccessTargetParser
     private let originStore: WorkspaceOriginStore
     private let installationIdentity: InstallationIdentity
+    private let notificationCoordinator: NotificationCoordinator
     private var activeWorkspace: WorkspaceEnvironment?
     private(set) var ownerRepository: OwnerRepository?
     private(set) var clientDeliveryEnvironment: ClientDeliveryEnvironment?
     private var unlockOnActivation = false
     private var applicationIsActive = true
     private var hasRestored = false
+    private var deferredIncomingURL: URL?
+    private var pendingSharedAccessURL: URL?
 
     init(
         environment: AppEnvironment,
         originStore: WorkspaceOriginStore = WorkspaceOriginStore(),
-        installationIdentity: InstallationIdentity = InstallationIdentity()
+        installationIdentity: InstallationIdentity,
+        notificationCoordinator: NotificationCoordinator
     ) {
         self.environment = environment
         self.originStore = originStore
         self.installationIdentity = installationIdentity
+        self.notificationCoordinator = notificationCoordinator
 #if DEBUG
         let permitsInsecureLoopback = true
 #else
@@ -232,7 +238,7 @@ final class AuthenticationCoordinator {
             let request = StudioLoginRequest(
                 email: email.isEmpty ? nil : email,
                 password: ownerPassword,
-                device: installationIdentity.deviceContext(
+                device: try installationIdentity.deviceContext(
                     appVersion: environment.configuration.clientVersion
                 )
             )
@@ -301,7 +307,7 @@ final class AuthenticationCoordinator {
                 kind: target.capability.sharedAccessKind,
                 slug: target.slug,
                 pin: pin.isEmpty ? nil : pin,
-                device: installationIdentity.deviceContext(
+                device: try installationIdentity.deviceContext(
                     appVersion: environment.configuration.clientVersion
                 )
             )
@@ -321,11 +327,14 @@ final class AuthenticationCoordinator {
         }
     }
 
-    func signOut() async {
-        guard !isWorking else { return }
+    @discardableResult
+    func signOut() async -> Bool {
+        guard !isWorking else { return false }
         isWorking = true
         workDescription = "Signing out"
         errorMessage = nil
+
+        await notificationCoordinator.unregisterBeforeLogout()
 
         if let ownerRepository {
             await ownerRepository.purgeCache()
@@ -354,6 +363,7 @@ final class AuthenticationCoordinator {
         phase = .signedOut
         isWorking = false
         workDescription = ""
+        return true
     }
 
     func sceneDidEnterBackground() {
@@ -491,8 +501,13 @@ final class AuthenticationCoordinator {
                 client: workspace.apiClient,
                 cache: TenantJSONCache(cacheNamespace: context.workspace.cacheNamespace)
             )
+            notificationCoordinator.bindOwner(
+                session: context,
+                repository: DeviceRegistrationRepository(client: workspace.apiClient)
+            )
         } else {
             ownerRepository = nil
+            notificationCoordinator.unbindOwner()
         }
 
         let kind = context.principal.kind
@@ -542,6 +557,81 @@ final class AuthenticationCoordinator {
             phase = .locked(context, kind)
             await unlockApp()
         }
+    }
+
+    var hasPendingSharedAccessSwitch: Bool {
+        pendingSharedAccessURL != nil
+    }
+
+    func handleIncomingURL(_ url: URL) {
+        if url.path.hasPrefix("/app/") {
+            notificationCoordinator.router.receiveUniversalLink(url)
+            return
+        }
+        if case .loading = phase {
+            deferredIncomingURL = url
+            return
+        }
+
+        do {
+            let target = try sharedAccessParser.parse(
+                url.absoluteString,
+                selectedCapability: selectedCapability,
+                currentWorkspaceOrigin: flow.workspace?.address.origin
+            )
+            switch phase {
+            case .signedOut:
+                prepareSharedAccess(url: url, target: target)
+            case .signedIn, .locked:
+                pendingSharedAccessURL = url
+            case .loading:
+                deferredIncomingURL = url
+            }
+        } catch {
+            present(error)
+        }
+    }
+
+    func processDeferredIncomingURL() {
+        guard let url = deferredIncomingURL else { return }
+        deferredIncomingURL = nil
+        handleIncomingURL(url)
+    }
+
+    func cancelSharedAccessSwitch() {
+        pendingSharedAccessURL = nil
+    }
+
+    func confirmSharedAccessSwitch() async {
+        guard let url = pendingSharedAccessURL else { return }
+        let target: SharedAccessTarget
+        do {
+            target = try sharedAccessParser.parse(
+                url.absoluteString,
+                selectedCapability: selectedCapability,
+                currentWorkspaceOrigin: flow.workspace?.address.origin
+            )
+        } catch {
+            pendingSharedAccessURL = nil
+            present(error)
+            return
+        }
+        guard await signOut() else { return }
+        pendingSharedAccessURL = nil
+        prepareSharedAccess(url: url, target: target)
+    }
+
+    func confirmOwnerWorkspaceSwitch(_ request: WorkspaceSwitchRequest) async {
+        guard await signOut() else { return }
+        notificationCoordinator.router.queueAfterWorkspaceSwitch(request)
+        workspaceInput = request.origin.absoluteString
+        await discoverWorkspace()
+    }
+
+    private func prepareSharedAccess(url: URL, target: SharedAccessTarget) {
+        showClientLinkEntry()
+        selectedCapability = target.capability
+        sharedAccessInput = url.absoluteString
     }
 
     private func clearCredentialInputs(keepingSharedAccessInput: Bool) {
@@ -676,29 +766,13 @@ final class WorkspaceOriginStore {
     }
 }
 
-@MainActor
-final class InstallationIdentity {
-    private let defaults: UserDefaults
-    private let key = "mise.installation-id"
-
-    init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-    }
-
-    func deviceContext(appVersion: String) -> DeviceContext {
-        let installationID: String
-        if let existing = defaults.string(forKey: key),
-           UUID(uuidString: existing) != nil
-        {
-            installationID = existing
-        } else {
-            installationID = UUID().uuidString.lowercased()
-            defaults.set(installationID, forKey: key)
+private extension SessionGatePhase {
+    var routerState: RouterAuthenticationState {
+        switch self {
+        case .loading: .loading
+        case .signedOut: .signedOut
+        case let .signedIn(session): .signedIn(session)
+        case let .locked(session, _): .locked(session)
         }
-        return DeviceContext(
-            installationID: installationID,
-            name: UIDevice.current.name,
-            appVersion: appVersion
-        )
     }
 }

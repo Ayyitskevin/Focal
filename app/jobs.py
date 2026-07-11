@@ -201,6 +201,13 @@ def _h_mobile_policy_effect(payload: dict) -> None:
     )
 
 
+def _h_apns_delivery(payload: dict) -> None:
+    # Lazy import avoids jobs -> push_notifications -> jobs at module import.
+    from . import push_notifications
+
+    push_notifications.deliver(int(payload["delivery_id"]))
+
+
 HANDLERS = {
     "image_derivatives": _h_image,
     "social_crops": _h_crops,
@@ -223,6 +230,7 @@ HANDLERS = {
     # mutates nothing until promotion is a deliberate flag + code change (ADR 0017).
     "qwen_writeback_gallery": lambda p: qwen_writeback.writeback_gallery(p["gallery_id"]),
     "mobile_policy_effect": _h_mobile_policy_effect,
+    "apns_delivery": _h_apns_delivery,
     # Local keeper-scoring for the cull deck: per-asset Qwen scores into argus_keeper_score.
     # Score-only, asset_id-keyed, inert unless MISE_CULL_SCORER + a challenger URL are set;
     # independent of the production cutover (ADR 0033).
@@ -335,7 +343,9 @@ def start() -> None:
         from . import saas
 
         total = 0
-        for tenant in saas.list_tenants(billable_only=True):
+        for tenant in saas.list_tenants():
+            if tenant.get("deleted_at") or not saas.tenant_has_access(tenant):
+                continue
             with saas.tenant_runtime(tenant):
                 db.run("UPDATE jobs SET status='queued' WHERE status='running'")
                 backlog = db.all_("SELECT id FROM jobs WHERE status='queued' ORDER BY id")
@@ -358,3 +368,7 @@ def stop() -> None:
     if _pool:
         _pool.shutdown(wait=False, cancel_futures=True)
         _pool = None
+    # Release the persistent HTTP/2 connection and provider-token cache.
+    from . import apns
+
+    apns.close()

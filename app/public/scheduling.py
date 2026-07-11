@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
-from .. import booking_notify, config, db, ics, mailer, scheduling, security
+from .. import booking_notify, config, ics, mailer, scheduling, security
 from ..render import templates
 
 log = logging.getLogger("mise.public.scheduling")
@@ -162,25 +162,24 @@ async def confirm_booking(
         )
     if not (name and _valid_email(email)):
         return repicker("Please enter your name and a valid email.")
+    has_intake = bool(et["creates_notion_session"])
     try:
-        bid, token = scheduling.book(et, start, name, email, phone, notes, tz)
+        bid, token = scheduling.book(
+            et,
+            start,
+            name,
+            email,
+            phone,
+            notes,
+            tz,
+            venue_address=venue_address.strip()[:300] if has_intake else "",
+            dish_count=dish_count.strip()[:60] if has_intake else "",
+            parking_notes=parking_notes.strip()[:500] if has_intake else "",
+            style_refs=style_refs.strip()[:1000] if has_intake else "",
+            onsite_contact=onsite_contact.strip()[:120] if has_intake else "",
+        )
     except scheduling.SlotTaken:
         return repicker("Sorry — that time was just taken. Please pick another.", 409)
-    # Persist the F&B intake (shoot event types only) before side-effects fire, so the
-    # auto-created project + Notion Session pick it up.
-    if et["creates_notion_session"]:
-        db.run(
-            """UPDATE bookings SET venue_address=?, dish_count=?, parking_notes=?,
-                  style_refs=?, onsite_contact=? WHERE id=?""",
-            (
-                venue_address.strip()[:300],
-                dish_count.strip()[:60],
-                parking_notes.strip()[:500],
-                style_refs.strip()[:1000],
-                onsite_contact.strip()[:120],
-                bid,
-            ),
-        )
     security.inquiry_record(ip, security.INQUIRY_BUCKET_BOOK)
     booking_notify.confirm(bid)
     log.info("booking %s confirmed (%s)", bid, slug)
@@ -276,6 +275,11 @@ async def do_reschedule(request: Request, token: str, start: str = Form(...), tz
             b["notes"],
             tz or b["tz"],
             exclude_id=b["id"],
+            venue_address=b["venue_address"] or "",
+            dish_count=b["dish_count"] or "",
+            parking_notes=b["parking_notes"] or "",
+            style_refs=b["style_refs"] or "",
+            onsite_contact=b["onsite_contact"] or "",
         )
     except scheduling.SlotTaken:
         ctx = _picker_ctx(et, request, is_reschedule=True, token=token)
@@ -283,8 +287,7 @@ async def do_reschedule(request: Request, token: str, start: str = Form(...), tz
         ctx["old_when"] = b["start_utc"]
         ctx["error"] = "Sorry — that time was just taken. Please pick another."
         return templates.TemplateResponse(request, "public/book_event.html", ctx, status_code=409)
-    # New slot held; release the old one and email the fresh invite.
-    scheduling.cancel(token, "Rescheduled")
+    # The new slot, old-slot release, and owner notification committed together.
     booking_notify.rescheduled(new_id)
     log.info("booking %s rescheduled -> %s", b["id"], new_id)
     return RedirectResponse(f"/booking/{new_token}", status_code=303)

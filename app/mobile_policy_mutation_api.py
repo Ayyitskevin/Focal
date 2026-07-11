@@ -25,6 +25,7 @@ from . import (
     gcal,
     jobs,
     mobile_auth,
+    push_notifications,
     scheduling,
     security,
     workflows,
@@ -530,6 +531,7 @@ def _decide_proposal(
     proposal_id = int(principal.resource_id)
     operation = f"proposal.{decision}:{proposal_id}"
     job_id = None
+    notification_jobs: list[int] = []
     with mutations._immediate_transaction() as con:
         claim = mutations._claim_command(
             con,
@@ -595,10 +597,25 @@ def _decide_proposal(
                 status_code=200,
                 effect=effect,
             )
+            verb = "accepted" if decision == "accept" else "declined"
+            title, body = push_notifications.alert_copy("proposal_responses")
+            notification_jobs = push_notifications.enqueue_owner_event_tx(
+                con,
+                dedupe_key=f"proposal.{verb}:{proposal_id}",
+                category="proposal_responses",
+                route=f"/app/projects/{row['project_id']}",
+                title=title,
+                body=body,
+            )
             if effect is not None:
                 job_id = _enqueue_effect(con, principal, claim.key)
     if job_id is not None:
         jobs.kick(job_id)
+    try:
+        push_notifications.kick(notification_jobs)
+    except Exception:
+        # The durable event remains queued for the notification sweeper.
+        log.exception("proposal %s notification kick failed", proposal_id)
     mutations._private(response, etag=_document_etag(value), replayed=claim.replayed)
     return value
 

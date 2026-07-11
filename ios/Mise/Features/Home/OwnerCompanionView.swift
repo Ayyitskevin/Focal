@@ -33,20 +33,33 @@ struct OwnerCompanionView: View {
     @State private var galleries: OwnerResourceModel<[GallerySummary]>
     @State private var bookings: OwnerResourceModel<[Booking]>
     @State private var tasks: OwnerResourceModel<[TaskDetail]>
+    @State private var homePath: [OwnerRoute] = []
+    @State private var clientsPath: [OwnerRoute] = []
+    @State private var projectsPath: [OwnerRoute] = []
+    @State private var galleriesPath: [OwnerRoute] = []
+    @State private var calendarPath: [OwnerRoute] = []
+    @State private var tasksPath: [OwnerRoute] = []
+    @State private var showingNotificationSettings = false
 
     let session: CurrentSession
     let repository: OwnerRepository
+    let notifications: NotificationCoordinator
+    let router: AppRouter
     let isSigningOut: Bool
     let signOut: @MainActor () async -> Void
 
     init(
         session: CurrentSession,
         repository: OwnerRepository,
+        notifications: NotificationCoordinator,
+        router: AppRouter,
         isSigningOut: Bool,
         signOut: @escaping @MainActor () async -> Void
     ) {
         self.session = session
         self.repository = repository
+        self.notifications = notifications
+        self.router = router
         self.isSigningOut = isSigningOut
         self.signOut = signOut
         _home = State(initialValue: OwnerResourceModel(
@@ -82,46 +95,64 @@ struct OwnerCompanionView: View {
     }
 
     var body: some View {
-        if horizontalSizeClass == .regular {
-            NavigationSplitView {
-                List(OwnerDestination.allCases) { destination in
-                    Button {
-                        selection = destination
-                    } label: {
-                        HStack {
-                            Label(destination.title, systemImage: destination.icon)
-                            Spacer()
-                            if selection == destination {
-                                Image(systemName: "checkmark")
-                                    .accessibilityHidden(true)
+        Group {
+            if horizontalSizeClass == .regular {
+                NavigationSplitView {
+                    List(OwnerDestination.allCases) { destination in
+                        Button {
+                            selection = destination
+                        } label: {
+                            HStack {
+                                Label(destination.title, systemImage: destination.icon)
+                                Spacer()
+                                if selection == destination {
+                                    Image(systemName: "checkmark")
+                                        .accessibilityHidden(true)
+                                }
                             }
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(selection == destination ? .isSelected : [])
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(selection == destination ? .isSelected : [])
+                    .navigationTitle(session.workspace.displayName)
+                } detail: {
+                    ownerStack(selection)
                 }
-                .navigationTitle(session.workspace.displayName)
-            } detail: {
-                ownerStack(selection)
-            }
-        } else {
-            TabView(selection: $selection) {
-                ForEach(OwnerDestination.allCases) { destination in
-                    ownerStack(destination)
-                        .tabItem { Label(destination.title, systemImage: destination.icon) }
-                        .tag(destination)
+            } else {
+                TabView(selection: $selection) {
+                    ForEach(OwnerDestination.allCases) { destination in
+                        ownerStack(destination)
+                            .tabItem { Label(destination.title, systemImage: destination.icon) }
+                            .tag(destination)
+                    }
                 }
             }
         }
+        .sheet(isPresented: $showingNotificationSettings) {
+            NavigationStack {
+                NotificationSettingsView(notifications: notifications)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showingNotificationSettings = false }
+                        }
+                    }
+            }
+        }
+        .onAppear { handle(router.navigationRequest) }
+        .onChange(of: router.navigationRequest) { _, request in handle(request) }
     }
 
     private func ownerStack(_ destination: OwnerDestination) -> some View {
-        NavigationStack {
+        NavigationStack(path: pathBinding(for: destination)) {
             screen(destination)
+                .navigationDestination(for: OwnerRoute.self, destination: routeDestination)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
                             LabeledContent("Studio", value: session.workspace.displayName)
+                            Button("Notification settings", systemImage: "bell") {
+                                showingNotificationSettings = true
+                            }
                             Button("Sign out", role: .destructive) {
                                 Task { await signOut() }
                             }
@@ -133,6 +164,62 @@ struct OwnerCompanionView: View {
                     }
                 }
         }
+    }
+
+    private func pathBinding(for destination: OwnerDestination) -> Binding<[OwnerRoute]> {
+        switch destination {
+        case .home: $homePath
+        case .clients: $clientsPath
+        case .projects: $projectsPath
+        case .galleries: $galleriesPath
+        case .calendar: $calendarPath
+        case .tasks: $tasksPath
+        }
+    }
+
+    @ViewBuilder
+    private func routeDestination(_ route: OwnerRoute) -> some View {
+        switch route {
+        case .home:
+            HomeView(model: home) { selection = $0 }
+        case let .project(id):
+            ProjectEditorView(repository: repository, projectID: id, clients: []) {
+                await projects.refresh()
+            }
+        case let .gallery(id, assetID):
+            GalleryDetailView(
+                repository: repository,
+                galleryID: id,
+                initialAssetID: assetID
+            )
+        case let .booking(id):
+            BookingRouteView(
+                repository: repository,
+                bookingID: id,
+                timeZoneIdentifier: session.workspace.timeZone
+            ) {
+                await bookings.refresh()
+            }
+        }
+    }
+
+    private func handle(_ request: OwnerNavigationRequest?) {
+        guard let request else { return }
+        switch request.route {
+        case .home:
+            selection = .home
+            homePath.removeAll()
+        case .project:
+            selection = .projects
+            projectsPath = [request.route]
+        case .gallery:
+            selection = .galleries
+            galleriesPath = [request.route]
+        case .booking:
+            selection = .calendar
+            calendarPath = [request.route]
+        }
+        router.consumeNavigation(request.id)
     }
 
     @ViewBuilder

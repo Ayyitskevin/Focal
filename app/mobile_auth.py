@@ -19,6 +19,7 @@ import json
 import re
 import secrets
 import sqlite3
+import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
@@ -182,6 +183,12 @@ def _installation_hash(installation_id: str | None) -> str | None:
     value = (installation_id or "").strip()
     if not value:
         return None
+    try:
+        value = str(uuid.UUID(value))
+    except ValueError:
+        # Older clients used bounded opaque installation identifiers. Preserve
+        # their exact lexical identity while canonicalizing native UUIDs.
+        pass
     return hashlib.sha256(f"mise-installation\0{value}".encode()).hexdigest()
 
 
@@ -663,6 +670,41 @@ def _revoke_session_tx(con: sqlite3.Connection, session_id: str, now_ts: int, re
         "UPDATE api_tokens SET revoked_at=COALESCE(revoked_at, ?) WHERE session_id=?",
         (now_ts, session_id),
     )
+    # Lazy import avoids a mobile_auth -> push_notifications -> mobile_auth cycle.
+    # Token material is erased in the same transaction as family revocation.
+    from . import push_notifications
+
+    push_notifications.deactivate_session_tx(con, session_id, reason)
+
+
+def session_is_current(con: sqlite3.Connection, session_id: str) -> bool:
+    """Re-check a session immediately before an asynchronous privileged effect.
+
+    Push delivery must not rely on registration-time authentication: the owner
+    may have logged out, revoked the device, rotated their password, or reached
+    the absolute session cap while an event was queued.
+    """
+
+    row = con.execute(
+        """SELECT id AS session_id, tenant_key, principal_kind, resource_id,
+                  resource_variant, gallery_visitor_id, scopes_json,
+                  credential_fingerprint, device_name, device_platform,
+                  device_app_version, created_at, last_seen_at,
+                  absolute_expires_at, revoked_at AS session_revoked_at
+             FROM api_sessions WHERE id=?""",
+        (session_id,),
+    ).fetchone()
+    if row is None or row["session_revoked_at"] is not None:
+        return False
+
+    now_ts = _now_ts()
+    if row["absolute_expires_at"] <= now_ts:
+        _revoke_session_tx(con, session_id, now_ts, "session_expired")
+        return False
+    if not _credential_is_current(con, row):
+        _revoke_session_tx(con, session_id, now_ts, "credential_changed")
+        return False
+    return True
 
 
 def _invalid_token() -> MobileAuthError:
@@ -687,11 +729,14 @@ def authenticate_access(
             raise _invalid_token()
         if not _binding_matches(request, row["tenant_key"]):
             raise _invalid_token()
+        if row["absolute_expires_at"] <= now_ts:
+            _revoke_session_tx(con, row["session_id"], now_ts, "session_expired")
+            con.commit()
+            raise _invalid_token()
         if (
             row["session_revoked_at"] is not None
             or row["token_revoked_at"] is not None
             or row["token_expires_at"] <= now_ts
-            or row["absolute_expires_at"] <= now_ts
         ):
             raise _invalid_token()
         if not _credential_is_current(con, row):

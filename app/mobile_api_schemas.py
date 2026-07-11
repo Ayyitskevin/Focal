@@ -242,8 +242,8 @@ class Principal(MobileAPIModel):
 class AuthSession(MobileAPIModel):
     """Token response decoded by the iOS ``AuthSession`` model.
 
-    ``session_id`` is additive metadata for diagnostics/revocation.  The current Swift
-    decoder safely ignores it; every field required by Swift remains required here.
+    ``session_id`` is additive metadata for diagnostics/revocation. The Swift client
+    decodes and persists it as part of its tenant-bound session context.
     """
 
     access_token: LongBoundedString

@@ -1,11 +1,13 @@
-"""Mise's scheduler — one in-process daemon thread for every recurring sweep.
+"""Mise's scheduler — one in-process daemon thread with two bounded cadences.
 
 It wakes on an interval and runs: due recurring plans (DRAFT invoices only —
 the money path never sends or charges itself; Kevin still clicks Send, Stripe
 still collects), the operational reminder sweeps (booking/gallery/contract/
 retainer/post-shoot — owner- and client-consented reminder mail per their own
-gates), and in hosted mode the platform lifecycle mail (trial reminder,
-win-back, dunning, weekly operator digest — all owner-facing, all one-shot).
+gates), durable APNs delivery, and in hosted mode the platform lifecycle mail
+(trial reminder, win-back, dunning, weekly operator digest — all owner-facing,
+all one-shot). Push delivery gets a short polling cadence while the heavier
+business sweeps retain their configured hourly cadence.
 It is deliberately the simplest thing that works: no cron, no run_at column,
 no second process. Every sweep is idempotent (period claims, one-shot stamps),
 so the loop can fire as often as it likes.
@@ -18,6 +20,7 @@ which is plenty for a monthly event.
 
 import logging
 import threading
+import time
 
 from . import (
     booking_reminders,
@@ -26,6 +29,7 @@ from . import (
     gallery_reminders,
     ops_monitor,
     postshoot_reminders,
+    push_notifications,
     retainer_reminders,
 )
 from .admin import recurring
@@ -37,37 +41,74 @@ _thread: threading.Thread | None = None
 
 
 def _loop(stop_event: threading.Event) -> None:
-    while not stop_event.wait(config.RECURRING_TICK_SECONDS):
-        if config.SAAS_MODE:
-            from . import saas
+    recurring_interval = max(1, int(config.RECURRING_TICK_SECONDS))
+    push_interval = max(1, int(config.APNS_SWEEP_SECONDS))
+    now = time.monotonic()
+    next_recurring = now + recurring_interval
+    next_push = now + push_interval
 
+    while True:
+        if stop_event.wait(max(0.0, min(next_recurring, next_push) - time.monotonic())):
+            return
+        now = time.monotonic()
+        if now >= next_push:
+            _push_sweep_all()
+            next_push = now + push_interval
+        if now >= next_recurring:
+            _recurring_sweep_all()
+            next_recurring = now + recurring_interval
+
+
+def _recurring_sweep_all() -> None:
+    if config.SAAS_MODE:
+        from . import saas
+
+        try:
+            # Platform-level lifecycle mail (ADR 0060) — outside tenant_runtime
+            # on purpose: it must carry platform identity, not a studio's.
+            saas.trial_reminder_sweep()
+        except Exception:
+            log.exception("trial reminder sweep failed")
+        try:
+            saas.winback_sweep()
+        except Exception:
+            log.exception("win-back sweep failed")
+        try:
+            saas.dunning_sweep()
+        except Exception:
+            log.exception("dunning sweep failed")
+        try:
+            # The one sweep that mails the OPERATOR, not a tenant (Batch D1).
+            saas.weekly_digest_sweep()
+        except Exception:
+            log.exception("weekly digest sweep failed")
+        for tenant in saas.list_tenants(billable_only=True):
             try:
-                # Platform-level lifecycle mail (ADR 0060) — outside tenant_runtime
-                # on purpose: it must carry platform identity, not a studio's.
-                saas.trial_reminder_sweep()
+                with saas.tenant_runtime(tenant):
+                    _sweep_once()
             except Exception:
-                log.exception("trial reminder sweep failed")
+                log.exception("tenant scheduler sweep failed: %s", tenant["slug"])
+        return
+    _sweep_once()
+
+
+def _push_sweep_all() -> None:
+    if config.SAAS_MODE:
+        from . import saas
+
+        for tenant in saas.list_tenants():
+            if tenant.get("deleted_at"):
+                continue
             try:
-                saas.winback_sweep()
+                with saas.tenant_runtime(tenant):
+                    push_notifications.sweep(dispatch=saas.tenant_has_access(tenant))
             except Exception:
-                log.exception("win-back sweep failed")
-            try:
-                saas.dunning_sweep()
-            except Exception:
-                log.exception("dunning sweep failed")
-            try:
-                # The one sweep that mails the OPERATOR, not a tenant (Batch D1).
-                saas.weekly_digest_sweep()
-            except Exception:
-                log.exception("weekly digest sweep failed")
-            for tenant in saas.list_tenants(billable_only=True):
-                try:
-                    with saas.tenant_runtime(tenant):
-                        _sweep_once()
-                except Exception:
-                    log.exception("tenant scheduler sweep failed: %s", tenant["slug"])
-            continue
-        _sweep_once()
+                log.exception("tenant push sweep failed: %s", tenant["slug"])
+        return
+    try:
+        push_notifications.sweep()
+    except Exception:
+        log.exception("push notification sweep failed")
 
 
 def _sweep_once() -> None:
@@ -110,7 +151,9 @@ def start() -> None:
     _thread = threading.Thread(target=_loop, args=(_stop,), name="mise-recurring", daemon=True)
     _thread.start()
     log.info(
-        "scheduler up (every %ss; money path stays drafts-only)", config.RECURRING_TICK_SECONDS
+        "scheduler up (recurring=%ss, push=%ss; money path stays drafts-only)",
+        config.RECURRING_TICK_SECONDS,
+        config.APNS_SWEEP_SECONDS,
     )
 
 
