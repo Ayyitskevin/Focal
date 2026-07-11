@@ -49,6 +49,7 @@ final class AuthenticationCoordinator {
     private let notificationCoordinator: NotificationCoordinator
     private var activeWorkspace: WorkspaceEnvironment?
     private(set) var ownerRepository: OwnerRepository?
+    private(set) var ownerMediaEnvironment: OwnerMediaEnvironment?
     private(set) var clientDeliveryEnvironment: ClientDeliveryEnvironment?
     private var unlockOnActivation = false
     private var applicationIsActive = true
@@ -138,6 +139,7 @@ final class AuthenticationCoordinator {
             }
             await workspace.session.invalidate()
             ownerRepository = nil
+            ownerMediaEnvironment = nil
             clientDeliveryEnvironment = nil
             originStore.clear()
             errorMessage = "Your saved session could not be restored. Sign in again."
@@ -153,6 +155,12 @@ final class AuthenticationCoordinator {
             try? await TenantJSONCache(
                 cacheNamespace: session.workspace.cacheNamespace
             ).removeAll()
+            let ownerMedia = workspace.ownerMedia(
+                workspaceCacheNamespace: session.workspace.cacheNamespace,
+                principalID: session.principal.id,
+                sessionID: session.sessionID
+            )
+            await ownerMedia.purge()
             return
         }
         let clientData = workspace.clientDelivery(
@@ -194,6 +202,7 @@ final class AuthenticationCoordinator {
         errorMessage = nil
         activeWorkspace = nil
         ownerRepository = nil
+        ownerMediaEnvironment = nil
         clientDeliveryEnvironment = nil
         flow.showClientLink()
     }
@@ -205,6 +214,7 @@ final class AuthenticationCoordinator {
         errorMessage = nil
         activeWorkspace = nil
         ownerRepository = nil
+        ownerMediaEnvironment = nil
         clientDeliveryEnvironment = nil
         flow.reset()
     }
@@ -339,6 +349,9 @@ final class AuthenticationCoordinator {
         if let ownerRepository {
             await ownerRepository.purgeCache()
         }
+        if let ownerMediaEnvironment {
+            await ownerMediaEnvironment.purge()
+        }
         if let clientDeliveryEnvironment {
             await clientDeliveryEnvironment.purge()
         }
@@ -355,6 +368,7 @@ final class AuthenticationCoordinator {
         originStore.clear()
         self.activeWorkspace = nil
         ownerRepository = nil
+        ownerMediaEnvironment = nil
         clientDeliveryEnvironment = nil
         clearCredentialInputs(keepingSharedAccessInput: false)
         workspaceInput = ""
@@ -497,9 +511,18 @@ final class AuthenticationCoordinator {
         if context.principal.kind == .studioOwner,
            context.principal.allows("studio:read")
         {
+            let ownerMedia = workspace.ownerMedia(
+                workspaceCacheNamespace: context.workspace.cacheNamespace,
+                principalID: context.principal.id,
+                sessionID: context.sessionID
+            )
+            ownerMediaEnvironment = ownerMedia
             ownerRepository = OwnerRepository(
                 client: workspace.apiClient,
-                cache: TenantJSONCache(cacheNamespace: context.workspace.cacheNamespace)
+                cache: TenantJSONCache(cacheNamespace: context.workspace.cacheNamespace),
+                onSessionEnded: {
+                    await ownerMedia.purge()
+                }
             )
             notificationCoordinator.bindOwner(
                 session: context,
@@ -507,6 +530,7 @@ final class AuthenticationCoordinator {
             )
         } else {
             ownerRepository = nil
+            ownerMediaEnvironment = nil
             notificationCoordinator.unbindOwner()
         }
 

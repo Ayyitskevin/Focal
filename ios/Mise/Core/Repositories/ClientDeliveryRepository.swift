@@ -525,7 +525,8 @@ actor ClientDeliveryRepository {
             sections: sections,
             assets: assets,
             heroAssetIDs: detail.heroAssetIDs,
-            vision: detail.vision
+            vision: detail.vision,
+            cullEnabled: detail.cullEnabled
         )
     }
 }

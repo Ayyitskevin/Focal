@@ -69,6 +69,12 @@ and avoiding it in the foundation keeps auth/session behavior auditable.
   and APNs entitlements, and the App Store privacy manifest. The installation UUID
   uses a ThisDeviceOnly Keychain item; APNs tokens remain memory-only. Only owner
   sessions register in this milestone.
+- Milestone 5B.1 stages a flag-gated native owner cull review for ordinary galleries.
+  The server-derived `cull_enabled` capability controls entry to a cache-first,
+  cursor-paged review deck with protected thumbnail/preview media and explicit
+  keep/cut/restore decisions. Decisions are never queued offline, and the app has no
+  owner-cull original/download route. `MISE_CULL_UI` remains false by default and
+  controls the web deck, native routes, and client-delivery gate together.
 - Gallery media uses the active session's single rotating authenticator. Server
   media URLs are accepted only when their origin and exact capability path match
   the active workspace; redirects are rejected and bearer tokens never enter URLs.
@@ -76,8 +82,10 @@ and avoiding it in the foundation keeps auth/session behavior auditable.
   xcconfig files.
 
 Simulator tests validate request construction and routing, but APNs acceptance does
-not. Before distributing a build, complete the physical-device sandbox and
-TestFlight production checks in `../docs/IOS-PUSH-OPERATIONS.md`.
+not. The 5B.1 source and tests also have not yet been validated with current Xcode,
+on a physical device, or through TestFlight. Before distributing a build, complete
+the [push checks](../docs/IOS-PUSH-OPERATIONS.md) and
+[native cull checks](../docs/IOS-AI-CULL-OPERATIONS.md).
 
-See `../docs/IOS-ARCHITECTURE.md` and `../docs/IOS-API-V1.md` for the product and
-backend plan.
+See the [architecture](../docs/IOS-ARCHITECTURE.md) and
+[API contract](../docs/IOS-API-V1.md) for the product and backend plan.

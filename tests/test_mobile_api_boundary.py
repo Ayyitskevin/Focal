@@ -58,3 +58,8 @@ def test_mobile_gallery_derivatives_use_high_capacity_bucket_and_originals_stay_
     assert ratelimit._bucket_for(f"{base}/download", "GET") == "download"
     assert ratelimit._bucket_for(f"{base}/favorite", "PUT") == "api"
     assert ratelimit._bucket_for(f"{base}/comments", "POST") == "api"
+
+    owner_base = "/api/v1/galleries/9/cull/assets/17"
+    for variant in ("thumbnail", "preview"):
+        assert ratelimit._bucket_for(f"{owner_base}/{variant}", "GET") == "api_media"
+    assert ratelimit._bucket_for(f"{owner_base}/download", "GET") == "api"

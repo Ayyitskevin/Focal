@@ -119,6 +119,10 @@ def test_tenant_discovery_and_openapi_are_scoped_native_contracts(mobile_client)
         "/tasks/{task_id}",
         "/galleries",
         "/galleries/{gallery_id}",
+        "/galleries/{gallery_id}/cull",
+        "/galleries/{gallery_id}/cull/assets/{asset_id}/thumbnail",
+        "/galleries/{gallery_id}/cull/assets/{asset_id}/preview",
+        "/galleries/{gallery_id}/assets/{asset_id}/cull",
         "/event-types",
         "/bookings",
         "/bookings/{booking_id}",
@@ -127,6 +131,42 @@ def test_tenant_discovery_and_openapi_are_scoped_native_contracts(mobile_client)
         "/bookings/{booking_id}/reschedule",
     }
     assert all("admin" not in path for path in schema["paths"])
+    decision = schema["paths"]["/galleries/{gallery_id}/assets/{asset_id}/cull"]["patch"]
+    decision_headers = {
+        parameter["name"]: parameter
+        for parameter in decision["parameters"]
+        if parameter["in"] == "header"
+    }
+    assert set(decision_headers) == {"Authorization", "Idempotency-Key", "If-Match"}
+    assert all(parameter["required"] for parameter in decision_headers.values())
+    assert {"200", "401", "403", "404", "409", "422", "429"} <= set(decision["responses"])
+    media = schema["paths"]["/galleries/{gallery_id}/cull/assets/{asset_id}/preview"]["get"]
+    assert "image/jpeg" in media["responses"]["200"]["content"]
+    assert {"200", "304", "401", "403", "404", "422", "429"} <= set(media["responses"])
+    page = schema["paths"]["/galleries/{gallery_id}/cull"]["get"]
+    page_headers = {
+        parameter["name"]: parameter
+        for parameter in page["parameters"]
+        if parameter["in"] == "header"
+    }
+    assert set(page_headers) == {"Authorization", "If-None-Match"}
+    assert page_headers["Authorization"]["required"] is True
+    assert page_headers["If-None-Match"]["required"] is False
+    assert {"200", "304", "401", "403", "404", "409", "422", "429"} <= set(page["responses"])
+    for operation, status in ((page, "409"), (decision, "409"), (media, "422")):
+        schema_ref = operation["responses"][status]["content"]["application/problem+json"][
+            "schema"
+        ]["$ref"]
+        assert schema_ref == "#/components/schemas/APIProblem"
+    retry = page["responses"]["429"]
+    assert retry["headers"]["Retry-After"]["schema"] == {
+        "type": "integer",
+        "minimum": 0,
+    }
+    assert (
+        retry["content"]["application/problem+json"]["schema"]["$ref"]
+        == "#/components/schemas/APIProblem"
+    )
 
 
 def test_owner_login_me_device_list_refresh_replay_and_logout(mobile_client):

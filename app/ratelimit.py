@@ -49,6 +49,15 @@ def _bucket_for(path: str, method: str = "GET") -> str | None:
             return "api_media"
         if variant == "download":
             return "download"
+    owner_cull_parts = path.split("/")
+    if (
+        method == "GET"
+        and len(owner_cull_parts) == 9
+        and owner_cull_parts[1:4] == ["api", "v1", "galleries"]
+        and owner_cull_parts[5:7] == ["cull", "assets"]
+        and owner_cull_parts[-1] in {"thumbnail", "preview"}
+    ):
+        return "api_media"
     if path == "/api/v1" or path.startswith("/api/v1/"):
         return "api"
     if "/download" in path:

@@ -226,7 +226,8 @@ final class ClientDeliveryRepositoryTests: XCTestCase {
             ),
         ],
         heroAssetIDs: [],
-        vision: nil
+        vision: nil,
+        cullEnabled: false
     )
 }
 

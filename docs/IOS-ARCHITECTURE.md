@@ -1,6 +1,7 @@
 # Mise for iOS — architecture and delivery plan
 
-Status: Milestones 1–5A implementation complete; 5A release validation pending
+Status: Milestones 1–5A implementation complete; Milestone 5B.1 native cull
+implementation staged; current-Xcode and physical-device release validation pending
 Minimum OS: iOS 17 / iPadOS 17
 UI: SwiftUI
 State: Observation-based MVVM with async/await
@@ -171,13 +172,14 @@ Offline is cache-first for safe reads, deliberately narrow for writes.
 | Data | Offline behavior |
 | --- | --- |
 | Dashboard/CRM/document summaries | show last successful snapshot with age |
-| Gallery manifests/thumbnails | URLCache plus protected disk cache |
-| Explicit gallery downloads | background URLSession into protected app files |
+| Gallery manifests/thumbnails | tenant metadata cache plus bounded authenticated in-memory media |
+| Explicit gallery downloads | foreground authenticated transfer into protected app files |
 | Draft intake/forms/notes | SwiftData draft; queued submit with idempotency key |
 | Favorites/comments | optimistic only when queued operation has a stable ID |
 | Contract signatures/payments | never complete offline; server-confirmed only |
 | Booking | draft selection offline, but revalidate and book online atomically |
 | AI commands | online command; cache result/status for later display |
+| Owner cull review | cache the first metadata page; media and decisions require an active online owner session |
 
 Every persisted/cache key includes `workspace.cacheNamespace` plus the tenant-local
 entity ID. Logout, session revocation, or workspace change purges private cached
@@ -188,6 +190,33 @@ Use server validators instead of polling full payloads:
 - gallery `contentRevision` and ETag
 - collection cursor plus `updated_since` where deletion tombstones are available
 - background refresh only for user-visible, time-sensitive data
+
+### Native owner cull boundary
+
+Milestone 5B.1 adds one bounded AI-assisted workflow without making AI authoritative:
+
+- The owner gallery manifest exposes the server-derived `cullEnabled` capability.
+  It is true only for an ordinary gallery when the host-wide cull flag is armed;
+  shared-client manifests always return false.
+- `CullReviewModel` owns cache-first first-page loading, cursor continuation,
+  refresh generations, counts, and stable retry keys. A changed score-ranked
+  collection discards continuation and reloads page one.
+- `OwnerRepository` validates gallery/asset parentage, score bounds, strong ETags,
+  opaque media revisions, counts, cursors, and exact derivative paths before
+  publishing a server response.
+- An owner-only media environment accepts only exact cull thumbnail/preview paths.
+  It rejects client-delivery routes, redirects, original/download routes, encoded
+  paths, credentials, queries, and cross-parent URLs before reading a bearer token.
+- A decision is never queued offline or inferred from an AI score. Keep, cut, and
+  restore are explicit human actions and update the UI only after server confirmation.
+  A transport failure retains the exact idempotency key for an exact retry.
+
+The cached queue contains bounded metadata only and remains under the tenant owner
+cache namespace. Cull images use the bounded in-memory authenticated-media cache;
+the opaque `mediaRevision` changes with stored/derivative identity and keys that
+cache without exposing a path. Images are not durable offline downloads. Logout,
+terminal API or media authentication, session revocation, and workspace change end
+the shared owner-media lifetime and purge private owner data.
 
 ## 7. Push notifications and deep links
 
@@ -237,6 +266,11 @@ of reusing the current bearer token.
   response and authorization cannot be redirected unexpectedly.
 - Keep `/api/v1` on explicit auth and general API rate buckets as the route surface grows.
 - Resource queries bind child and parent IDs and reapply published/ready/cull gates.
+- Owner cull derivatives bind both gallery and asset, serve only JPEG screen
+  derivatives, and remain a different route profile from capability-bound client media.
+- Cull item ETags include score/state/audit and private stored/derivative identity so
+  stale evidence, ABA transitions, or replaced media require a fresh human review.
+  A media change during a decision rolls the whole command back.
 - High-value commands include actor/session/device in the audit event.
 - Stripe checkout remains hosted for the first release. The app displays server
   totals and opens the server-issued checkout URL; it never recomputes the charge.
@@ -257,6 +291,10 @@ of reusing the current bearer token.
   accent colors are contrast-checked before use.
 - Gallery grids use paged manifests, thumbnail variants sized for display scale,
   prefetching, cancellation on disappear, and bounded decoded-image memory.
+- Cull review uses bounded cursor pages, a 48 MiB compressed in-memory media budget,
+  8 MiB thumbnail and 32 MiB preview response caps, and off-main image downsampling.
+  Validate actual memory, scroll responsiveness, cancellation, and rate-limit behavior
+  on representative galleries before TestFlight rollout.
 - Video uses AVPlayer with Range-capable authorized media endpoints.
 
 ## 10. Delivery sequence
@@ -328,11 +366,29 @@ file-protected, and explicitly initiated by the client.
 - remaining release evidence: current-Xcode test/archive inspection, real-device
   sandbox delivery, and TestFlight production delivery
 
-#### Milestone 5B — AI and rollout operations (next)
+#### Milestone 5B.1 — native owner cull review (implementation staged)
 
-- AI run/cull/content previews and explicit commands
+- owner manifest capability, score-ranked cursor pages, full-queue counts, and
+  collection-change detection
+- exact owner-only thumbnail/preview media profile with no original or download path
+- cache-first native review grid/lightbox with accessible filters and explicit
+  keep/cut/restore controls
+- strong per-item versions, session-bound idempotent replay, audit evidence,
+  cache reconciliation, and fully reversible client-delivery gating
+- fail-closed host flag, focused backend/Swift tests, and the
+  [rollout/rollback runbook](IOS-AI-CULL-OPERATIONS.md)
+- remaining acceptance evidence: current-Xcode generation/build/tests, signed archive
+  inspection, real-device media/session testing, and internal TestFlight rehearsal
+
+#### Remaining Milestone 5B and App Store operations
+
+- AI run ledger and content-generation previews/commands remain future slices; AI
+  drafts must stay human-reviewed and must never auto-publish
 - privacy-safe telemetry, performance budgets, TestFlight rollout, and App Store
   submission evidence
+
+Milestone 5B.1 does not complete the broader AI roadmap or App Store release. The
+Milestone 5A physical APNs/TestFlight checks also remain required before submission.
 
 ## 11. Product decisions still open
 

@@ -26,6 +26,11 @@ enum AuthenticatedMediaPurpose: String, Sendable {
     fileprivate var isImage: Bool { self != .download }
 }
 
+enum AuthenticatedMediaRouteProfile: Sendable {
+    case clientGallery
+    case ownerCull
+}
+
 enum AuthenticatedMediaError: LocalizedError, Sendable {
     case invalidURL
     case responseTooLarge
@@ -38,7 +43,7 @@ enum AuthenticatedMediaError: LocalizedError, Sendable {
         case .invalidURL:
             "Mise refused an invalid media address."
         case .responseTooLarge:
-            "This preview is too large to open safely. Download the original instead."
+            "This image is too large to open safely."
         case .unsupportedContent:
             "The studio returned an unsupported media format."
         case .fileStorageFailed:
@@ -99,9 +104,10 @@ actor ClientDeliveryLifetime {
     }
 }
 
-/// Loads guest gallery media without ever handing a bearer-only URL to `AsyncImage`.
-/// Authorization is attached only after the URL is proven to be an exact media route
-/// on the active workspace origin. Redirects are rejected to prevent token disclosure.
+/// Loads scoped media without ever handing a bearer-only URL to `AsyncImage`.
+/// Authorization is attached only after the URL is proven to be an exact client
+/// delivery or owner-cull route on the active workspace origin. Redirects are
+/// rejected to prevent token disclosure.
 actor AuthenticatedMediaClient: AuthenticatedMediaLoading {
     private struct MemoryEntry: Sendable {
         let data: Data
@@ -112,6 +118,7 @@ actor AuthenticatedMediaClient: AuthenticatedMediaLoading {
     private let clientVersion: String
     private let session: URLSession
     private let authorizer: any RequestAuthorizing
+    private let routeProfile: AuthenticatedMediaRouteProfile
     private let downloadStore: ProtectedMediaDownloadStore
     private let memoryLimit: Int
     private let maximumCachedObjectSize: Int
@@ -129,6 +136,7 @@ actor AuthenticatedMediaClient: AuthenticatedMediaLoading {
         session: URLSession,
         authorizer: any RequestAuthorizing,
         cacheNamespace: String,
+        routeProfile: AuthenticatedMediaRouteProfile = .clientGallery,
         memoryLimit: Int = 48 * 1_024 * 1_024,
         maximumCachedObjectSize: Int = 8 * 1_024 * 1_024,
         downloadByteLimit: Int64 = 2 * 1_024 * 1_024 * 1_024,
@@ -141,6 +149,7 @@ actor AuthenticatedMediaClient: AuthenticatedMediaLoading {
         self.clientVersion = clientVersion
         self.session = session
         self.authorizer = authorizer
+        self.routeProfile = routeProfile
         self.memoryLimit = max(0, memoryLimit)
         self.maximumCachedObjectSize = max(0, maximumCachedObjectSize)
         self.downloadByteLimit = max(0, downloadByteLimit)
@@ -432,19 +441,39 @@ actor AuthenticatedMediaClient: AuthenticatedMediaLoading {
         }
 
         let components = url.path.split(separator: "/", omittingEmptySubsequences: true)
-        guard components.count == 7,
-              components[0] == "api",
-              components[1] == "v1",
-              components[2] == "client",
-              components[3] == "gallery",
-              components[4] == "assets",
-              let assetID = Int64(components[5]),
-              assetID > 0,
-              components[6] == Substring(purpose.rawValue)
-        else {
+        guard isAllowedMediaPath(components, purpose: purpose) else {
             throw AuthenticatedMediaError.invalidURL
         }
         return url
+    }
+
+    private func isAllowedMediaPath(
+        _ components: [Substring],
+        purpose: AuthenticatedMediaPurpose
+    ) -> Bool {
+        switch routeProfile {
+        case .clientGallery:
+            return components.count == 7
+                && components[0] == "api"
+                && components[1] == "v1"
+                && components[2] == "client"
+                && components[3] == "gallery"
+                && components[4] == "assets"
+                && Int64(components[5]).map { $0 > 0 } == true
+                && components[6] == Substring(purpose.rawValue)
+        case .ownerCull:
+            // Native cull review intentionally has no original/download route.
+            return (purpose == .thumbnail || purpose == .preview)
+                && components.count == 8
+                && components[0] == "api"
+                && components[1] == "v1"
+                && components[2] == "galleries"
+                && Int64(components[3]).map { $0 > 0 } == true
+                && components[4] == "cull"
+                && components[5] == "assets"
+                && Int64(components[6]).map { $0 > 0 } == true
+                && components[7] == Substring(purpose.rawValue)
+        }
     }
 
     private func validatedHTTPResponse(_ response: URLResponse) throws -> HTTPURLResponse {

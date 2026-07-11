@@ -433,6 +433,7 @@ def client_gallery(request: Request, response: Response) -> GalleryDetail | Resp
         hero_asset_ids=hero_asset_ids,
         # Vision run ids, scores, cull decisions, and provider state remain owner-only.
         vision=None,
+        cull_enabled=False,
     )
     digest = hashlib.sha256(detail.model_dump_json().encode()).hexdigest()
     etag = f'"client-gallery-{digest[:32]}"'

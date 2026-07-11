@@ -81,6 +81,42 @@ struct WorkspaceEnvironment: Sendable {
     fileprivate let clientVersion: String
 
     @MainActor
+    func ownerMedia(
+        workspaceCacheNamespace: String,
+        principalID: String,
+        sessionID: String?
+    ) -> OwnerMediaEnvironment {
+        let capabilityNamespace = [
+            workspaceCacheNamespace,
+            "owner-media",
+            principalID,
+            "session",
+            sessionID ?? "legacy-session",
+        ].joined(separator: "\0")
+        let cache = TenantJSONCache(cacheNamespace: workspaceCacheNamespace)
+        let accessState = OwnerMediaAccessState()
+        let lifetime = ClientDeliveryLifetime()
+        let media = AuthenticatedMediaClient(
+            origin: origin,
+            clientVersion: clientVersion,
+            session: networkSession,
+            authorizer: session,
+            cacheNamespace: capabilityNamespace,
+            routeProfile: .ownerCull,
+            lifetime: lifetime,
+            onSessionEnded: {
+                try? await cache.removeAll()
+                await accessState.end()
+            }
+        )
+        return OwnerMediaEnvironment(
+            media: media,
+            accessState: accessState,
+            lifetime: lifetime
+        )
+    }
+
+    @MainActor
     func clientDelivery(
         workspaceCacheNamespace: String,
         principalID: String,
@@ -104,6 +140,7 @@ struct WorkspaceEnvironment: Sendable {
             session: networkSession,
             authorizer: session,
             cacheNamespace: capabilityNamespace,
+            routeProfile: .clientGallery,
             lifetime: lifetime,
             onSessionEnded: {
                 try? await cache.removeAll()
@@ -125,6 +162,28 @@ struct WorkspaceEnvironment: Sendable {
             accessState: accessState,
             lifetime: lifetime
         )
+    }
+}
+
+struct OwnerMediaEnvironment: Sendable {
+    let media: AuthenticatedMediaClient
+    let accessState: OwnerMediaAccessState
+    let lifetime: ClientDeliveryLifetime
+
+    func purge() async {
+        await lifetime.end()
+        await media.purge()
+        await accessState.end()
+    }
+}
+
+@MainActor
+@Observable
+final class OwnerMediaAccessState {
+    private(set) var sessionEnded = false
+
+    func end() {
+        sessionEnded = true
     }
 }
 

@@ -66,7 +66,8 @@ final class GalleryDetailFixtureTests: XCTestCase {
                 }
               ],
               "hero_asset_ids": [201],
-              "vision": null
+              "vision": null,
+              "cull_enabled": true
             }
             """.utf8
         )
@@ -78,5 +79,22 @@ final class GalleryDetailFixtureTests: XCTestCase {
         XCTAssertEqual(gallery.sections.first?.proofTarget, 20)
         XCTAssertEqual(gallery.assets.first?.links.thumbnailURL?.host, "studio.example.com")
         XCTAssertEqual(gallery.heroAssetIDs, [201])
+        XCTAssertTrue(gallery.cullEnabled)
+
+        var legacyObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        XCTAssertNotNil(legacyObject.removeValue(forKey: "cull_enabled"))
+        let legacyData = try JSONSerialization.data(withJSONObject: legacyObject)
+        let legacy = try MiseJSON.decoder().decode(
+            GalleryDetail.self,
+            from: legacyData
+        )
+        XCTAssertFalse(legacy.cullEnabled)
+        let cachedRoundTrip = try MiseJSON.decoder().decode(
+            GalleryDetail.self,
+            from: MiseJSON.encoder().encode(legacy)
+        )
+        XCTAssertFalse(cachedRoundTrip.cullEnabled)
     }
 }

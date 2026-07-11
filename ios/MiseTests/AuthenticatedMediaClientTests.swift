@@ -61,7 +61,14 @@ final class AuthenticatedMediaClientTests: XCTestCase {
             ),
         ] {
             do {
-                _ = try await client.data(from: url, purpose: purpose)
+                if purpose == .download {
+                    _ = try await client.download(
+                        from: url,
+                        suggestedFilename: "not-allowed.jpg"
+                    )
+                } else {
+                    _ = try await client.data(from: url, purpose: purpose)
+                }
                 XCTFail("Expected media URL rejection.")
             } catch AuthenticatedMediaError.invalidURL {
                 // Expected before any bearer token is requested.
@@ -70,6 +77,108 @@ final class AuthenticatedMediaClientTests: XCTestCase {
 
         let bearerCalls = await authorizer.bearerCallCount()
         XCTAssertEqual(bearerCalls, 0)
+    }
+
+    func testRouteProfilesRejectOppositeCapabilityBeforeReadingToken() async throws {
+        let clientAuthorizer = MediaAuthorizer(
+            mode: .tokens(initial: "client-secret", refreshed: nil)
+        )
+        let clientMedia = makeClient(authorizer: clientAuthorizer)
+        let ownerURL = URL(
+            string: "https://studio.example.com/api/v1/galleries/7/cull/assets/41/thumbnail"
+        )!
+
+        do {
+            _ = try await clientMedia.data(from: ownerURL, purpose: .thumbnail)
+            XCTFail("Expected client media to reject an owner-cull route.")
+        } catch AuthenticatedMediaError.invalidURL {
+            // Expected before the client capability token is read.
+        }
+
+        let ownerAuthorizer = MediaAuthorizer(
+            mode: .tokens(initial: "owner-secret", refreshed: nil)
+        )
+        let ownerMedia = makeClient(
+            authorizer: ownerAuthorizer,
+            routeProfile: .ownerCull
+        )
+        let clientURL = URL(
+            string: "https://studio.example.com/api/v1/client/gallery/assets/41/preview"
+        )!
+
+        do {
+            _ = try await ownerMedia.data(from: clientURL, purpose: .preview)
+            XCTFail("Expected owner media to reject a client-gallery route.")
+        } catch AuthenticatedMediaError.invalidURL {
+            // Expected before the owner token is read.
+        }
+
+        let clientBearerCalls = await clientAuthorizer.bearerCallCount()
+        let ownerBearerCalls = await ownerAuthorizer.bearerCallCount()
+        XCTAssertEqual(clientBearerCalls, 0)
+        XCTAssertEqual(ownerBearerCalls, 0)
+    }
+
+    func testAllowsExactOwnerCullDerivativesButNoOwnerDownloadRoute() async throws {
+        let requests = LockedBox<[String]>([])
+        MockURLProtocol.setHandler { request in
+            requests.withValue { $0.append(request.url!.path) }
+            return (
+                Self.response(
+                    url: request.url!,
+                    status: 200,
+                    headers: ["Content-Type": "image/jpeg"]
+                ),
+                Data([4, 1])
+            )
+        }
+        let authorizer = MediaAuthorizer(mode: .tokens(initial: "owner", refreshed: nil))
+        let client = makeClient(authorizer: authorizer, routeProfile: .ownerCull)
+        let thumbnail = URL(
+            string: "https://studio.example.com/api/v1/galleries/7/cull/assets/41/thumbnail"
+        )!
+        let preview = URL(
+            string: "https://studio.example.com/api/v1/galleries/7/cull/assets/41/preview"
+        )!
+
+        let thumbnailData = try await client.data(from: thumbnail, purpose: .thumbnail)
+        let previewData = try await client.data(from: preview, purpose: .preview)
+        XCTAssertEqual(thumbnailData, Data([4, 1]))
+        XCTAssertEqual(previewData, Data([4, 1]))
+
+        for (url, purpose) in [
+            (
+                URL(
+                    string: "https://studio.example.com/api/v1/galleries/7/cull/assets/41/download"
+                )!,
+                AuthenticatedMediaPurpose.download
+            ),
+            (
+                URL(
+                    string: "https://studio.example.com/api/v1/galleries/7/assets/41/preview"
+                )!,
+                AuthenticatedMediaPurpose.preview
+            ),
+            (preview, AuthenticatedMediaPurpose.thumbnail),
+        ] {
+            do {
+                if purpose == .download {
+                    _ = try await client.download(
+                        from: url,
+                        suggestedFilename: "not-allowed.jpg"
+                    )
+                } else {
+                    _ = try await client.data(from: url, purpose: purpose)
+                }
+                XCTFail("Expected owner media URL rejection.")
+            } catch AuthenticatedMediaError.invalidURL {
+                // Expected before another bearer-bearing request is made.
+            }
+        }
+
+        XCTAssertEqual(requests.withValue { $0 }.count, 2)
+        let bearerCalls = await authorizer.bearerCallCount()
+        XCTAssertEqual(bearerCalls, 2)
     }
 
     func testRetriesOneUnauthorizedRequestWithRotatedToken() async throws {
@@ -166,6 +275,55 @@ final class AuthenticatedMediaClientTests: XCTestCase {
 
         let invalidations = await authorizer.invalidationCount()
         XCTAssertEqual(ended.withValue { $0 }, 1)
+        XCTAssertEqual(invalidations, 1)
+    }
+
+    @MainActor
+    func testTerminalOwnerCullFailurePurgesOwnerCacheAndEndsAccessState() async throws {
+        let cacheRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: cacheRoot) }
+        let cache = TenantJSONCache(
+            cacheNamespace: "tenant-owner-cull",
+            rootDirectory: cacheRoot
+        )
+        try await cache.write([41], key: "galleries.v1", etag: #""galleries-v1""#)
+        let accessState = OwnerMediaAccessState()
+
+        MockURLProtocol.setHandler { request in
+            (
+                Self.response(
+                    url: request.url!,
+                    status: 401,
+                    headers: ["Content-Type": "application/problem+json"]
+                ),
+                Data(#"{"detail":"expired"}"#.utf8)
+            )
+        }
+        let authorizer = MediaAuthorizer(mode: .refreshFailure(.expired))
+        let client = makeClient(
+            authorizer: authorizer,
+            routeProfile: .ownerCull,
+            onSessionEnded: {
+                try? await cache.removeAll()
+                await accessState.end()
+            }
+        )
+        let url = URL(
+            string: "https://studio.example.com/api/v1/galleries/7/cull/assets/41/preview"
+        )!
+
+        do {
+            _ = try await client.data(from: url, purpose: .preview)
+            XCTFail("Expected terminal owner-media refresh failure.")
+        } catch SessionError.expired {
+            // Expected.
+        }
+
+        let cached = try await cache.read("galleries.v1", as: [Int].self)
+        let invalidations = await authorizer.invalidationCount()
+        XCTAssertNil(cached)
+        XCTAssertTrue(accessState.sessionEnded)
         XCTAssertEqual(invalidations, 1)
     }
 
@@ -314,6 +472,7 @@ final class AuthenticatedMediaClientTests: XCTestCase {
 
     private func makeClient(
         authorizer: MediaAuthorizer,
+        routeProfile: AuthenticatedMediaRouteProfile = .clientGallery,
         memoryLimit: Int = 48 * 1_024 * 1_024,
         downloadByteLimit: Int64 = 2 * 1_024 * 1_024 * 1_024,
         downloadRoot: URL? = nil,
@@ -330,6 +489,7 @@ final class AuthenticatedMediaClientTests: XCTestCase {
             session: URLSession(configuration: configuration),
             authorizer: authorizer,
             cacheNamespace: "tenant\0capability\0gallery_guest:7",
+            routeProfile: routeProfile,
             memoryLimit: memoryLimit,
             downloadByteLimit: downloadByteLimit,
             downloadRoot: downloadRoot,

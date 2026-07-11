@@ -236,6 +236,7 @@ def test_gallery_owner_auth_manifest_safety_and_conditional_cache(api_client, mo
         "download_url": None,
     }
     assert payload["vision"]["error"] == "Analysis failed."
+    assert payload["cull_enabled"] is True
     serialized = json.dumps(payload)
     for secret in ("4821", "/srv/", "ready-original", "provider-response", "pending.jpg"):
         assert secret not in serialized

@@ -46,6 +46,12 @@ struct CullState: APIStringValue {
     static let cut = Self(rawValue: "cut")
 }
 
+enum CullAction: String, Codable, Hashable, Sendable {
+    case keep
+    case cut
+    case restore
+}
+
 struct ProposalStatus: APIStringValue {
     let rawValue: String
     init(rawValue: String) { self.rawValue = rawValue }
@@ -287,6 +293,40 @@ struct GalleryDetail: Codable, Hashable, Sendable, Identifiable {
     let assets: [GalleryAsset]
     let heroAssetIDs: [Int64]
     let vision: GalleryVisionSummary?
+    let cullEnabled: Bool
+}
+
+extension GalleryDetail {
+    private enum CodingKeys: String, CodingKey {
+        case summary
+        case sections
+        case assets
+        case heroAssetIDs
+        case vision
+        case cullEnabled
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        summary = try container.decode(GallerySummary.self, forKey: .summary)
+        sections = try container.decode([GallerySection].self, forKey: .sections)
+        assets = try container.decode([GalleryAsset].self, forKey: .assets)
+        heroAssetIDs = try container.decode([Int64].self, forKey: .heroAssetIDs)
+        vision = try container.decodeIfPresent(GalleryVisionSummary.self, forKey: .vision)
+        // Older backend responses and protected offline cache entries predate
+        // the native cull capability. They must remain readable and fail closed.
+        cullEnabled = try container.decodeIfPresent(Bool.self, forKey: .cullEnabled) ?? false
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(summary, forKey: .summary)
+        try container.encode(sections, forKey: .sections)
+        try container.encode(assets, forKey: .assets)
+        try container.encode(heroAssetIDs, forKey: .heroAssetIDs)
+        try container.encodeIfPresent(vision, forKey: .vision)
+        try container.encode(cullEnabled, forKey: .cullEnabled)
+    }
 }
 
 struct GallerySection: Codable, Hashable, Sendable, Identifiable {
@@ -620,8 +660,33 @@ struct CullItem: Codable, Hashable, Sendable, Identifiable {
     var id: Int64 { assetID }
 
     let assetID: Int64
+    let galleryID: Int64
     let filename: String
-    let score: Double?
+    let position: Int
+    let keeperScore: Double?
+    let heroPotential: Double?
     let state: CullState?
-    let previewURL: URL
+    let thumbnailURL: URL?
+    let previewURL: URL?
+    let mediaRevision: Int64
+    let etag: String
+}
+
+struct CullCounts: Codable, Hashable, Sendable {
+    let total: Int
+    let keep: Int
+    let cut: Int
+    let undecided: Int
+    let scored: Int
+}
+
+struct CullPage: Codable, Hashable, Sendable {
+    let items: [CullItem]
+    let nextCursor: String?
+    let hasMore: Bool
+    let counts: CullCounts
+}
+
+struct CullDecisionRequest: Codable, Hashable, Sendable {
+    let action: CullAction
 }

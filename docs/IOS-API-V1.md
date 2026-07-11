@@ -9,6 +9,8 @@ Milestone 4A adds owner client/project details and bounded client, project, and 
 commands. Milestone 4B adds owner booking management and exact-capability proposal
 decisions. Client booking creation, money commands, and native legal signing remain
 planned. Milestone 5A adds the owner-only APNs device and notification contract.
+Milestone 5B.1 adds the flag-gated native owner cull review, protected derivatives,
+and reversible keep/cut/restore command.
 
 ## Conventions
 
@@ -271,11 +273,11 @@ summary advertises an available action.
 | `GET /api/v1/event-types/{id}/slots` | server-computed available slots |
 | `GET /api/v1/bookings` | `Page<Booking>` |
 | `GET /api/v1/ai/runs` | `Page<AIRun>` |
-| `GET /api/v1/galleries/{id}/cull` | paged cull deck/results |
+| `GET /api/v1/galleries/{id}/cull` | implemented owner cull review page (`CullPage`) |
 
-The Milestone 2 endpoints are available only to the exact `studio_owner`
-principal with `studio:read`. Client/project detail, document, slot, AI-run, and
-cull-result reads remain reserved contract surface until their delivery slices.
+Owner endpoints in this table require the exact `studio_owner` principal with
+`studio:read`. Native cull review is implemented in Milestone 5B.1. The general
+AI-run ledger remains reserved contract surface; it is not part of the cull slice.
 
 Collections default to 25 and cap at 100. Cursors carry ordering state but no
 authorization; authorization is reevaluated on every page.
@@ -323,6 +325,118 @@ job queue in the same transaction, leased by workers, retried after transient
 failure, and recovered after restart. Client booking creation is intentionally not
 part of this slice because no dedicated mobile booking/anti-abuse credential exists.
 
+### Native owner culling (Milestone 5B.1)
+
+The owner gallery detail includes `cull_enabled`. It is `true` only for an ordinary
+gallery when the host-wide `MISE_CULL_UI` flag is enabled. It is always `false` in
+the client-delivery manifest, and drops/transfers never become cull queues. The app
+shows the native Review Cull action only when this server-derived value is true.
+
+All cull routes resolve the tenant from the authenticated request host. They accept
+no tenant ID, database path, slug, principal, or media path from the caller. Reads
+require the exact `studio_owner` principal with `studio:read`; the decision command
+also requires `studio:write`.
+
+| Method/path | Contract |
+| --- | --- |
+| `GET /api/v1/galleries/{galleryId}/cull?limit=25&cursor=...` | score-ranked, cursor-paged `CullPage`; limit 1–100 |
+| `GET /api/v1/galleries/{galleryId}/cull/assets/{assetId}/thumbnail` | private JPEG thumbnail; no original/download variant |
+| `GET /api/v1/galleries/{galleryId}/cull/assets/{assetId}/preview` | private screen derivative JPEG; no original/download variant |
+| `PATCH /api/v1/galleries/{galleryId}/assets/{assetId}/cull` | explicit keep/cut/restore decision |
+
+A page contains every ready photo in the gallery, including cut photos so an owner
+can restore them. Videos, pending/failed assets, drops, and other galleries are not
+included. Scored photos sort by keeper score descending; unscored photos follow in
+gallery position and asset-ID order. `counts` describes the full queue rather than
+only the returned page:
+
+    {
+      "items": [
+        {
+          "asset_id": 201,
+          "gallery_id": 17,
+          "filename": "KLP_1024.jpg",
+          "position": 1,
+          "keeper_score": 0.98,
+          "hero_potential": 0.86,
+          "state": "keep",
+          "thumbnail_url": "https://studio.example.com/api/v1/galleries/17/cull/assets/201/thumbnail",
+          "preview_url": "https://studio.example.com/api/v1/galleries/17/cull/assets/201/preview",
+          "media_revision": 73,
+          "etag": "\"cull-asset-0123456789abcdef0123456789abcdef\""
+        }
+      ],
+      "next_cursor": null,
+      "has_more": false,
+      "counts": {
+        "total": 1,
+        "keep": 1,
+        "cut": 0,
+        "undecided": 0,
+        "scored": 1
+      }
+    }
+
+The page response uses `Cache-Control: private, no-cache`, `Vary: Authorization`,
+and a strong page `ETag`; `If-None-Match` may produce an empty `304`. The opaque
+cursor is tenant- and gallery-bound and carries a signed snapshot of the
+score-ranked queue.
+If asset membership, position, or keeper scores change between pages, continuation
+returns `409` with code `pagination.collection_changed`. The app must discard the
+continuation and reload page one; it must not merge a changed ordering into the old
+list. Authentication and authorization are reevaluated for every page.
+
+Derivative responses use `Content-Type: image/jpeg`,
+`Cache-Control: private, max-age=86400`, `Vary: Authorization`, and a strong media
+`ETag`; `If-None-Match` may return `304`. The URL must remain on the exact tenant
+origin and bind both gallery and asset IDs. The native media client rejects redirects,
+credentials, queries, fragments, encoded paths, mismatched variants, client-gallery
+paths in owner mode, and every owner-cull download/original path. A missing,
+symlinked, unsafe, or cross-gallery derivative fails closed with `404`.
+
+Each item has an opaque non-negative `media_revision`. It remains stable across cull
+decisions, changes with the protected stored/derivative identity, and keys the
+native in-memory image cache so replaced review media is not shown under stale item
+state.
+
+The decision body has one closed action:
+
+    { "action": "cut" }
+
+`keep` and `cut` store an explicit human decision. `restore` clears the cull state,
+decision timestamp, and source; it does not delete or recreate a file. Every accepted
+command requires both:
+
+- `If-Match: "cull-asset-..."` using the strong item ETag; and
+- `Idempotency-Key: <uuid>` stable for an exact retry.
+
+The ETag covers the parent IDs, sanitized filename, scores, state, cull audit
+revision, stored-file identity, and derivative identity. This prevents stale score
+review, derivative replacement, ID reuse, and keep/cut/restore ABA transitions from
+accepting an old card. A missing `If-Match` or UUID returns `422`; a stale/weak match
+returns `409 resource.version_conflict`. An identical session-bound retry replays the
+original representation with `Idempotency-Replayed: true`; key reuse with a different
+action, resource, or ETag in that owner session returns
+`409 request.idempotency_conflict`.
+
+The decision, `mobile_owner` audit row, content-revision bump when state changes,
+and replay record share one immediate transaction. Success returns the new item and
+ETag with `Cache-Control: no-store` and `Vary: Authorization`. A cut is a reversible
+delivery flag: while `MISE_CULL_UI=true`, client gallery/media/download/favorite/ZIP
+paths exclude it, but the original and derivatives remain intact and the owner queue
+still shows it. See the [native cull operations runbook](IOS-AI-CULL-OPERATIONS.md)
+for rollout and rollback behavior.
+If the protected media changes during a decision, the command returns
+`409 cull.media_changed` and the transaction leaves no decision, audit, or replay
+residue.
+
+When `MISE_CULL_UI=false` (the default), `cull_enabled` is false, every cull list,
+media, and decision route returns `404`, and client delivery ignores stored cull
+states. Common failures otherwise follow the standard problem shape: `401` expired
+session, `403` wrong principal/scope, `404` disabled/missing/cross-parent resource,
+`409` collection/version/idempotency/media conflict, `422` malformed input, and
+`429` with `Retry-After` for rate limiting.
+
 ## Remaining command roadmap
 
 | Method/path | Semantics |
@@ -330,7 +444,6 @@ part of this slice because no dedicated mobile booking/anti-abuse credential exi
 | `POST /api/v1/contracts/{id}/sign` | hash/version checked signature evidence |
 | `POST /api/v1/invoices/{id}/checkout` | return server-created hosted checkout URL |
 | `POST /api/v1/bookings` | atomically revalidate slot and create booking |
-| `PATCH /api/v1/galleries/{g}/assets/{a}/cull` | owner keep/cut/restore command |
 | `POST /api/v1/captions/{id}/draft` | explicit AI draft; never auto-approve |
 
 Contract signing, checkout, booking, rescheduling, and AI commands require an
@@ -403,7 +516,8 @@ authorized media variants under `links`. This is the canonical wire shape:
         }
       ],
       "hero_asset_ids": [201],
-      "vision": null
+      "vision": null,
+      "cull_enabled": true
     }
 
 Never expose gallery/portal PINs, `stored` filenames, or server paths. Media URLs
@@ -412,10 +526,13 @@ and the cull delivery gate. Support Range requests for video and conditional/pri
 caching. Do not put bearer credentials in signed URL query parameters.
 
 The owner `GET /galleries/{id}` manifest deliberately continues to emit `null`
-for every media link. The capability-bound `GET /client/gallery` manifest emits
-only variants that physically exist beneath the tenant media root. Each media
-request rechecks the exact bearer resource, visitor binding, gallery publication
-and expiry, ready status, asset parent, section parent, cull gate, and requested
+for every ordinary gallery media link; owner cull derivatives are exposed only by
+the exact cull routes above. Its `cull_enabled` value is server-derived. The
+capability-bound `GET /client/gallery` manifest always returns
+`cull_enabled=false` and emits only variants that physically exist beneath the
+tenant media root. Each media request rechecks the exact bearer resource, visitor
+binding, gallery publication and expiry, ready status, asset parent, section parent,
+cull gate, and requested
 download scope. Missing or unsafe files fail closed.
 
 ## Offline/cache metadata

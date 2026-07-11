@@ -22,6 +22,7 @@ from . import (
     config,
     mobile_auth,
     mobile_client_delivery_api,
+    mobile_cull_api,
     mobile_devices_api,
     mobile_gallery_calendar_api,
     mobile_gallery_delivery_api,
@@ -571,3 +572,4 @@ app.include_router(mobile_client_delivery_api.router)
 app.include_router(mobile_gallery_delivery_api.router)
 app.include_router(mobile_owner_mutation_api.router)
 app.include_router(mobile_policy_mutation_api.router)
+app.include_router(mobile_cull_api.router)

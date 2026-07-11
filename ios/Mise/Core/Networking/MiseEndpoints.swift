@@ -303,10 +303,36 @@ enum MiseEndpoints {
             )
         }
 
-        static func cull(galleryID: Int64) -> APIEndpoint<APIPage<CullItem>> {
+        static func cull(
+            galleryID: Int64,
+            cursor: String? = nil,
+            limit: Int = 25,
+            etag: String? = nil
+        ) -> APIEndpoint<CullPage> {
             APIEndpoint(
                 method: .get,
-                path: "/api/v1/galleries/\(galleryID)/cull"
+                path: "/api/v1/galleries/\(galleryID)/cull",
+                queryItems: [
+                    APIQueryItem(name: "cursor", value: cursor),
+                    APIQueryItem(name: "limit", value: String(min(max(limit, 1), 100))),
+                ],
+                etag: etag
+            )
+        }
+
+        static func decideCull(
+            galleryID: Int64,
+            assetID: Int64,
+            action: CullAction,
+            etag: String,
+            idempotencyKey: UUID
+        ) throws -> APIEndpoint<CullItem> {
+            try .json(
+                method: .patch,
+                path: "/api/v1/galleries/\(galleryID)/assets/\(assetID)/cull",
+                body: CullDecisionRequest(action: action),
+                headers: ["If-Match": etag],
+                idempotencyKey: idempotencyKey
             )
         }
     }

@@ -264,6 +264,7 @@ def test_manifest_is_exact_guest_scoped_cacheable_and_secret_free(delivery_clien
     assert payload["summary"]["favorite_count"] == 0
     assert payload["hero_asset_ids"] == [seeded["photo"]]
     assert payload["vision"] is None
+    assert payload["cull_enabled"] is False
     delivered_ids = {asset["id"] for asset in payload["assets"]}
     assert delivered_ids == {
         seeded["photo"],

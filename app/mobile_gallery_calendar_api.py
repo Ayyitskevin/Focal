@@ -139,6 +139,7 @@ class GalleryDetail(MobileReadModel):
     assets: list[GalleryAsset] = Field(default_factory=list, max_length=10_000)
     hero_asset_ids: list[int] = Field(default_factory=list, max_length=1000)
     vision: GalleryVisionSummary | None = None
+    cull_enabled: bool = False
 
     @model_validator(mode="after")
     def children_belong_to_gallery(self) -> GalleryDetail:
@@ -648,6 +649,7 @@ def gallery_detail(
         assets=assets,
         hero_asset_ids=hero_asset_ids,
         vision=_vision(row, hero_asset_ids),
+        cull_enabled=bool(config.CULL_UI and row["type"] == "gallery"),
     )
     digest = hashlib.sha256(detail.model_dump_json().encode()).hexdigest()
     etag = f'"gallery-{digest[:32]}"'

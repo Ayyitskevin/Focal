@@ -43,6 +43,7 @@ struct OwnerCompanionView: View {
 
     let session: CurrentSession
     let repository: OwnerRepository
+    let media: any AuthenticatedMediaLoading
     let notifications: NotificationCoordinator
     let router: AppRouter
     let isSigningOut: Bool
@@ -51,6 +52,7 @@ struct OwnerCompanionView: View {
     init(
         session: CurrentSession,
         repository: OwnerRepository,
+        media: any AuthenticatedMediaLoading,
         notifications: NotificationCoordinator,
         router: AppRouter,
         isSigningOut: Bool,
@@ -58,6 +60,7 @@ struct OwnerCompanionView: View {
     ) {
         self.session = session
         self.repository = repository
+        self.media = media
         self.notifications = notifications
         self.router = router
         self.isSigningOut = isSigningOut
@@ -189,8 +192,11 @@ struct OwnerCompanionView: View {
         case let .gallery(id, assetID):
             GalleryDetailView(
                 repository: repository,
+                media: media,
                 galleryID: id,
-                initialAssetID: assetID
+                initialAssetID: assetID,
+                canDecideCull: session.principal.allows("studio:write"),
+                didCullChange: { await galleries.refresh() }
             )
         case let .booking(id):
             BookingRouteView(
@@ -232,7 +238,12 @@ struct OwnerCompanionView: View {
         case .projects:
             ProjectsView(model: projects, clientsModel: clients, repository: repository)
         case .galleries:
-            GalleriesView(model: galleries, repository: repository)
+            GalleriesView(
+                model: galleries,
+                repository: repository,
+                media: media,
+                canDecideCull: session.principal.allows("studio:write")
+            )
         case .calendar:
             CalendarAgendaView(
                 model: bookings,

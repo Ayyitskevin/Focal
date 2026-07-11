@@ -30,6 +30,7 @@ struct RootView: View {
                 SignedInShell(
                     session: session,
                     ownerRepository: authentication.ownerRepository,
+                    ownerMediaEnvironment: authentication.ownerMediaEnvironment,
                     clientDeliveryEnvironment: authentication.clientDeliveryEnvironment,
                     notifications: notifications,
                     isSigningOut: authentication.isWorking,
@@ -128,21 +129,37 @@ private struct LoadingSessionView: View {
 private struct SignedInShell: View {
     let session: CurrentSession
     let ownerRepository: OwnerRepository?
+    let ownerMediaEnvironment: OwnerMediaEnvironment?
     let clientDeliveryEnvironment: ClientDeliveryEnvironment?
     let notifications: NotificationCoordinator
     let isSigningOut: Bool
     let signOut: @MainActor () async -> Void
 
     var body: some View {
-        if session.principal.kind == .studioOwner, let repository = ownerRepository {
-            OwnerCompanionView(
-                session: session,
-                repository: repository,
-                notifications: notifications,
-                router: notifications.router,
-                isSigningOut: isSigningOut,
-                signOut: signOut
-            )
+        if session.principal.kind == .studioOwner,
+           let repository = ownerRepository,
+           let ownerMediaEnvironment
+        {
+            if ownerMediaEnvironment.accessState.sessionEnded {
+                ContentUnavailableView {
+                    Label("Session expired", systemImage: "lock.trianglebadge.exclamationmark")
+                } description: {
+                    Text("Sign in again to reopen this studio. Cached owner data was removed.")
+                } actions: {
+                    Button("Sign out") { Task { await signOut() } }
+                        .disabled(isSigningOut)
+                }
+            } else {
+                OwnerCompanionView(
+                    session: session,
+                    repository: repository,
+                    media: ownerMediaEnvironment.media,
+                    notifications: notifications,
+                    router: notifications.router,
+                    isSigningOut: isSigningOut,
+                    signOut: signOut
+                )
+            }
         } else if session.principal.kind != .studioOwner,
                   let clientDeliveryEnvironment
         {

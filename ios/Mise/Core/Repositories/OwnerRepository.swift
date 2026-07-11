@@ -51,10 +51,16 @@ actor OwnerRepository {
 
     let client: any APIClientProtocol
     let cache: TenantJSONCache
+    private let onSessionEnded: @Sendable () async -> Void
 
-    init(client: any APIClientProtocol, cache: TenantJSONCache) {
+    init(
+        client: any APIClientProtocol,
+        cache: TenantJSONCache,
+        onSessionEnded: @escaping @Sendable () async -> Void = {}
+    ) {
         self.client = client
         self.cache = cache
+        self.onSessionEnded = onSessionEnded
     }
 
     func cachedDashboard() async throws -> ResourceSnapshot<DashboardSummary>? {
@@ -246,12 +252,14 @@ actor OwnerRepository {
            case .unauthenticated = apiError
         {
             try? await cache.removeAll()
+            await onSessionEnded()
             return
         }
         guard let sessionError = error as? SessionError else { return }
         switch sessionError {
         case .expired, .identityChanged, .workspaceMismatch:
             try? await cache.removeAll()
+            await onSessionEnded()
         }
     }
 }
