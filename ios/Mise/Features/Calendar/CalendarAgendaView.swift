@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CalendarAgendaView: View {
     let model: OwnerResourceModel<[Booking]>
+    let repository: OwnerRepository
     let timeZoneIdentifier: String
 
     var body: some View {
@@ -26,24 +27,34 @@ struct CalendarAgendaView: View {
             ForEach(grouped) { group in
                 Section(dayFormatter.string(from: group.day)) {
                     ForEach(group.bookings) { booking in
-                        HStack(alignment: .top, spacing: 14) {
-                            Text(timeFormatter.string(from: booking.startAt))
-                                .font(.subheadline.monospacedDigit().weight(.semibold))
-                                .frame(width: 72, alignment: .leading)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(booking.eventName).font(.headline)
-                                Text(booking.name).foregroundStyle(.secondary)
-                                if let notes = booking.notes, !notes.isEmpty {
-                                    Text(notes).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        NavigationLink {
+                            BookingManagementView(
+                                repository: repository,
+                                booking: booking,
+                                timeZoneIdentifier: timeZoneIdentifier
+                            ) {
+                                await model.refresh()
+                            }
+                        } label: {
+                            HStack(alignment: .top, spacing: 14) {
+                                Text(timeFormatter.string(from: booking.startAt))
+                                    .font(.subheadline.monospacedDigit().weight(.semibold))
+                                    .frame(width: 72, alignment: .leading)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(booking.eventName).font(.headline)
+                                    Text(booking.name).foregroundStyle(.secondary)
+                                    if let notes = booking.notes, !notes.isEmpty {
+                                        Text(notes)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(2)
+                                    }
                                 }
+                                Spacer(minLength: 0)
                             }
-                            Spacer(minLength: 0)
-                            if booking.status == .cancelled {
-                                Text("Cancelled").font(.caption).foregroundStyle(.red)
-                            }
+                            .padding(.vertical, 4)
+                            .accessibilityElement(children: .combine)
                         }
-                        .padding(.vertical, 4)
-                        .accessibilityElement(children: .combine)
                     }
                 }
             }

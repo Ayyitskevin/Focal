@@ -211,7 +211,26 @@ strong `ETag` in `If-Match`; stale versions return `409` without mutation. Busin
 data, audit evidence, and the replay record share one transaction. Project workflow
 effects are recoverable from the replay record after a post-commit dispatch failure.
 
-## Initial commands
+### Implemented policy commands (Milestone 4B)
+
+| Method/path | Authority and semantics |
+| --- | --- |
+| `GET /api/v1/bookings/{id}` | exact owner detail representation and `ETag` |
+| `GET /api/v1/bookings/{id}/slots` | owner-only policy-filtered replacement slots |
+| `POST /api/v1/bookings/{id}/cancel` | owner cancellation with `If-Match` |
+| `POST /api/v1/bookings/{id}/reschedule` | atomically replace/cancel with `If-Match` |
+| `POST /api/v1/client/proposal/accept` | exact proposal `respond` capability |
+| `POST /api/v1/client/proposal/decline` | exact proposal `respond` capability |
+
+Booking commands require `studio:write`. Proposal decisions are bound to the
+authenticated document resource and never accept a proposal ID or tenant selector.
+Every command requires a UUID `Idempotency-Key` and the strong representation
+`ETag` in `If-Match`. Notification and workflow effects are written to the durable
+job queue in the same transaction, leased by workers, retried after transient
+failure, and recovered after restart. Client booking creation is intentionally not
+part of this slice because no dedicated mobile booking/anti-abuse credential exists.
+
+## Command roadmap
 
 | Method/path | Semantics |
 | --- | --- |
@@ -219,13 +238,9 @@ effects are recoverable from the replay record after a post-commit dispatch fail
 | `DELETE /api/v1/client/gallery/assets/{a}/favorite` | idempotently unselect for the bound visitor |
 | `GET /api/v1/client/gallery/assets/{a}/comments` | bounded visible video comment thread |
 | `POST /api/v1/client/gallery/assets/{a}/comments` | add a timecoded video comment/reply |
-| `POST /api/v1/proposals/{id}/accept` | server-authoritative transition |
-| `POST /api/v1/proposals/{id}/decline` | server-authoritative transition |
 | `POST /api/v1/contracts/{id}/sign` | hash/version checked signature evidence |
 | `POST /api/v1/invoices/{id}/checkout` | return server-created hosted checkout URL |
 | `POST /api/v1/bookings` | atomically revalidate slot and create booking |
-| `POST /api/v1/bookings/{id}/cancel` | cancel within policy |
-| `POST /api/v1/bookings/{id}/reschedule` | atomically create replacement/cancel old |
 | `PATCH /api/v1/galleries/{g}/assets/{a}/cull` | owner keep/cut/restore command |
 | `POST /api/v1/captions/{id}/draft` | explicit AI draft; never auto-approve |
 

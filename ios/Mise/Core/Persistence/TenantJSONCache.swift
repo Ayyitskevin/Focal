@@ -105,6 +105,19 @@ actor TenantJSONCache {
         )
     }
 
+    func update<Value: Codable & Sendable>(
+        _ key: String,
+        as type: Value.Type = Value.self,
+        transform: @Sendable (Value) -> Value
+    ) throws -> TenantCacheRecord<Value>? {
+        guard let current = try read(key, as: type) else { return nil }
+        return try write(
+            transform(current.value),
+            key: key,
+            etag: nil
+        )
+    }
+
     func remove(_ key: String) throws {
         let url = fileURL(for: key)
         guard fileManager.fileExists(atPath: url.path) else { return }

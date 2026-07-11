@@ -179,10 +179,17 @@ struct ClientWorkspaceView: View {
 
 struct ClientDocumentView: View {
     let workspaceOrigin: URL
+    let repository: ClientDeliveryRepository
+    @State private var deciding = false
+    @State private var decisionError: String?
+    @State private var confirmation: ProposalDecision?
+    @State private var pendingDecision: Bool?
+    @State private var decisionKey = UUID()
     @State private var model: ClientResourceModel<ClientDocumentSummary>
 
     init(repository: ClientDeliveryRepository, workspaceOrigin: URL) {
         self.workspaceOrigin = workspaceOrigin
+        self.repository = repository
         _model = State(initialValue: ClientResourceModel(
             staleAfter: 10 * 60,
             cached: { try await repository.cachedDocument() },
@@ -202,6 +209,18 @@ struct ClientDocumentView: View {
         )
         .navigationTitle("Document")
         .navigationBarTitleDisplayMode(.inline)
+        .alert(item: $confirmation) { decision in
+            Alert(
+                title: Text(
+                    decision == .accept ? "Accept this proposal?" : "Decline this proposal?"
+                ),
+                message: Text("This response is final and will be recorded by the studio."),
+                primaryButton: decision == .accept
+                    ? .default(Text("Accept")) { Task { await decide(decision) } }
+                    : .destructive(Text("Decline")) { Task { await decide(decision) } },
+                secondaryButton: .cancel()
+            )
+        }
     }
 
     private func document(_ document: ClientDocumentSummary) -> some View {
@@ -293,7 +312,9 @@ struct ClientDocumentView: View {
                     }
                 }
 
-                if document.canAct {
+                if document.kind == .proposal, document.canAct {
+                    proposalActions
+                } else if document.canAct {
                     VStack(alignment: .leading, spacing: 8) {
                         SecureBrowserAction(
                             url: document.actionURL,
@@ -320,7 +341,77 @@ struct ClientDocumentView: View {
         }
         .refreshable { await model.refresh() }
     }
+    private var proposalActions: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button("Accept proposal", systemImage: "checkmark.circle.fill") {
+                confirmation = .accept
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(deciding)
+
+            Button("Decline proposal", systemImage: "xmark.circle", role: .destructive) {
+                confirmation = .decline
+            }
+            .buttonStyle(.bordered)
+            .disabled(deciding)
+
+            if deciding {
+                ProgressView("Sending your response…")
+            }
+            if let decisionError {
+                Text(decisionError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+            Text("Your response is recorded securely with this device session.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func decide(_ decision: ProposalDecision) async {
+        let accept = decision == .accept
+        if pendingDecision != accept {
+            pendingDecision = accept
+            decisionKey = UUID()
+        }
+        deciding = true
+        decisionError = nil
+        defer { deciding = false }
+
+        do {
+            let current = try await repository.proposalForDecision()
+            guard current.value.kind == .proposal, current.value.canAct else {
+                model.replace(current.value)
+                pendingDecision = nil
+                decisionError = "This proposal is no longer open for a response."
+                return
+            }
+            let result = try await repository.decideProposal(
+                accept: accept,
+                etag: current.etag,
+                idempotencyKey: decisionKey
+            )
+            model.replace(result.value)
+            pendingDecision = nil
+        } catch let APIError.conflict(_) {
+            pendingDecision = nil
+
+            decisionError = "The proposal changed. Review the latest version before responding."
+            await model.refresh()
+        } catch {
+            decisionError = error.localizedDescription
+        }
+    }
 }
+
+private enum ProposalDecision: String, Identifiable {
+    case accept
+    case decline
+
+    var id: String { rawValue }
+}
+
 
 private struct ClientAccessHeader: View {
     let eyebrow: String

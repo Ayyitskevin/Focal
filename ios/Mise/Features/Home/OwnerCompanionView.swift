@@ -149,6 +149,7 @@ struct OwnerCompanionView: View {
         case .calendar:
             CalendarAgendaView(
                 model: bookings,
+                repository: repository,
                 timeZoneIdentifier: session.workspace.timeZone
             )
         case .tasks:

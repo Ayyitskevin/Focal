@@ -285,6 +285,6 @@ async def do_reschedule(request: Request, token: str, start: str = Form(...), tz
         return templates.TemplateResponse(request, "public/book_event.html", ctx, status_code=409)
     # New slot held; release the old one and email the fresh invite.
     scheduling.cancel(token, "Rescheduled")
-    booking_notify.confirm(new_id)
+    booking_notify.rescheduled(new_id)
     log.info("booking %s rescheduled -> %s", b["id"], new_id)
     return RedirectResponse(f"/booking/{new_token}", status_code=303)

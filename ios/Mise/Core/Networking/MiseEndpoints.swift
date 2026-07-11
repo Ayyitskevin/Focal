@@ -326,21 +326,21 @@ enum MiseEndpoints {
         static func document(etag: String? = nil) -> APIEndpoint<ClientDocumentSummary> {
             APIEndpoint(method: .get, path: "/api/v1/client/document", etag: etag)
         }
-    }
-
-    enum Documents {
         static func decideProposal(
-            id: Int64,
             accept: Bool,
+            etag: String,
             idempotencyKey: UUID
-        ) -> APIEndpoint<Proposal> {
+        ) -> APIEndpoint<ClientDocumentSummary> {
             APIEndpoint(
                 method: .post,
-                path: "/api/v1/proposals/\(id)/\(accept ? "accept" : "decline")",
+                path: "/api/v1/client/proposal/\(accept ? "accept" : "decline")",
+                headers: ["If-Match": etag],
                 idempotencyKey: idempotencyKey
             )
         }
+    }
 
+    enum Documents {
         static func signContract(
             id: Int64,
             body: ContractSignRequest,
@@ -385,14 +385,51 @@ enum MiseEndpoints {
             )
         }
 
-        static func createBooking(
-            _ body: BookingCreateRequest,
+        static func detail(id: Int64) -> APIEndpoint<Booking> {
+            APIEndpoint(method: .get, path: "/api/v1/bookings/\(id)")
+        }
+
+        static func slots(
+            bookingID: Int64,
+            day: LocalDate,
+            timeZone: String
+        ) -> APIEndpoint<BookingSlots> {
+            APIEndpoint(
+                method: .get,
+                path: "/api/v1/bookings/\(bookingID)/slots",
+                queryItems: [
+                    APIQueryItem(name: "day", value: day.rawValue),
+                    APIQueryItem(name: "time_zone", value: timeZone),
+                ]
+            )
+        }
+
+        static func cancel(
+            bookingID: Int64,
+            body: BookingCancelRequest,
+            etag: String,
             idempotencyKey: UUID
         ) throws -> APIEndpoint<Booking> {
             try .json(
                 method: .post,
-                path: "/api/v1/bookings",
+                path: "/api/v1/bookings/\(bookingID)/cancel",
                 body: body,
+                headers: ["If-Match": etag],
+                idempotencyKey: idempotencyKey
+            )
+        }
+
+        static func reschedule(
+            bookingID: Int64,
+            body: BookingRescheduleRequest,
+            etag: String,
+            idempotencyKey: UUID
+        ) throws -> APIEndpoint<Booking> {
+            try .json(
+                method: .post,
+                path: "/api/v1/bookings/\(bookingID)/reschedule",
+                body: body,
+                headers: ["If-Match": etag],
                 idempotencyKey: idempotencyKey
             )
         }
@@ -426,14 +463,4 @@ struct ContractSignRequest: Codable, Hashable, Sendable {
 struct InvoiceCheckout: Codable, Hashable, Sendable {
     let checkoutURL: URL
     let expiresAt: Date
-}
-
-struct BookingCreateRequest: Codable, Hashable, Sendable {
-    let eventTypeID: Int64
-    let startAt: Date
-    let timeZone: String
-    let name: String
-    let email: String
-    let phone: String?
-    let notes: String?
 }

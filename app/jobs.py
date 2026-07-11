@@ -191,6 +191,16 @@ def _h_vision_analyze(p: dict) -> None:
         argus_analyze.run_for_gallery(gid, skip_dedup=bool(p.get("skip_dedup")))
 
 
+def _h_mobile_policy_effect(payload: dict) -> None:
+    # Lazy import avoids a jobs -> mobile router -> jobs import cycle.
+    from . import mobile_policy_mutation_api
+
+    mobile_policy_mutation_api.deliver_pending_effect(
+        str(payload["session_id"]),
+        str(payload["idempotency_key"]),
+    )
+
+
 HANDLERS = {
     "image_derivatives": _h_image,
     "social_crops": _h_crops,
@@ -212,11 +222,28 @@ HANDLERS = {
     # interlocked — a no-op unless Qwen is the eligible production provider — so this handler
     # mutates nothing until promotion is a deliberate flag + code change (ADR 0017).
     "qwen_writeback_gallery": lambda p: qwen_writeback.writeback_gallery(p["gallery_id"]),
+    "mobile_policy_effect": _h_mobile_policy_effect,
     # Local keeper-scoring for the cull deck: per-asset Qwen scores into argus_keeper_score.
     # Score-only, asset_id-keyed, inert unless MISE_CULL_SCORER + a challenger URL are set;
     # independent of the production cutover (ADR 0033).
     "cull_score_gallery": lambda p: cull_scorer.score_gallery(p["gallery_id"]),
 }
+
+
+def enqueue_in_transaction(con, kind: str, payload: dict) -> int:
+    """Persist a job on the caller's transaction for atomic command/outbox writes."""
+    return int(
+        con.execute(
+            "INSERT INTO jobs (kind, payload) VALUES (?,?)",
+            (kind, json.dumps(payload)),
+        ).lastrowid
+    )
+
+
+def kick(job_id: int) -> None:
+    """Submit an already-persisted job when a worker pool is available."""
+    if _pool:
+        _pool.submit(_execute, job_id, _current_tenant_slug())
 
 
 # ── queue machinery ────────────────────────────────────────────────────────

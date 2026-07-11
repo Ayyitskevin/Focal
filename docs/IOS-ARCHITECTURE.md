@@ -1,6 +1,6 @@
 # Mise for iOS — architecture and delivery plan
 
-Status: Milestones 1–4A implemented; scheduling and operations next
+Status: Milestones 1–4B implemented; operations next
 Minimum OS: iOS 17 / iPadOS 17
 UI: SwiftUI
 State: Observation-based MVVM with async/await
@@ -299,9 +299,14 @@ file-protected, and explicitly initiated by the client.
 - business mutation, audit row, replay record, and workflow marker committed atomically
 - cache reconciliation after success; no unsafe offline write queue
 
-### Milestone 4B — policy-sensitive mutations (planned)
+### Milestone 4B — policy-sensitive mutations (complete)
 
-- booking/cancel/reschedule and proposal decisions after notification/policy review
+- owner booking detail, server-authoritative slot discovery, cancellation, and
+  atomic rescheduling with ETag conflict protection
+- exact-capability native proposal accept/decline with immutable session/device evidence
+- durable leased side-effect jobs for notification/workflow retry after restart
+- DST-safe day bounds, same-day cap exclusion, and fresh Google Calendar conflict checks
+- client booking creation remains deferred until a dedicated anti-abuse booking credential exists
 
 ### Milestone 5 — operations
 

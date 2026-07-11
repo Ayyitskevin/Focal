@@ -121,6 +121,7 @@ final class APIClientTests: XCTestCase {
             headers.withValue {
                 $0["Idempotency-Key"] = request.value(forHTTPHeaderField: "Idempotency-Key")
                 $0["If-None-Match"] = request.value(forHTTPHeaderField: "If-None-Match")
+                $0["If-Match"] = request.value(forHTTPHeaderField: "If-Match")
             }
             return (
                 Self.response(
@@ -138,6 +139,7 @@ final class APIClientTests: XCTestCase {
         let endpoint = APIEndpoint<FavoriteState>(
             method: .put,
             path: "/api/v1/galleries/17/assets/201/favorite",
+            headers: ["If-Match": #""entity-9""#],
             idempotencyKey: key,
             etag: #""gallery-42""#
         )
@@ -147,6 +149,7 @@ final class APIClientTests: XCTestCase {
         XCTAssertTrue(result.selected)
         XCTAssertEqual(headers.withValue { $0["Idempotency-Key"] }, key.uuidString.lowercased())
         XCTAssertEqual(headers.withValue { $0["If-None-Match"] }, #""gallery-42""#)
+        XCTAssertEqual(headers.withValue { $0["If-Match"] }, #""entity-9""#)
     }
 
     func testReturnsCacheMetadataWithDecodedValue() async throws {

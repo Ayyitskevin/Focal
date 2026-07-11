@@ -138,16 +138,17 @@ def _busy_conflict(
     return any(bs < end_utc and be > start_utc for bs, be in busy)
 
 
-def _day_count(con, et, day: dt.date) -> int:
+def _day_count(con, et, day: dt.date, exclude_id: int | None = None) -> int:
     """Confirmed bookings for this event on this LOCAL day (cap accounting)."""
     tz = _biz_tz()
     start = dt.datetime.combine(day, dt.time(), tz).astimezone(_UTC)
-    end = start + dt.timedelta(days=1)
+    end = dt.datetime.combine(day + dt.timedelta(days=1), dt.time(), tz).astimezone(_UTC)
     row = con.execute(
         """SELECT COUNT(*) AS n FROM bookings
            WHERE status='confirmed' AND event_type_id=?
-             AND start_utc >= ? AND start_utc < ?""",
-        (et["id"], _fmt_utc(start), _fmt_utc(end)),
+             AND start_utc >= ? AND start_utc < ?
+             AND (? IS NULL OR id != ?)""",
+        (et["id"], _fmt_utc(start), _fmt_utc(end), exclude_id, exclude_id),
     ).fetchone()
     return row["n"]
 
@@ -158,6 +159,7 @@ def _slots_utc(
     day: dt.date,
     ref_utc: dt.datetime,
     busy: list[tuple[dt.datetime, dt.datetime]] | None = None,
+    exclude_id: int | None = None,
 ) -> list[dt.datetime]:
     """Open slot start instants (UTC) for `day`, after all policy filters.
 
@@ -167,7 +169,7 @@ def _slots_utc(
     today_local = ref_utc.astimezone(_biz_tz()).date()
     if day < today_local or (day - today_local).days > et["booking_window_days"]:
         return []
-    if et["max_per_day"] and _day_count(con, et, day) >= et["max_per_day"]:
+    if et["max_per_day"] and _day_count(con, et, day, exclude_id) >= et["max_per_day"]:
         return []
 
     tz = _biz_tz()
@@ -188,7 +190,7 @@ def _slots_utc(
                 start_utc >= notice_cutoff
                 and start_utc <= window_cutoff
                 and not _busy_conflict(start_utc, end_utc, busy)
-                and not _overlaps(con, et, start_utc, end_utc, None)
+                and not _overlaps(con, et, start_utc, end_utc, exclude_id)
             ):
                 out.append(start_utc)
             m += step
@@ -204,7 +206,8 @@ def slots_for_day(et, day: dt.date, visitor_tz: str = "") -> list[dict]:
     disp = _display_tz(visitor_tz)
     tz = _biz_tz()
     day_start = dt.datetime.combine(day, dt.time(), tz).astimezone(_UTC)
-    busy = gcal.free_busy(day_start, day_start + dt.timedelta(days=1))
+    day_end = dt.datetime.combine(day + dt.timedelta(days=1), dt.time(), tz).astimezone(_UTC)
+    busy = gcal.free_busy(day_start, day_end)
     con = db.connect()
     try:
         starts = _slots_utc(con, et, day, now_utc(), busy)
@@ -268,11 +271,9 @@ def book(
     try:
         con.execute("BEGIN IMMEDIATE")
         ref = now_utc()
-        open_starts = {_fmt_utc(s) for s in _slots_utc(con, et, day_local, ref)}
-        # exclude_id (reschedule) frees its own old slot for the overlap test
-        if exclude_id is not None and start_utc_str not in open_starts:
-            if not _overlaps(con, et, start_utc, end_utc, exclude_id):
-                open_starts.add(start_utc_str)
+        open_starts = {
+            _fmt_utc(s) for s in _slots_utc(con, et, day_local, ref, exclude_id=exclude_id)
+        }
         if start_utc_str not in open_starts:
             con.execute("ROLLBACK")
             raise SlotTaken("slot no longer available")

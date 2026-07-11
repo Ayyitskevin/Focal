@@ -27,6 +27,7 @@ from . import (
     mobile_gallery_delivery_api,
     mobile_owner_api,
     mobile_owner_mutation_api,
+    mobile_policy_mutation_api,
     saas,
     urls,
 )
@@ -612,3 +613,4 @@ app.include_router(mobile_gallery_calendar_api.router)
 app.include_router(mobile_client_delivery_api.router)
 app.include_router(mobile_gallery_delivery_api.router)
 app.include_router(mobile_owner_mutation_api.router)
+app.include_router(mobile_policy_mutation_api.router)

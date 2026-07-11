@@ -4,6 +4,8 @@ enum ClientDeliveryRepositoryError: LocalizedError, Sendable {
     case missingConditionalValue
     case favoriteIdentityMismatch
     case commentIdentityMismatch
+    case missingEntityTag
+    case proposalDecisionUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -13,6 +15,10 @@ enum ClientDeliveryRepositoryError: LocalizedError, Sendable {
             "The studio returned a favorite for the wrong media item."
         case .commentIdentityMismatch:
             "The studio returned a comment for the wrong media item."
+        case .missingEntityTag:
+            "The studio did not provide a secure version for this document."
+        case .proposalDecisionUnavailable:
+            "This proposal is no longer open for a response."
         }
     }
 }
@@ -114,6 +120,75 @@ actor ClientDeliveryRepository {
                 }
                 throw error
             }
+        }
+    }
+
+    func proposalForDecision() async throws -> EditableResource<ClientDocumentSummary> {
+        try await serialized { ticket in
+            if let current = try await cache.read(
+                Key.document,
+                as: ClientDocumentSummary.self
+            ), let etag = current.etag, current.value.kind == .proposal,
+               current.value.canAct {
+                try await requireActive(ticket)
+                return EditableResource(value: current.value, etag: etag)
+            }
+
+            try await requireActive(ticket)
+            let response = try await sendWithMetadata(
+                MiseEndpoints.ClientDelivery.document()
+            )
+            guard response.value.kind == .proposal, response.value.canAct else {
+                throw ClientDeliveryRepositoryError.proposalDecisionUnavailable
+            }
+            guard let etag = response.metadata.etag, !etag.isEmpty else {
+                throw ClientDeliveryRepositoryError.missingEntityTag
+            }
+            _ = try await persist(
+                response.value,
+                key: Key.document,
+                etag: etag,
+                storedAt: response.metadata.receivedAt,
+                lifetimeTicket: ticket
+            )
+            return EditableResource(value: response.value, etag: etag)
+        }
+    }
+
+    func decideProposal(
+        accept: Bool,
+        etag: String,
+        idempotencyKey: UUID
+    ) async throws -> EditableResource<ClientDocumentSummary> {
+        try await serialized { ticket in
+            try await requireActive(ticket)
+            let response = try await sendWithMetadata(
+                MiseEndpoints.ClientDelivery.decideProposal(
+                    accept: accept,
+                    etag: etag,
+                    idempotencyKey: idempotencyKey
+                )
+            )
+            guard response.value.kind == .proposal else {
+                throw ClientDeliveryRepositoryError.proposalDecisionUnavailable
+            }
+            guard let nextETag = response.metadata.etag, !nextETag.isEmpty else {
+                throw ClientDeliveryRepositoryError.missingEntityTag
+            }
+            if (try? await cache.write(
+                response.value,
+                key: Key.document,
+                etag: nextETag,
+                storedAt: response.metadata.receivedAt
+            )) != nil {
+                do {
+                    try await requireActive(ticket)
+                } catch {
+                    try? await cache.remove(Key.document)
+                    throw error
+                }
+            }
+            return EditableResource(value: response.value, etag: nextETag)
         }
     }
 

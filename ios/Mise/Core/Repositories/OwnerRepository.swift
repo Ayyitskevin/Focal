@@ -16,11 +16,6 @@ struct ResourceSnapshot<Value: Codable & Sendable>: Sendable {
     }
 }
 
-struct EditableResource<Value: Codable & Sendable>: Sendable {
-    let value: Value
-    let etag: String
-}
-
 enum OwnerRepositoryError: LocalizedError, Sendable {
     case invalidPagination
     case missingConditionalValue

@@ -579,6 +579,26 @@ struct Booking: Codable, Hashable, Sendable, Identifiable {
     let createdAt: Date
 }
 
+struct BookingSlot: Codable, Hashable, Sendable, Identifiable {
+    var id: Date { startAt }
+    let startAt: Date
+}
+
+struct BookingSlots: Codable, Hashable, Sendable {
+    let day: LocalDate
+    let timeZone: String
+    let items: [BookingSlot]
+}
+
+struct BookingCancelRequest: Codable, Hashable, Sendable {
+    let reason: String
+}
+
+struct BookingRescheduleRequest: Codable, Hashable, Sendable {
+    let startAt: Date
+    let timeZone: String
+}
+
 struct AIRun: Codable, Hashable, Sendable, Identifiable {
     let id: Int64
     let capability: String

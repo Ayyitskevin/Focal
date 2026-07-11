@@ -108,7 +108,32 @@ def _link_studio(booking_id: int, inquiry_id: int | None) -> None:
     db.run("UPDATE bookings SET client_id=?, project_id=? WHERE id=?", (cid, pid, booking_id))
 
 
-def confirm(booking_id: int) -> None:
+def _mirror_inquiry(booking_id: int, booking, business_when: str) -> int | None:
+    """Create the one inquiry mirror for an original booking, never a reschedule."""
+    try:
+        inquiry_id = db.run(
+            """INSERT INTO inquiries (name, email, business, message, kind,
+                                      shoot_date, service, emailed)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (
+                booking["name"],
+                booking["email"],
+                None,
+                f"Booked {booking['event_name']} for {business_when}.\n\n{booking['notes']}",
+                "booking",
+                booking["start_utc"][:10],
+                booking["event_name"],
+                1 if mailer.configured() else 0,
+            ),
+        )
+        db.run("UPDATE bookings SET inquiry_id=? WHERE id=?", (inquiry_id, booking_id))
+        return int(inquiry_id)
+    except Exception as exc:
+        log.error("booking %s inquiry-row mirror failed: %s", booking_id, exc)
+        return None
+
+
+def confirm(booking_id: int, *, rescheduled: bool = False) -> None:
     """Email client + Kevin with the invite; mirror to Odysseus + Notion."""
     b = _load(booking_id)
     if not b:
@@ -149,14 +174,14 @@ def confirm(booking_id: int) -> None:
         }
         client_body = (
             f"Hi {b['name']},\n\n"
-            f"Your booking is confirmed:\n\n"
+            f"Your booking has been {'rescheduled' if rescheduled else 'confirmed'}:\n\n"
             f"  {b['event_name']}\n  {cli_when}\n  {loc}\n\n"
             f"Add it to your calendar with the attached invite, or here:\n{gcal_link}\n\n"
             f"Need to change or cancel? {_manage_url(b['token'])}\n\n"
             f"— {mailer.sender_name()}\n"
         )
         kevin_body = (
-            f"New booking via {urls.public_base_url()}\n\n"
+            f"{'Rescheduled booking' if rescheduled else 'New booking'} via {urls.public_base_url()}\n\n"
             f"Event: {b['event_name']}\nWhen: {biz_when}\n"
             f"Name: {b['name']}\nEmail: {b['email']}\nPhone: {b['phone'] or '—'}\n\n"
             f"{b['notes'] or '(no note)'}\n\nManage: {_manage_url(b['token'])}\n"
@@ -164,7 +189,7 @@ def confirm(booking_id: int) -> None:
         try:
             mailer.send(
                 b["email"],
-                f"Booking confirmed — {b['event_name']}",
+                f"Booking {'rescheduled' if rescheduled else 'confirmed'} — {b['event_name']}",
                 client_body,
                 reply_to=mailer.studio_inbox(),
                 ics=invite,
@@ -175,7 +200,7 @@ def confirm(booking_id: int) -> None:
             # Kevin's copy doubles as the Odysseus inquiry_intake hook (it polls his inbox).
             mailer.send(
                 mailer.studio_inbox(),
-                f"Booking — {b['name']} · {b['event_name']} · {biz_when}",
+                f"Booking {'rescheduled' if rescheduled else 'confirmed'} — {b['name']} · {b['event_name']} · {biz_when}",
                 kevin_body,
                 reply_to=b["email"],
                 ics=invite,
@@ -183,27 +208,8 @@ def confirm(booking_id: int) -> None:
         except Exception as e:
             log.error("booking %s kevin email failed: %s", booking_id, e)
 
-    # Mise-side inquiry row keeps the admin inquiry list + Odysseus consistent.
-    iid = None
-    try:
-        iid = db.run(
-            """INSERT INTO inquiries (name, email, business, message, kind,
-                                      shoot_date, service, emailed)
-               VALUES (?,?,?,?,?,?,?,?)""",
-            (
-                b["name"],
-                b["email"],
-                None,
-                f"Booked {b['event_name']} for {biz_when}.\n\n{b['notes']}",
-                "booking",
-                b["start_utc"][:10],
-                b["event_name"],
-                1 if mailer.configured() else 0,
-            ),
-        )
-        db.run("UPDATE bookings SET inquiry_id=? WHERE id=?", (iid, booking_id))
-    except Exception as e:
-        log.error("booking %s inquiry-row mirror failed: %s", booking_id, e)
+    # A reschedule is the same lead and project, not a second inquiry.
+    iid = None if rescheduled else _mirror_inquiry(booking_id, b, biz_when)
 
     # Link the booking into the Studio CRM (client always; project for real shoots).
     try:
@@ -287,3 +293,13 @@ def cancelled(booking_id: int, by_admin: bool = False) -> None:
 
     # Drop the matching Google calendar event (best-effort; no-op if not connected).
     gcal.on_booking_cancelled(booking_id)
+
+
+def rescheduled(booking_id: int) -> None:
+    """Deliver replacement semantics without creating a second lead or project."""
+    booking = _load(booking_id)
+    if not booking or not booking["reschedule_of"]:
+        log.error("rescheduled: booking %s has no source booking", booking_id)
+        return
+    cancelled(int(booking["reschedule_of"]), by_admin=True)
+    confirm(booking_id, rescheduled=True)
