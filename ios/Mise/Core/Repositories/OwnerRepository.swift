@@ -39,6 +39,8 @@ actor OwnerRepository {
         static let projects = "projects.v1"
         static let galleries = "galleries.v1"
         static let bookings = "bookings.v1"
+        static let commercialActions = "commercial.actions.v1"
+        static let companies = "commercial.companies.v1"
 
         static func gallery(_ id: Int64) -> String {
             "gallery.\(id).v1"
@@ -117,6 +119,52 @@ actor OwnerRepository {
             key: Key.gallery(id),
             endpoint: MiseEndpoints.Galleries.detail(id: id)
         )
+    }
+
+    // ── Commercial spine (owner read-only; queue S9) ─────────────────────────
+
+    func cachedCommercialActions() async throws -> ResourceSnapshot<[CommercialAction]>? {
+        try await cached(Key.commercialActions, as: [CommercialAction].self)
+    }
+
+    func refreshCommercialActions() async throws -> ResourceSnapshot<[CommercialAction]> {
+        let values = try await fetchAll { _ in MiseEndpoints.Commercial.actions }
+        return try await persist(values, key: Key.commercialActions)
+    }
+
+    func cachedCompanies() async throws -> ResourceSnapshot<[CompanySummary]>? {
+        try await cached(Key.companies, as: [CompanySummary].self)
+    }
+
+    func refreshCompanies() async throws -> ResourceSnapshot<[CompanySummary]> {
+        let values = try await fetchAll { cursor in
+            MiseEndpoints.Commercial.companies(cursor: cursor, limit: 100)
+        }
+        return try await persist(values, key: Key.companies)
+    }
+
+    /// Per-company / per-project detail views are fast-changing derived data;
+    /// they fetch fresh each time (no offline cache) and surface as a network
+    /// snapshot, consistent with the offline policy for derived summaries.
+    func companyNextActions(id: Int64) async throws -> ResourceSnapshot<CompanyNextActions> {
+        try await fetched(MiseEndpoints.Commercial.nextActions(companyID: id))
+    }
+
+    func arChase(companyID: Int64, invoiceID: Int64? = nil) async throws
+        -> ResourceSnapshot<ArChaseAssist>
+    {
+        try await fetched(MiseEndpoints.Commercial.arChase(companyID: companyID, invoiceID: invoiceID))
+    }
+
+    func projectCloseout(id: Int64) async throws -> ResourceSnapshot<ProjectCloseout> {
+        try await fetched(MiseEndpoints.Projects.closeout(projectID: id))
+    }
+
+    private func fetched<Value: Codable & Sendable>(
+        _ endpoint: APIEndpoint<Value>
+    ) async throws -> ResourceSnapshot<Value> {
+        let value = try await send(endpoint)
+        return ResourceSnapshot(value: value, storedAt: Date(), source: .network)
     }
 
     func purgeCache() async {
