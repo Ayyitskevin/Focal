@@ -1,11 +1,11 @@
 import SwiftUI
 
 struct CalendarAgendaView: View {
-    let model: OwnerResourceModel<[Booking]>
+    let model: ResourceModel<[Booking]>
     let timeZoneIdentifier: String
 
     var body: some View {
-        OwnerResourceView(
+        ResourceView(
             model: model,
             isEmpty: { $0.isEmpty },
             content: agenda,

@@ -1,10 +1,10 @@
 import SwiftUI
 
 struct ProjectsView: View {
-    let model: OwnerResourceModel<[ProjectSummary]>
+    let model: ResourceModel<[ProjectSummary]>
 
     var body: some View {
-        OwnerResourceView(
+        ResourceView(
             model: model,
             isEmpty: { $0.isEmpty },
             content: projectList,

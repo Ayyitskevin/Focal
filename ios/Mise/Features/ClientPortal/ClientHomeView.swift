@@ -3,11 +3,11 @@ import SwiftUI
 /// Client Home: a warm studio welcome plus dynamically generated next steps —
 /// only what currently needs the client's attention, straight from the server.
 struct ClientHomeView: View {
-    let model: OwnerResourceModel<ClientHomeSummary>
+    let model: ResourceModel<ClientHomeSummary>
     let navigate: (ClientDestination) -> Void
 
     var body: some View {
-        OwnerResourceView(
+        ResourceView(
             model: model,
             isEmpty: { _ in false },
             content: content,

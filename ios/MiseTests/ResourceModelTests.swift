@@ -1,7 +1,7 @@
 import XCTest
 @testable import Mise
 
-final class OwnerResourceModelTests: XCTestCase {
+final class ResourceModelTests: XCTestCase {
     @MainActor
     func testFailedRefreshKeepsCachedSnapshotVisible() async {
         let cached = ResourceSnapshot(
@@ -9,7 +9,7 @@ final class OwnerResourceModelTests: XCTestCase {
             storedAt: Date(timeIntervalSince1970: 1_700_000_000),
             source: .cache
         )
-        let model = OwnerResourceModel<[String]>(
+        let model = ResourceModel<[String]>(
             staleAfter: 60,
             cached: { cached },
             remote: { throw OfflineError() }

@@ -34,9 +34,9 @@ enum ClientDestination: String, CaseIterable, Identifiable {
 struct ClientCompanionView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var selection = ClientDestination.home
-    @State private var home: OwnerResourceModel<ClientHomeSummary>
-    @State private var galleries: OwnerResourceModel<[GallerySummary]>
-    @State private var bookings: OwnerResourceModel<[Booking]>
+    @State private var home: ResourceModel<ClientHomeSummary>
+    @State private var galleries: ResourceModel<[GallerySummary]>
+    @State private var bookings: ResourceModel<[Booking]>
 
     let session: CurrentSession
     let repository: ClientRepository
@@ -56,17 +56,17 @@ struct ClientCompanionView: View {
         self.mediaLoader = mediaLoader
         self.isSigningOut = isSigningOut
         self.signOut = signOut
-        _home = State(initialValue: OwnerResourceModel(
+        _home = State(initialValue: ResourceModel(
             staleAfter: 15 * 60,
             cached: { try await repository.cachedHome() },
             remote: { try await repository.refreshHome() }
         ))
-        _galleries = State(initialValue: OwnerResourceModel(
+        _galleries = State(initialValue: ResourceModel(
             staleAfter: 30 * 60,
             cached: { try await repository.cachedGalleries() },
             remote: { try await repository.refreshGalleries() }
         ))
-        _bookings = State(initialValue: OwnerResourceModel(
+        _bookings = State(initialValue: ResourceModel(
             staleAfter: 15 * 60,
             cached: { try await repository.cachedBookings() },
             remote: { try await repository.refreshBookings() }

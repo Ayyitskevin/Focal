@@ -1,11 +1,11 @@
 import SwiftUI
 
 struct ClientsView: View {
-    let model: OwnerResourceModel<[ClientSummary]>
+    let model: ResourceModel<[ClientSummary]>
     @State private var query = ""
 
     var body: some View {
-        OwnerResourceView(
+        ResourceView(
             model: model,
             isEmpty: { $0.isEmpty },
             content: clientList,

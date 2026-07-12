@@ -27,12 +27,12 @@ enum OwnerDestination: String, CaseIterable, Identifiable {
 struct OwnerCompanionView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var selection = OwnerDestination.home
-    @State private var home: OwnerResourceModel<DashboardSummary>
-    @State private var clients: OwnerResourceModel<[ClientSummary]>
-    @State private var projects: OwnerResourceModel<[ProjectSummary]>
-    @State private var galleries: OwnerResourceModel<[GallerySummary]>
-    @State private var bookings: OwnerResourceModel<[Booking]>
-    @State private var commercial: OwnerResourceModel<[CommercialAction]>
+    @State private var home: ResourceModel<DashboardSummary>
+    @State private var clients: ResourceModel<[ClientSummary]>
+    @State private var projects: ResourceModel<[ProjectSummary]>
+    @State private var galleries: ResourceModel<[GallerySummary]>
+    @State private var bookings: ResourceModel<[Booking]>
+    @State private var commercial: ResourceModel<[CommercialAction]>
 
     let session: CurrentSession
     let repository: OwnerRepository
@@ -52,32 +52,32 @@ struct OwnerCompanionView: View {
         self.mediaLoader = mediaLoader
         self.isSigningOut = isSigningOut
         self.signOut = signOut
-        _home = State(initialValue: OwnerResourceModel(
+        _home = State(initialValue: ResourceModel(
             staleAfter: 15 * 60,
             cached: { try await repository.cachedDashboard() },
             remote: { try await repository.refreshDashboard() }
         ))
-        _clients = State(initialValue: OwnerResourceModel(
+        _clients = State(initialValue: ResourceModel(
             staleAfter: 60 * 60,
             cached: { try await repository.cachedClients() },
             remote: { try await repository.refreshClients() }
         ))
-        _projects = State(initialValue: OwnerResourceModel(
+        _projects = State(initialValue: ResourceModel(
             staleAfter: 30 * 60,
             cached: { try await repository.cachedProjects() },
             remote: { try await repository.refreshProjects() }
         ))
-        _galleries = State(initialValue: OwnerResourceModel(
+        _galleries = State(initialValue: ResourceModel(
             staleAfter: 30 * 60,
             cached: { try await repository.cachedGalleries() },
             remote: { try await repository.refreshGalleries() }
         ))
-        _bookings = State(initialValue: OwnerResourceModel(
+        _bookings = State(initialValue: ResourceModel(
             staleAfter: 15 * 60,
             cached: { try await repository.cachedBookings() },
             remote: { try await repository.refreshBookings() }
         ))
-        _commercial = State(initialValue: OwnerResourceModel(
+        _commercial = State(initialValue: ResourceModel(
             staleAfter: 15 * 60,
             cached: { try await repository.cachedCommercialActions() },
             remote: { try await repository.refreshCommercialActions() }

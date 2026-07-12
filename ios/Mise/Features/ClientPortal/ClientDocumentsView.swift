@@ -9,11 +9,11 @@ import SwiftUI
 /// signatures and Stripe checkout stay server-rendered flows in Milestone 3
 /// (docs/IOS-ARCHITECTURE.md §8).
 struct ClientDocumentsView: View {
-    let home: OwnerResourceModel<ClientHomeSummary>
+    let home: ResourceModel<ClientHomeSummary>
     let repository: ClientRepository
 
     var body: some View {
-        OwnerResourceView(
+        ResourceView(
             model: home,
             isEmpty: { _ in false },
             content: content,
@@ -42,11 +42,11 @@ struct ClientDocumentsView: View {
 
 private struct ProjectDocumentsList: View {
     let projectID: Int64
-    @State private var model: OwnerResourceModel<ClientDocuments>
+    @State private var model: ResourceModel<ClientDocuments>
 
     init(projectID: Int64, repository: ClientRepository) {
         self.projectID = projectID
-        _model = State(initialValue: OwnerResourceModel(
+        _model = State(initialValue: ResourceModel(
             staleAfter: 15 * 60,
             cached: { try await repository.cachedDocuments(projectID: projectID) },
             remote: { try await repository.refreshDocuments(projectID: projectID) }
@@ -54,7 +54,7 @@ private struct ProjectDocumentsList: View {
     }
 
     var body: some View {
-        OwnerResourceView(
+        ResourceView(
             model: model,
             isEmpty: { $0.isEmpty },
             content: list,
