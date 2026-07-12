@@ -165,7 +165,7 @@ final class AIActivityContractTests: XCTestCase {
         ]
         let client = AIActivityQueuedClient(replies: try pages.enumerated().map { index, page in
             .value(
-                MiseJSON.encoder().encode(page),
+                try MiseJSON.encoder().encode(page),
                 Self.metadata(etag: index == 0 ? #""ai-runs-v2""# : nil)
             )
         })
