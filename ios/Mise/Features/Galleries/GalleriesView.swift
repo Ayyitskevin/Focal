@@ -1,12 +1,12 @@
 import SwiftUI
 
 struct GalleriesView: View {
-    let model: OwnerResourceModel<[GallerySummary]>
+    let model: ResourceModel<[GallerySummary]>
     let repository: OwnerRepository
     let mediaLoader: AuthenticatedMediaLoader
 
     var body: some View {
-        OwnerResourceView(
+        ResourceView(
             model: model,
             isEmpty: { $0.isEmpty },
             content: galleryList,

@@ -44,11 +44,11 @@ enum CommercialRoute: Hashable {
 
 @MainActor
 struct CommercialView: View {
-    let model: OwnerResourceModel<[CommercialAction]>
+    let model: ResourceModel<[CommercialAction]>
     let repository: OwnerRepository
 
     var body: some View {
-        OwnerResourceView(
+        ResourceView(
             model: model,
             isEmpty: { $0.isEmpty },
             content: queue,
@@ -108,14 +108,14 @@ struct CommercialView: View {
 
 @MainActor
 struct CompanyNextActionsView: View {
-    @State private var model: OwnerResourceModel<CompanyNextActions>
+    @State private var model: ResourceModel<CompanyNextActions>
     let repository: OwnerRepository
     let companyName: String
 
     init(repository: OwnerRepository, companyID: Int64, companyName: String) {
         self.repository = repository
         self.companyName = companyName
-        _model = State(initialValue: OwnerResourceModel(
+        _model = State(initialValue: ResourceModel(
             staleAfter: 0,
             cached: { nil },
             remote: { try await repository.companyNextActions(id: companyID) }
@@ -123,7 +123,7 @@ struct CompanyNextActionsView: View {
     }
 
     var body: some View {
-        OwnerResourceView(
+        ResourceView(
             model: model,
             isEmpty: { $0.actions.isEmpty },
             content: { value in
@@ -175,12 +175,12 @@ struct CompanyNextActionsView: View {
 
 @MainActor
 struct ProjectCloseoutView: View {
-    @State private var model: OwnerResourceModel<ProjectCloseout>
+    @State private var model: ResourceModel<ProjectCloseout>
     let title: String
 
     init(repository: OwnerRepository, projectID: Int64, title: String) {
         self.title = title
-        _model = State(initialValue: OwnerResourceModel(
+        _model = State(initialValue: ResourceModel(
             staleAfter: 0,
             cached: { nil },
             remote: { try await repository.projectCloseout(id: projectID) }
@@ -188,7 +188,7 @@ struct ProjectCloseoutView: View {
     }
 
     var body: some View {
-        OwnerResourceView(
+        ResourceView(
             model: model,
             isEmpty: { $0.items.isEmpty },
             content: { value in
@@ -244,12 +244,12 @@ struct ProjectCloseoutView: View {
 
 @MainActor
 struct ArChaseAssistView: View {
-    @State private var model: OwnerResourceModel<ArChaseAssist>
+    @State private var model: ResourceModel<ArChaseAssist>
     let companyName: String
 
     init(repository: OwnerRepository, companyID: Int64, companyName: String) {
         self.companyName = companyName
-        _model = State(initialValue: OwnerResourceModel(
+        _model = State(initialValue: ResourceModel(
             staleAfter: 0,
             cached: { nil },
             remote: { try await repository.arChase(companyID: companyID) }
@@ -257,7 +257,7 @@ struct ArChaseAssistView: View {
     }
 
     var body: some View {
-        OwnerResourceView(
+        ResourceView(
             model: model,
             isEmpty: { $0.overdueInvoices.isEmpty },
             content: { value in

@@ -1,8 +1,8 @@
 import Foundation
 import SwiftUI
 
-struct OwnerResourceView<Value: Codable & Sendable, Content: View, Empty: View>: View {
-    let model: OwnerResourceModel<Value>
+struct ResourceView<Value: Codable & Sendable, Content: View, Empty: View>: View {
+    let model: ResourceModel<Value>
     let isEmpty: (Value) -> Bool
     let content: (Value) -> Content
     let empty: () -> Empty

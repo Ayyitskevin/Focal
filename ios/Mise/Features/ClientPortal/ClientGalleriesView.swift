@@ -3,12 +3,12 @@ import SwiftUI
 /// Client Gallery root: a vertical list of gallery rows (cover thumb, title,
 /// count, status pill), per the design handoff — not the owner's card grid.
 struct ClientGalleriesView: View {
-    let model: OwnerResourceModel<[GallerySummary]>
+    let model: ResourceModel<[GallerySummary]>
     let repository: ClientRepository
     let mediaLoader: AuthenticatedMediaLoader
 
     var body: some View {
-        OwnerResourceView(
+        ResourceView(
             model: model,
             isEmpty: { $0.isEmpty },
             content: galleryList,
@@ -81,7 +81,7 @@ struct ClientGalleriesView: View {
 struct ClientGalleryDetailView: View {
     let gallery: GallerySummary
     let mediaLoader: AuthenticatedMediaLoader
-    @State private var model: OwnerResourceModel<GalleryDetail>
+    @State private var model: ResourceModel<GalleryDetail>
     @State private var favorites: GalleryFavorites
 
     init(
@@ -91,7 +91,7 @@ struct ClientGalleryDetailView: View {
     ) {
         self.gallery = gallery
         self.mediaLoader = mediaLoader
-        _model = State(initialValue: OwnerResourceModel(
+        _model = State(initialValue: ResourceModel(
             staleAfter: 60 * 60,
             cached: { try await repository.cachedGallery(id: gallery.id) },
             remote: { try await repository.refreshGallery(id: gallery.id) }
@@ -110,7 +110,7 @@ struct ClientGalleryDetailView: View {
     }
 
     var body: some View {
-        OwnerResourceView(
+        ResourceView(
             model: model,
             isEmpty: { $0.assets.isEmpty },
             content: { detail in

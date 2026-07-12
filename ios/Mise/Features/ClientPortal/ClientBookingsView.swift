@@ -4,7 +4,7 @@ import SwiftUI
 /// resolve to a real client (workspace, portal) have bookings to show;
 /// gallery and single-document links get a gentle explanation instead.
 struct ClientBookingsView: View {
-    let model: OwnerResourceModel<[Booking]>
+    let model: ResourceModel<[Booking]>
     let accessKind: PrincipalKind
     let timeZoneIdentifier: String
 
@@ -15,7 +15,7 @@ struct ClientBookingsView: View {
     var body: some View {
         Group {
             if hasBookingAuthority {
-                OwnerResourceView(
+                ResourceView(
                     model: model,
                     isEmpty: { $0.isEmpty },
                     content: list,

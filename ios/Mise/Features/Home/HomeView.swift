@@ -1,11 +1,11 @@
 import SwiftUI
 
 struct HomeView: View {
-    let model: OwnerResourceModel<DashboardSummary>
+    let model: ResourceModel<DashboardSummary>
     let navigate: (OwnerDestination) -> Void
 
     var body: some View {
-        OwnerResourceView(
+        ResourceView(
             model: model,
             isEmpty: { _ in false },
             content: dashboard,

@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-enum OwnerLoadState<Value: Codable & Sendable>: Sendable {
+enum ResourceLoadState<Value: Codable & Sendable>: Sendable {
     case idle
     case loading(ResourceSnapshot<Value>?)
     case loaded(ResourceSnapshot<Value>)
@@ -18,8 +18,8 @@ enum OwnerLoadState<Value: Codable & Sendable>: Sendable {
 
 @MainActor
 @Observable
-final class OwnerResourceModel<Value: Codable & Sendable> {
-    private(set) var state: OwnerLoadState<Value> = .idle
+final class ResourceModel<Value: Codable & Sendable> {
+    private(set) var state: ResourceLoadState<Value> = .idle
     private(set) var isRefreshing = false
     let staleAfter: TimeInterval
     private let cached: @Sendable () async throws -> ResourceSnapshot<Value>?
