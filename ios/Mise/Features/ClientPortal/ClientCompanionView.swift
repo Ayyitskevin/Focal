@@ -34,6 +34,7 @@ enum ClientDestination: String, CaseIterable, Identifiable {
 struct ClientCompanionView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var selection = ClientDestination.home
+    @State private var documentsPath = NavigationPath()
     @State private var home: ResourceModel<ClientHomeSummary>
     @State private var galleries: ResourceModel<[GallerySummary]>
     @State private var bookings: ResourceModel<[Booking]>
@@ -110,32 +111,61 @@ struct ClientCompanionView: View {
         .tint(MiseDesign.terra)
     }
 
+    @ViewBuilder
     private func clientStack(_ destination: ClientDestination) -> some View {
-        NavigationStack {
-            screen(destination)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Menu {
-                            LabeledContent("Studio", value: session.workspace.displayName)
-                            LabeledContent("Access", value: session.principal.kind.displayName)
-                            Button("Sign out", role: .destructive) {
-                                Task { await signOut() }
-                            }
-                            .disabled(isSigningOut)
-                        } label: {
-                            Image(systemName: "person.crop.circle")
-                                .accessibilityLabel("Account")
-                        }
+        if destination == .documents {
+            // The Documents stack gets a path so a Home next-step can deep-link
+            // straight to a proposal/contract/invoice, not just switch tabs.
+            NavigationStack(path: $documentsPath) {
+                screen(destination)
+                    .navigationDestination(for: DocumentRef.self) { ref in
+                        ClientDocumentDetailLoader(
+                            ref: ref,
+                            projectID: home.state.snapshot?.value.projectID ?? nil,
+                            repository: repository
+                        )
                     }
-                }
+                    .toolbar { accountToolbar }
+            }
+        } else {
+            NavigationStack {
+                screen(destination)
+                    .toolbar { accountToolbar }
+            }
         }
+    }
+
+    @ToolbarContentBuilder
+    private var accountToolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Menu {
+                LabeledContent("Studio", value: session.workspace.displayName)
+                LabeledContent("Access", value: session.principal.kind.displayName)
+                Button("Sign out", role: .destructive) {
+                    Task { await signOut() }
+                }
+                .disabled(isSigningOut)
+            } label: {
+                Image(systemName: "person.crop.circle")
+                    .accessibilityLabel("Account")
+            }
+        }
+    }
+
+    private func openDocument(_ ref: DocumentRef) {
+        documentsPath.append(ref)
+        selection = .documents
     }
 
     @ViewBuilder
     private func screen(_ destination: ClientDestination) -> some View {
         switch destination {
         case .home:
-            ClientHomeView(model: home) { selection = $0 }
+            ClientHomeView(
+                model: home,
+                navigate: { selection = $0 },
+                openDocument: openDocument
+            )
         case .gallery:
             ClientGalleriesView(
                 model: galleries,

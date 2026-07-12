@@ -191,6 +191,72 @@ private struct SingleDocumentView: View {
     }
 }
 
+/// Resolves a `DocumentRef` (from a Home deep-link) to the exact document
+/// detail. Self-loading so it works regardless of whether the Documents list
+/// has loaded yet; the fetch is cache-first, so it usually returns instantly.
+struct ClientDocumentDetailLoader: View {
+    let ref: DocumentRef
+    let projectID: Int64?
+    @State private var model: ResourceModel<ClientDocuments>?
+
+    init(ref: DocumentRef, projectID: Int64?, repository: ClientRepository) {
+        self.ref = ref
+        self.projectID = projectID
+        if let projectID {
+            _model = State(initialValue: ResourceModel(
+                staleAfter: 15 * 60,
+                cached: { try await repository.cachedDocuments(projectID: projectID) },
+                remote: { try await repository.refreshDocuments(projectID: projectID) }
+            ))
+        } else {
+            _model = State(initialValue: nil)
+        }
+    }
+
+    var body: some View {
+        Group {
+            if let model {
+                ResourceView(
+                    model: model,
+                    isEmpty: { _ in false },
+                    content: { detail(in: $0) },
+                    empty: { EmptyView() }
+                )
+            } else {
+                notFound
+            }
+        }
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    @ViewBuilder
+    private func detail(in documents: ClientDocuments) -> some View {
+        if ref.variant == "proposal",
+           let proposal = documents.proposals.first(where: { $0.id == ref.id })
+        {
+            ClientProposalDetailView(proposal: proposal)
+        } else if ref.variant == "contract",
+                  let contract = documents.contracts.first(where: { $0.id == ref.id })
+        {
+            ClientContractDetailView(contract: contract)
+        } else if ref.variant == "invoice",
+                  let invoice = documents.invoices.first(where: { $0.id == ref.id })
+        {
+            ClientInvoiceDetailView(invoice: invoice)
+        } else {
+            notFound
+        }
+    }
+
+    private var notFound: some View {
+        ContentUnavailableView(
+            "Document unavailable",
+            systemImage: "doc.text",
+            description: Text("Open the Documents tab to find it.")
+        )
+    }
+}
+
 struct ClientProposalDetailView: View {
     let proposal: Proposal
     @Environment(\.openURL) private var openURL

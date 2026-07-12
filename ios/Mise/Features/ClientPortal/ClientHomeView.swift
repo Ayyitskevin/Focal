@@ -5,6 +5,7 @@ import SwiftUI
 struct ClientHomeView: View {
     let model: ResourceModel<ClientHomeSummary>
     let navigate: (ClientDestination) -> Void
+    let openDocument: (DocumentRef) -> Void
 
     var body: some View {
         ResourceView(
@@ -28,7 +29,11 @@ struct ClientHomeView: View {
                 Section("Next steps") {
                     ForEach(summary.nextSteps) { step in
                         Button {
-                            navigate(destination(for: step))
+                            if let ref = step.documentRef {
+                                openDocument(ref)
+                            } else {
+                                navigate(destination(for: step))
+                            }
                         } label: {
                             nextStepRow(step)
                         }
