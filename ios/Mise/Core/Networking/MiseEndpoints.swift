@@ -125,6 +125,55 @@ enum MiseEndpoints {
                 path: "/api/v1/projects/\(projectID)/invoices"
             )
         }
+
+        static func closeout(projectID: Int64) -> APIEndpoint<ProjectCloseout> {
+            APIEndpoint(
+                method: .get,
+                path: "/api/v1/projects/\(projectID)/closeout"
+            )
+        }
+    }
+
+    /// Owner commercial spine — read-only (queue S8).
+    enum Commercial {
+        static func companies(
+            cursor: String? = nil,
+            limit: Int = 25
+        ) -> APIEndpoint<APIPage<CompanySummary>> {
+            APIEndpoint(
+                method: .get,
+                path: "/api/v1/companies",
+                queryItems: [
+                    APIQueryItem(name: "cursor", value: cursor),
+                    APIQueryItem(name: "limit", value: String(min(max(limit, 1), 100))),
+                ]
+            )
+        }
+
+        static let actions = APIEndpoint<APIPage<CommercialAction>>(
+            method: .get,
+            path: "/api/v1/commercial/actions"
+        )
+
+        static func nextActions(companyID: Int64) -> APIEndpoint<CompanyNextActions> {
+            APIEndpoint(
+                method: .get,
+                path: "/api/v1/companies/\(companyID)/next-actions"
+            )
+        }
+
+        static func arChase(companyID: Int64, invoiceID: Int64? = nil) -> APIEndpoint<ArChaseAssist> {
+            APIEndpoint(
+                method: .get,
+                path: "/api/v1/companies/\(companyID)/ar-chase",
+                queryItems: [
+                    APIQueryItem(
+                        name: "invoice_id",
+                        value: invoiceID.map { String($0) }
+                    )
+                ]
+            )
+        }
     }
 
     enum Galleries {
