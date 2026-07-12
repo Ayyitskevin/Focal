@@ -1,8 +1,6 @@
 # Mise
 
-Professional client studio, hosted and maintained for solo photographers and
-videographers. Exactly **$20/month** after a 14-day trial. No paid tiers, no
-setup fee, cancel anytime.
+A pocket-sized studio OS for wedding photographers. iOS-first client & studio management: CRM pipeline, proposals-to-payments, gallery proofing, and booking — in one warm, boutique-grade app.
 
 Mise combines the parts solo creatives usually stitch together from Pixieset,
 HoneyBook, Dubsado, ShootProof, and spreadsheets:
