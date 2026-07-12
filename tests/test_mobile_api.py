@@ -101,8 +101,17 @@ def test_tenant_discovery_and_openapi_are_scoped_native_contracts(mobile_client)
         "/projects",
         "/galleries",
         "/galleries/{gallery_id}",
+        "/galleries/{gallery_id}/assets/{asset_id}/favorite",
         "/event-types",
         "/bookings",
+        "/client/home",
+        "/client/galleries",
+        "/client/galleries/{gallery_id}",
+        "/client/bookings",
+        "/projects/{project_id}/proposals",
+        "/projects/{project_id}/contracts",
+        "/projects/{project_id}/invoices",
+        "/media/galleries/{gallery_id}/assets/{asset_id}/{variant}",
     }
     assert all("admin" not in path for path in schema["paths"])
 

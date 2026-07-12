@@ -229,11 +229,12 @@ def test_gallery_owner_auth_manifest_safety_and_conditional_cache(api_client, mo
     assert payload["assets"][0]["filename"] == "ready.jpg"
     assert payload["assets"][0]["keeper_score"] == pytest.approx(0.97)
     assert payload["assets"][0]["hero_potential"] is None
+    media_base = f"https://studio.test/api/v1/media/galleries/{gallery_id}/assets/{ready_id}"
     assert payload["assets"][0]["links"] == {
-        "thumbnail_url": None,
-        "preview_url": None,
+        "thumbnail_url": f"{media_base}/thumbnail",
+        "preview_url": f"{media_base}/preview",
         "poster_url": None,
-        "download_url": None,
+        "download_url": f"{media_base}/download",
     }
     assert payload["vision"]["error"] == "Analysis failed."
     serialized = json.dumps(payload)

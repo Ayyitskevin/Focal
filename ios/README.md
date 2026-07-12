@@ -44,6 +44,12 @@ and avoiding it in the foundation keeps auth/session behavior auditable.
   and self-hosted origins are entered in the app and remain isolated per origin.
 - Milestone 2 adds the cache-first owner dashboard, clients, projects, gallery
   manifests, and upcoming-booking agenda with adaptive iPhone/iPad navigation.
+- Milestone 3 adds the client experience (Home / Gallery / Documents /
+  Bookings) for the four shared-access principals, the shared gallery grid +
+  lightbox with gallery-guest favoriting, bearer-authenticated media loading,
+  and the design-handoff tokens (`MiseDesign`). Display type uses the system
+  serif design as the Newsreader stand-in; bundling the handoff's
+  Newsreader/Archivo webfonts is a pending asset/licensing decision.
 - Do not add access tokens, refresh tokens, PINs, Stripe secrets, or APNs keys to
   xcconfig files.
 

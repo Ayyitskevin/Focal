@@ -47,6 +47,8 @@ final class AuthenticationCoordinator {
     private let installationIdentity: InstallationIdentity
     private var activeWorkspace: WorkspaceEnvironment?
     private(set) var ownerRepository: OwnerRepository?
+    private(set) var clientRepository: ClientRepository?
+    private(set) var mediaLoader: AuthenticatedMediaLoader?
     private var unlockOnActivation = false
     private var applicationIsActive = true
     private var hasRestored = false
@@ -89,11 +91,13 @@ final class AuthenticationCoordinator {
                 return
             }
             activeWorkspace = workspace
-            configureOwnerRepository(for: session.context, workspace: workspace)
+            configureRepositories(for: session.context, workspace: workspace)
             await enterRestoredSession(session.context)
         } catch {
             await workspace.session.invalidate()
             ownerRepository = nil
+            clientRepository = nil
+            mediaLoader = nil
             originStore.clear()
             errorMessage = "Your saved session could not be restored. Sign in again."
             phase = .signedOut
@@ -130,7 +134,7 @@ final class AuthenticationCoordinator {
         clearCredentialInputs(keepingSharedAccessInput: false)
         errorMessage = nil
         activeWorkspace = nil
-        ownerRepository = nil
+        clearRepositories()
         flow.showClientLink()
     }
 
@@ -140,7 +144,7 @@ final class AuthenticationCoordinator {
         workspaceInput = ""
         errorMessage = nil
         activeWorkspace = nil
-        ownerRepository = nil
+        clearRepositories()
         flow.reset()
     }
 
@@ -271,6 +275,9 @@ final class AuthenticationCoordinator {
         if let ownerRepository {
             await ownerRepository.purgeCache()
         }
+        if let clientRepository {
+            await clientRepository.purgeCache()
+        }
 
         if let activeWorkspace {
             do {
@@ -283,7 +290,7 @@ final class AuthenticationCoordinator {
 
         originStore.clear()
         self.activeWorkspace = nil
-        ownerRepository = nil
+        clearRepositories()
         clearCredentialInputs(keepingSharedAccessInput: false)
         workspaceInput = ""
         flow.reset()
@@ -391,7 +398,7 @@ final class AuthenticationCoordinator {
         workspace: WorkspaceEnvironment
     ) {
         activeWorkspace = workspace
-        configureOwnerRepository(for: session.context, workspace: workspace)
+        configureRepositories(for: session.context, workspace: workspace)
         originStore.save(workspace.origin)
         clearCredentialInputs(keepingSharedAccessInput: false)
         if applicationIsActive {
@@ -407,21 +414,37 @@ final class AuthenticationCoordinator {
         }
     }
 
-    private func configureOwnerRepository(
+    private func configureRepositories(
         for context: CurrentSession,
         workspace: WorkspaceEnvironment
     ) {
-        guard
-            context.principal.kind == .studioOwner,
-            context.principal.allows("studio:read")
-        else {
-            ownerRepository = nil
+        mediaLoader = workspace.mediaLoader
+        if context.principal.kind == .studioOwner,
+           context.principal.allows("studio:read")
+        {
+            ownerRepository = OwnerRepository(
+                client: workspace.apiClient,
+                cache: TenantJSONCache(cacheNamespace: context.workspace.cacheNamespace)
+            )
+            clientRepository = nil
             return
         }
-        ownerRepository = OwnerRepository(
-            client: workspace.apiClient,
-            cache: TenantJSONCache(cacheNamespace: context.workspace.cacheNamespace)
-        )
+        ownerRepository = nil
+        if context.principal.kind != .studioOwner {
+            clientRepository = ClientRepository(
+                client: workspace.apiClient,
+                cache: TenantJSONCache(cacheNamespace: context.workspace.cacheNamespace),
+                principal: context.principal
+            )
+        } else {
+            clientRepository = nil
+        }
+    }
+
+    private func clearRepositories() {
+        ownerRepository = nil
+        clientRepository = nil
+        mediaLoader = nil
     }
 
     private func enterRestoredSession(_ context: CurrentSession) async {

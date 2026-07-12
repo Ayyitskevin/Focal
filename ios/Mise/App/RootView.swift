@@ -20,6 +20,8 @@ struct RootView: View {
                 SignedInShell(
                     session: session,
                     ownerRepository: authentication.ownerRepository,
+                    clientRepository: authentication.clientRepository,
+                    mediaLoader: authentication.mediaLoader,
                     isSigningOut: authentication.isWorking,
                     signOut: { await authentication.signOut() }
                 )
@@ -72,19 +74,34 @@ private struct LoadingSessionView: View {
 private struct SignedInShell: View {
     let session: CurrentSession
     let ownerRepository: OwnerRepository?
+    let clientRepository: ClientRepository?
+    let mediaLoader: AuthenticatedMediaLoader?
     let isSigningOut: Bool
     let signOut: @MainActor () async -> Void
 
     var body: some View {
-        if session.principal.kind == .studioOwner, let repository = ownerRepository {
+        if session.principal.kind == .studioOwner,
+           let repository = ownerRepository,
+           let mediaLoader
+        {
             OwnerCompanionView(
                 session: session,
                 repository: repository,
+                mediaLoader: mediaLoader,
                 isSigningOut: isSigningOut,
                 signOut: signOut
             )
-        } else if session.principal.kind != .studioOwner {
-            GuestConnectedView(session: session, isSigningOut: isSigningOut, signOut: signOut)
+        } else if session.principal.kind != .studioOwner,
+                  let repository = clientRepository,
+                  let mediaLoader
+        {
+            ClientCompanionView(
+                session: session,
+                repository: repository,
+                mediaLoader: mediaLoader,
+                isSigningOut: isSigningOut,
+                signOut: signOut
+            )
         } else {
             ContentUnavailableView {
                 Label("Studio data unavailable", systemImage: "exclamationmark.triangle")
@@ -94,47 +111,6 @@ private struct SignedInShell: View {
                 Button("Sign out", role: .destructive) { Task { await signOut() } }
                     .disabled(isSigningOut)
             }
-        }
-    }
-}
-
-@MainActor
-private struct GuestConnectedView: View {
-    let session: CurrentSession
-    let isSigningOut: Bool
-    let signOut: @MainActor () async -> Void
-
-    var body: some View {
-        NavigationStack {
-            ContentUnavailableView {
-                Label(title, systemImage: icon)
-            } description: {
-                Text("You’re securely connected to \(session.workspace.displayName). This limited session cannot open studio-owner data.")
-            } actions: {
-                Button("Sign out", role: .destructive) { Task { await signOut() } }
-                    .disabled(isSigningOut)
-            }
-            .navigationTitle(session.principal.kind.displayName)
-        }
-    }
-
-    private var title: String {
-        switch session.principal.kind {
-        case .galleryGuest: "Gallery access connected"
-        case .portalGuest: "Client portal connected"
-        case .workspaceGuest: "Project workspace connected"
-        case .documentGuest: "Document access connected"
-        default: "Limited access connected"
-        }
-    }
-
-    private var icon: String {
-        switch session.principal.kind {
-        case .galleryGuest: "photo.on.rectangle"
-        case .portalGuest: "person.crop.circle.badge.checkmark"
-        case .workspaceGuest: "briefcase"
-        case .documentGuest: "doc.text"
-        default: "lock.shield"
         }
     }
 }

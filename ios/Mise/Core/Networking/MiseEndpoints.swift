@@ -252,6 +252,50 @@ enum MiseEndpoints {
             )
         }
     }
+
+    /// Shared-client (guest principal) resources — Milestone 3.
+    enum Client {
+        static let home = APIEndpoint<ClientHomeSummary>(
+            method: .get,
+            path: "/api/v1/client/home"
+        )
+
+        static func galleries(
+            cursor: String? = nil,
+            limit: Int = 25
+        ) -> APIEndpoint<APIPage<GallerySummary>> {
+            APIEndpoint(
+                method: .get,
+                path: "/api/v1/client/galleries",
+                queryItems: [
+                    APIQueryItem(name: "cursor", value: cursor),
+                    APIQueryItem(name: "limit", value: String(min(max(limit, 1), 100))),
+                ]
+            )
+        }
+
+        static func galleryDetail(id: Int64, etag: String? = nil) -> APIEndpoint<GalleryDetail> {
+            APIEndpoint(
+                method: .get,
+                path: "/api/v1/client/galleries/\(id)",
+                etag: etag
+            )
+        }
+
+        static func bookings(
+            cursor: String? = nil,
+            limit: Int = 25
+        ) -> APIEndpoint<APIPage<Booking>> {
+            APIEndpoint(
+                method: .get,
+                path: "/api/v1/client/bookings",
+                queryItems: [
+                    APIQueryItem(name: "cursor", value: cursor),
+                    APIQueryItem(name: "limit", value: String(min(max(limit, 1), 100))),
+                ]
+            )
+        }
+    }
 }
 struct FavoriteState: Codable, Hashable, Sendable {
     let assetID: Int64

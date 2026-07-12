@@ -3,6 +3,7 @@ import SwiftUI
 struct GalleriesView: View {
     let model: OwnerResourceModel<[GallerySummary]>
     let repository: OwnerRepository
+    let mediaLoader: AuthenticatedMediaLoader
 
     var body: some View {
         OwnerResourceView(
@@ -23,7 +24,11 @@ struct GalleriesView: View {
     private func galleryList(_ galleries: [GallerySummary]) -> some View {
         List(galleries) { gallery in
             NavigationLink {
-                GalleryDetailView(repository: repository, gallery: gallery)
+                GalleryDetailView(
+                    repository: repository,
+                    mediaLoader: mediaLoader,
+                    gallery: gallery
+                )
             } label: {
                 HStack(spacing: 14) {
                     Image(systemName: gallery.type == .drop ? "bolt.fill" : "photo.stack")

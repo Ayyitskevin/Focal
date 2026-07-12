@@ -38,6 +38,11 @@ def _bucket_for(path: str, method: str = "GET") -> str | None:
         "/api/v1/client-auth/"
     ):
         return "api_auth"
+    if path.startswith("/api/v1/media/"):
+        # Original-file downloads share the web download bucket; thumbnail/preview
+        # variants get their own generous bucket because a native gallery grid
+        # legitimately bursts dozens of authenticated media requests on open.
+        return "download" if path.endswith("/download") else "api_media"
     if path == "/api/v1" or path.startswith("/api/v1/"):
         return "api"
     if "/download" in path:

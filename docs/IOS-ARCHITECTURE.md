@@ -1,6 +1,8 @@
 # Mise for iOS — architecture and delivery plan
 
-Status: Milestones 1–2 implemented; client delivery next
+Status: Milestones 1–3 implemented; safe mutations next
+Design source: the "Mise Mobile" design handoff (owner + client, iPhone/iPad,
+light/dark) is the visual reference for screens, copy tone, and tokens
 Minimum OS: iOS 17 / iPadOS 17
 UI: SwiftUI
 State: Observation-based MVVM with async/await
@@ -278,11 +280,23 @@ of reusing the current bearer token.
 - cache-first repositories and stale-state UI
 - iPhone/iPad navigation, dark mode, accessibility baseline
 
-### Milestone 3 — client delivery
+### Milestone 3 — client delivery (implemented; ADR 0067)
 
-- gallery grid/lightbox, favorites, video comments, background downloads
-- portal/workspace and document summaries
-- web fallback for legal signing and Stripe checkout
+- `ClientCompanionView`: Home / Gallery / Documents / Bookings tabs for all
+  four guest principals, each tab scoped to exactly the unlocked capability
+- shared owner/client sectioned gallery grid + fullscreen paging lightbox;
+  optimistic gallery-guest favoriting with server-confirmed proofing counts
+- bearer-authenticated media loading (`AuthenticatedMediaLoader` /
+  `AuthenticatedRemoteImage`) — owner manifests render real thumbnails too
+- client Home renders server-computed next steps; Documents shows
+  proposal/contract/invoice detail with web fallback for accept/sign/pay
+- design tokens from the handoff (`MiseDesign`): terra accent with the
+  intentional dark-mode hue shift, semantic status-pill families, serif
+  display type via the system serif design
+- deferred within M3 scope: video comments, background downloads, and
+  document-level deep links from next steps (currently tab-level); the
+  handoff's decorative lightbox comment/download buttons are intentionally
+  not shipped
 
 ### Milestone 4 — safe mutations
 
