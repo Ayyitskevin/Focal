@@ -8,7 +8,7 @@ Kevin is mid-reskin on his machine; treat uncommitted changes as live work.
 ## Checklist
 
 - [x] AI-capability topology confirmed from adapter code (checkpoint 1)
-- [ ] Deliverable 1: docs/MISE-REVIEW.md (checkpoint 2)
+- [x] Deliverable 1: docs/MISE-REVIEW.md (checkpoint 2)
 - [ ] iOS app audit sub-step of Deliverable 2 (checkpoint 3)
 - [ ] Deliverable 2: docs/IOS-UPGRADE.md (checkpoint 4)
 - [ ] Deliverable 3: docs/HANDOFF-QUEUE.md (checkpoint 5)
@@ -53,14 +53,33 @@ mickeybot — stale post-075, worth pruning.
 
 ## Next concrete step
 
-Run the health checks (`python -m pytest -m unit -q`, `ruff check .`,
-`ruff format --check .` — report only), skim `docs/WORKER-CONTRACT.md` +
-`docs/adr/README.md` for cross-references, check templates/ + static/ for
-reskin consistency (admin/* vs client/*), then write docs/MISE-REVIEW.md.
-A working venv exists at
-/tmp/claude-0/-home-user-mise/0214d61e-6505-5f50-a638-1150d7caf19b/scratchpad/venv312
-(python3.12 + requirements + pytest + httpx2 + ruff; export
-MISE_SECRET_KEY=anything before pytest).
+Deliverable 2 (docs/IOS-UPGRADE.md). The iOS audit facts are already
+established (see below) — write the audit section from them, then the
+ordered upgrade plan. Anchor on docs/IOS-ARCHITECTURE.md §10 (M4 safe
+mutations, M5 operations) + the commercial-spine gap named in
+docs/MISE-REVIEW.md §5, and flag the single-tenant vs hosted-SaaS product
+question without answering it.
+
+### iOS audit facts (established; verified in the M3 session today)
+
+- SwiftUI, iOS 17 minimum, Swift 6 strict concurrency, XcodeGen
+  (`ios/project.yml`), Observation-based MVVM, zero third-party deps.
+- Auth: opaque rotating bearer sessions against `/api/v1` (ADR 0066);
+  ThisDeviceOnly Keychain, origin-scoped; Face ID/Touch ID is a local
+  re-entry lock only. No cookies, redirects rejected.
+- API surface called: tenant/auth/client-auth/me/sessions, dashboard,
+  clients, projects, galleries(+detail), event-types, bookings,
+  client/home, client/galleries(+detail), client/bookings,
+  projects/{id}/proposals|contracts|invoices, favorite PUT/DELETE,
+  /api/v1/media/* via AuthenticatedMediaLoader.
+- The app talks ONLY to the Mise backend — no AI capability directly.
+- Milestones 0–3 implemented/merged; M4 (safe mutations) and M5 (APNs,
+  deep links, ops) are the planned next slices per IOS-ARCHITECTURE.md.
+- Gaps: no commercial-spine surfaces (review §5); Swift tests exist but
+  no CI job runs them (no macOS runner configured in .github/workflows);
+  fonts decision pending (system serif stands in for Newsreader).
+- Open product question for Kevin: single-tenant kleephotography use only,
+  or eventual hosted multi-tenant awareness? (Do not collapse.)
 
 ## Git state
 
