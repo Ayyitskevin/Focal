@@ -6,6 +6,7 @@ enum OwnerDestination: String, CaseIterable, Identifiable {
     case projects
     case galleries
     case calendar
+    case commercial
 
     var id: String { rawValue }
     var title: String { rawValue.prefix(1).uppercased() + String(rawValue.dropFirst()) }
@@ -17,6 +18,7 @@ enum OwnerDestination: String, CaseIterable, Identifiable {
         case .projects: "briefcase"
         case .galleries: "photo.on.rectangle"
         case .calendar: "calendar"
+        case .commercial: "dollarsign.circle"
         }
     }
 }
@@ -30,6 +32,7 @@ struct OwnerCompanionView: View {
     @State private var projects: OwnerResourceModel<[ProjectSummary]>
     @State private var galleries: OwnerResourceModel<[GallerySummary]>
     @State private var bookings: OwnerResourceModel<[Booking]>
+    @State private var commercial: OwnerResourceModel<[CommercialAction]>
 
     let session: CurrentSession
     let repository: OwnerRepository
@@ -73,6 +76,11 @@ struct OwnerCompanionView: View {
             staleAfter: 15 * 60,
             cached: { try await repository.cachedBookings() },
             remote: { try await repository.refreshBookings() }
+        ))
+        _commercial = State(initialValue: OwnerResourceModel(
+            staleAfter: 15 * 60,
+            cached: { try await repository.cachedCommercialActions() },
+            remote: { try await repository.refreshCommercialActions() }
         ))
     }
 
@@ -146,6 +154,8 @@ struct OwnerCompanionView: View {
                 model: bookings,
                 timeZoneIdentifier: session.workspace.timeZone
             )
+        case .commercial:
+            CommercialView(model: commercial, repository: repository)
         }
     }
 }
