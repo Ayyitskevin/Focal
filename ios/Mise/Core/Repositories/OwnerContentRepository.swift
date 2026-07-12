@@ -575,9 +575,9 @@ extension OwnerRepository {
              .validation,
              .rateLimited,
              .notModified:
-            true
+            return true
         case let .http(status, _):
-            (400..<500).contains(status)
+            return (400..<500).contains(status)
         case .invalidEndpoint,
              .transport,
              .unexpectedResponse,
@@ -585,7 +585,7 @@ extension OwnerRepository {
              .unexpectedContentType,
              .decoding,
              .server:
-            false
+            return false
         }
     }
 
@@ -794,12 +794,12 @@ extension OwnerRepository {
               validServerText(detail.period, maximum: 32, allowEmpty: false),
               validServerText(detail.label, maximum: 500, allowEmpty: false),
               validServerText(detail.body, maximum: 100_000, allowEmpty: true),
-              detail.note.map {
+              detail.note.map({
                   validServerText($0, maximum: 20_000, allowEmpty: false)
-              } ?? true,
+              }) ?? true,
               validStatuses.contains(detail.status),
               detail.status != .approved || !detail.suggestionsEnabled,
-              detail.aiDraftedAt.map { finite($0) } ?? true,
+              detail.aiDraftedAt.map({ finite($0) }) ?? true,
               finite(detail.createdAt),
               finite(detail.updatedAt)
         else {
@@ -850,13 +850,13 @@ extension OwnerRepository {
               baseRevision.map({ $0 == suggestion.baseRevision }) ?? true,
               validStates.contains(suggestion.state),
               suggestion.review == .humanReview,
-              suggestion.failureReason.map { validFailures.contains($0) } ?? true,
+              suggestion.failureReason.map({ validFailures.contains($0) }) ?? true,
               finite(suggestion.createdAt),
               finite(suggestion.expiresAt),
               suggestion.expiresAt > suggestion.createdAt,
-              suggestion.completedAt.map {
+              suggestion.completedAt.map({
                   finite($0) && $0 >= suggestion.createdAt
-              } ?? true,
+              }) ?? true,
               suggestion.state == .ready || !suggestion.stale
         else {
             throw APIError.unexpectedResponse

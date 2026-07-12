@@ -17,14 +17,19 @@ final class SystemNotificationAuthorizationProvider: NotificationAuthorizationPr
     }
 
     func permissionState() async -> NotificationPermissionState {
-        let settings = await center.notificationSettings()
-        switch settings.authorizationStatus {
-        case .notDetermined: .notDetermined
-        case .denied: .denied
-        case .authorized: .authorized
-        case .provisional: .provisional
-        case .ephemeral: .ephemeral
-        @unknown default: .unsupported
+        await withCheckedContinuation { continuation in
+            center.getNotificationSettings { settings in
+                let state: NotificationPermissionState
+                switch settings.authorizationStatus {
+                case .notDetermined: state = .notDetermined
+                case .denied: state = .denied
+                case .authorized: state = .authorized
+                case .provisional: state = .provisional
+                case .ephemeral: state = .ephemeral
+                @unknown default: state = .unsupported
+                }
+                continuation.resume(returning: state)
+            }
         }
     }
 

@@ -60,11 +60,25 @@ jobs:
             .venv/bin/python -m pytest tests/test_smoke.py -q --tb=short
 
   ios:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify App Store toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          sdk_version="$(xcrun --sdk iphoneos --show-sdk-version)"
+          xcode_major="$(xcodebuild -version | awk '$1 == "Xcode" { split($2, version, "."); print version[1] }')"
+          sdk_major="${sdk_version%%.*}"
+          echo "iOS SDK $sdk_version"
+          if (( xcode_major < 26 || sdk_major < 26 )); then
+            echo "Xcode 26 and the iOS 26 SDK are required for App Store submission." >&2
+            exit 1
+          fi
 
       - name: Install XcodeGen
         run: brew install xcodegen
