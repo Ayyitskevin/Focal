@@ -32,6 +32,21 @@ struct NextStepAction: Codable, Hashable, Sendable, Identifiable {
     let documentID: Int64?
     let galleryID: Int64?
     let publicURL: URL?
+
+    /// A document deep-link for this step, when it points at a specific
+    /// proposal/contract/invoice (used to open the exact document, not just
+    /// the Documents tab).
+    var documentRef: DocumentRef? {
+        guard let variant = documentVariant, let id = documentID else { return nil }
+        return DocumentRef(variant: variant, id: id)
+    }
+}
+
+/// Identifies one client-visible document for navigation. Deep-links from Home
+/// carry only (variant, id); the Documents tab resolves it to the full object.
+struct DocumentRef: Hashable, Sendable {
+    let variant: String
+    let id: Int64
 }
 
 struct ClientDocumentPreview: Codable, Hashable, Sendable, Identifiable {
