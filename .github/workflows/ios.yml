@@ -1,0 +1,50 @@
+# iOS build + test gate (queue S1 / IOS-UPGRADE step 1).
+#
+# Kept as its own workflow rather than a job inside ci.yml on purpose: GitHub
+# path filters apply at the workflow `on:` level, so adding `paths: ios/**` to
+# ci.yml would stop the Python gate from running on non-iOS changes. A separate
+# file lets the (slow, metered) macOS job run ONLY when ios/ changes, without
+# touching the Python CI.
+name: iOS
+
+on:
+  push:
+    branches: [ main ]
+    paths: [ 'ios/**', '.github/workflows/ios.yml' ]
+  pull_request:
+    branches: [ main ]
+    paths: [ 'ios/**', '.github/workflows/ios.yml' ]
+
+jobs:
+  build-test:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain (Xcode + available iOS SDKs/simulators)
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i ios || true
+          xcrun simctl list devices available | grep -i iphone || true
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate the Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      # NOTE: the -destination line is the most likely first-run tweak point —
+      # the device name/OS must exist on the runner image's Xcode. `iPhone 16`
+      # matches ios/README.md; adjust the name/OS if the runner reports a
+      # different available simulator in the step above.
+      - name: Build and run MiseTests
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project Mise.xcodeproj \
+            -scheme Mise \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            CODE_SIGNING_ALLOWED=NO
