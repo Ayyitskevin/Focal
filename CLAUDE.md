@@ -5,19 +5,21 @@ FastAPI (async) + HTMX/Alpine.js + SQLite/WAL. One product, one data spine, one 
 
 ## Architecture in one paragraph
 
-Mise is the **transaction authority**. AI sidecars (Argus/vision, Plutus/offers,
-Mnemosyne/albums, Aphrodite/products, Dionysus/content) are **stateless workers** driven
-through a **provider facade** (`app/providers/`). The facade owns capability routing, cost
-ledgering (`ai_runs`), and the structured-output contracts (`schemas/*.schema.json`). Every AI
-output is a **draft a human approves** — the model proposes, deterministic code validates, a
-human clicks. Nothing auto-sends, charges, publishes, or prints.
+Mise is the **transaction authority**. AI sidecars (Argus/vision, Odysseus+Dionysus/content,
+Aphrodite/products — dormant) are **stateless workers** driven through a **provider facade**
+(`app/providers/`). The facade owns capability routing, cost ledgering (`ai_runs`), and the
+structured-output contracts (`schemas/*.schema.json`). Every AI output is a **draft a human
+approves** — the model proposes, deterministic code validates, a human clicks. Nothing
+auto-sends, charges, publishes, or prints. (Plutus/offers and Mnemosyne/albums were
+decommissioned — migration 075 — as consumer-print capabilities that don't fit the B2B
+food-and-beverage workflow.)
 
 ## Key invariants (never break these)
 
 - **§11.4 — Model proposes, human approves.** AI results enter a review surface; operator
   action is required before any write to a client-visible record.
-- **Money/rights boundary.** Plutus/Aphrodite outputs are proposals; Mise enforces spend caps
-  and consent gates in code, not convention. No auto-invoice, auto-charge, or auto-publish.
+- **Money/rights boundary.** Aphrodite (products) outputs are proposals; Mise enforces spend
+  caps and consent gates in code, not convention. No auto-invoice, auto-charge, or auto-publish.
 - **Strangler migration.** Live paths stay green; the new path is flag-gated and can be rolled
   back to the old path by toggling one env var. Decommission only after parity + observation.
 
@@ -29,7 +31,7 @@ app/admin/         Admin-only route handlers (CSRF-gated)
 app/providers/     Provider facade: contracts.py, registry.py, adapters
 migrations/        Sequential SQL migrations (NNN_name.sql) + rollback/
 schemas/           JSON schemas for worker structured output
-templates/         Jinja2 templates (admin/* + client/*)
+templates/         Jinja2 templates (admin/, public/, saas/, site/)
 tests/             Pytest suite (no live model/API calls — mock only)
 docs/              ADRs, runbook, worker contract, sibling briefs
 docs/sibling-briefs/  Ready-to-paste prompts for each sibling repo
@@ -81,18 +83,19 @@ no auto-send, auto-charge, auto-publish, or auto-close.
 
 ```python
 # app/providers/contracts.py
-class Capability(str, Enum):
-    VISION = "vision"
-    OFFERS = "offers"
-    ALBUMS = "albums"
-    PRODUCTS = "products"   # dormant — budget cap + consent gate
-    CONTENT = "content"
+class Capability(enum.Enum):
+    VISION = "vision"       # Argus: keywords, alt text, culling / hero signals
+    CONTENT = "content"     # Odysseus caption / Dionysus packs: captions, copy drafts
+    PRODUCTS = "products"   # Aphrodite: renders — dormant, budget cap + consent gate
 
-# ProviderResult fields: provider, model, latency_ms, cost_usd, raw, structured
+# ProviderResult fields: capability, provider, status, review, output,
+#   model, latency_ms, cost_usd, tokens, error
 ```
 
-Adapters live in `app/providers/<name>_adapter.py`. Register in `app/providers/registry.py`.
-`serves_production=False` marks a dormant adapter (dormant = wired but not armed).
+Adapters live in `app/providers/adapters.py` (legacy) / `<name>_*.py`. Register in
+`app/providers/registry.py`. `serves_production=False` marks a dormant/eval-only adapter
+(dormant = wired but not armed). See ADR 0068 for the consolidation target (in-process or
+direct hosted-API — never a separate self-hosted sidecar).
 
 ## Dormant capabilities
 
