@@ -15,7 +15,7 @@ struct AppEnvironment: Sendable {
     /// Creates a complete authentication boundary for one canonical tenant origin.
     /// Never reuse this environment for a different host.
     func workspace(at origin: URL) -> WorkspaceEnvironment {
-        let networkSession = makeBearerOnlyURLSession()
+        let networkSession = Self.makeBearerOnlyURLSession()
         let persistence = KeychainSessionPersistence(
             service: Bundle.main.bundleIdentifier ?? "com.ayyitskevin.mise",
             account: "authenticated-session.\(Self.originKey(for: origin))"
