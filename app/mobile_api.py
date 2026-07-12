@@ -23,6 +23,7 @@ from . import (
     config,
     mobile_auth,
     mobile_client_api,
+    mobile_commercial_api,
     mobile_gallery_calendar_api,
     mobile_media,
     mobile_owner_api,
@@ -609,4 +610,5 @@ def revoke_session(request: Request, session_id: str) -> Response:
 app.include_router(mobile_owner_api.router)
 app.include_router(mobile_gallery_calendar_api.router)
 app.include_router(mobile_client_api.router)
+app.include_router(mobile_commercial_api.router)
 app.include_router(mobile_media.router)

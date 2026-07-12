@@ -199,15 +199,17 @@ Contract signing, checkout, booking, rescheduling, and AI commands require an
 `Idempotency-Key`. The server retains transition rules, amount math, hash checks,
 Stripe reconciliation, audit logging, and workflow dispatch.
 
-## Owner commercial spine (planned — read-only)
+## Owner commercial spine (implemented — read-only)
 
 Native mirror of the operator's F&B commercial surfaces (ADRs 0039–0046): the
 company next-action ranking, the studio commercial action queue, AR chase
 assist + cadence, and project closeout readiness. Every route is **owner-only
-(`studio_owner` + `studio:read`) and purely read**. These endpoints reuse the
-exact admin derivations — `_ctx_commercial_actions`, `_company_next_actions`,
-`_ar_chase_context`/`_company_overdue_rows`/`_ar_chase_history`, and
-`_project_closeout` in `app/admin/studio.py` — behind DTOs, per backend note 6
+(`studio_owner` + `studio:read`) and purely read**. Implemented in
+`app/mobile_commercial_api.py` (queue S8), reusing the extracted admin
+derivations — `_ctx_commercial_actions`, `_ranked_company_actions`,
+`_company_next_actions`, `_ar_chase_context`/`_company_overdue_rows`/
+`_ar_chase_history`, and `_project_closeout` in `app/commercial.py` (S7) —
+behind DTOs, per backend note 6
 (share the query function, do not re-derive or HTTP-call the HTML route). No new
 authority is introduced and no value is auto-sent, charged, or mutated.
 
