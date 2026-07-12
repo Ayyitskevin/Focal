@@ -284,13 +284,15 @@ struct ArChaseAssistView: View {
                             .padding(.vertical, 2)
                         }
                     }
-                    Section("Draft reminder") {
+                    Section {
                         LabeledContent("To", value: value.draft.to)
                         LabeledContent("Subject", value: value.draft.subject)
                         Text(value.draft.body)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
+                    } header: {
+                        Text("Draft reminder")
                     } footer: {
                         Text("Review-only. Send the reminder from the web for now.")
                     }
