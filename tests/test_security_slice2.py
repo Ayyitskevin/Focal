@@ -64,12 +64,13 @@ def test_workspace_cookie_does_not_replay_across_tenants(monkeypatch, tmp_path):
     assert security.unsign(cookie_from_7) != security.client_session_payload("workspace", 3)
 
 
-def test_reclaimed_slug_cannot_resurrect_session(monkeypatch, tmp_path):
-    # Tenant id (not slug) is in the payload, so a deleted+reclaimed slug (new id)
-    # rejects the old studio's cookie even though the slug matches (ADR 0051/0062).
+def test_tenant_id_binding_rejects_legacy_conflicting_slug_context(monkeypatch, tmp_path):
+    # Permanent retirement prevents normal slug reuse. The tenant id remains in
+    # the payload as defense-in-depth for a legacy/corrupt control plane that
+    # presents the same slug under a different immutable tenant identity.
     _configure_saas(tmp_path, monkeypatch, tenant_id=7)
     old = security.sign(security.client_session_payload("portal", 5))
-    _configure_saas(tmp_path, monkeypatch, tenant_id=99)  # same slug story, new id
+    _configure_saas(tmp_path, monkeypatch, tenant_id=99)
     assert security.unsign(old) != security.client_session_payload("portal", 5)
 
 

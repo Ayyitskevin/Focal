@@ -115,6 +115,11 @@ SAAS_STRIPE_WEBHOOK_SECRET = os.environ.get("MISE_SAAS_STRIPE_WEBHOOK_SECRET", "
 # Dunning grace: how long a past_due tenant keeps access while Stripe retries the
 # card (ADR 0050). Terminal states (unpaid/canceled) always block immediately.
 SAAS_PAST_DUE_GRACE_DAYS = int(os.environ.get("MISE_SAAS_PAST_DUE_GRACE_DAYS", "10"))
+# Destructive local trash purge is explicitly armed only. Zero keeps recovery
+# artifacts until an operator has approved local + off-site lifecycle policy.
+SAAS_DELETED_STUDIO_LOCAL_PURGE_DAYS = int(
+    os.environ.get("MISE_SAAS_DELETED_STUDIO_LOCAL_PURGE_DAYS", "0")
+)
 SAAS_ANNOUNCEMENT = os.environ.get("MISE_SAAS_ANNOUNCEMENT", "").strip()
 SAAS_ANNOUNCEMENT_URL = os.environ.get("MISE_SAAS_ANNOUNCEMENT_URL", "").strip()
 # Public support contact shown on the /support and legal pages. Falls back to the
@@ -245,6 +250,22 @@ ODYSSEUS_TIMEOUT = int(os.environ.get("MISE_ODYSSEUS_TIMEOUT", "210"))
 # ai_runs rows. Flip per host once the ledger is observed (see docs/MISE-CONSOLIDATION-
 # ROADMAP.md Phase 1).
 PROVIDER_FACADE_CONTENT = _b("MISE_PROVIDER_FACADE_CONTENT", "false")
+
+# Native caption suggestions are separately armed because they send explicit
+# owner-authored context to an external processor. The switch defaults off until
+# provider ownership/retention, privacy disclosures, and a staging cost ceiling
+# have been reviewed. Limits are tenant-local because every hosted request/job
+# runs inside the selected tenant database.
+MOBILE_CONTENT_SUGGESTIONS = _b("MISE_MOBILE_CONTENT_SUGGESTIONS", "false")
+MOBILE_CONTENT_DAILY_LIMIT = int(os.environ.get("MISE_MOBILE_CONTENT_DAILY_LIMIT", "10"))
+MOBILE_CONTENT_CONCURRENT_LIMIT = int(os.environ.get("MISE_MOBILE_CONTENT_CONCURRENT_LIMIT", "1"))
+MOBILE_CONTENT_SUGGESTION_TTL_HOURS = int(
+    os.environ.get("MISE_MOBILE_CONTENT_SUGGESTION_TTL_HOURS", "24")
+)
+# Dedicated provider-call bulkhead. Caption generation never occupies the
+# generic image/video/ZIP/APNs/policy pool, even when the provider reaches its
+# full request timeout.
+MOBILE_CONTENT_WORKERS = max(1, min(int(os.environ.get("MISE_MOBILE_CONTENT_WORKERS", "1")), 4))
 
 # AI-assisted culling surface (operator keep/cut review over the vision keeper scores). Default
 # OFF — the cull write routes 404 until armed, so the feature is inert on every host until the
@@ -399,6 +420,8 @@ RETAINER_RENEWAL_NUDGE_DAYS = int(os.environ.get("MISE_RETAINER_RENEWAL_NUDGE_DA
 # flagged. Backups run daily (~02:3x via mise-backup.timer), so 26h gives a small
 # grace past the normal 24h gap before it reads as stale/missing.
 BACKUP_STALE_HOURS = int(os.environ.get("MISE_BACKUP_STALE_HOURS", "26"))
+BACKUP_RCLONE_REMOTE = os.environ.get("MISE_BACKUP_RCLONE_REMOTE", "").strip()
+BACKUP_RCLONE_REMOTE_ENCRYPTED = _b("MISE_BACKUP_RCLONE_REMOTE_ENCRYPTED", "false")
 
 # Event-driven reminder net (hermes_arm): at a Mise event instant, fire-and-forget
 # an "arm a deferred owner reminder" push to Hermes (flow :7020), which owns the

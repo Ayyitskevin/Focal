@@ -467,6 +467,7 @@ def test_hosted_sweep_cleans_locked_tenants_without_dispatching(monkeypatch):
         {"slug": "deleted", "plan_status": "active", "deleted_at": "2026-07-11"},
     ]
     calls: list[tuple[str, bool]] = []
+    cleanup_calls: list[str] = []
     current: list[str] = []
 
     @contextmanager
@@ -485,10 +486,86 @@ def test_hosted_sweep_cleans_locked_tenants_without_dispatching(monkeypatch):
         "sweep",
         lambda *, dispatch: calls.append((current[-1], dispatch)),
     )
+    monkeypatch.setattr(
+        scheduler,
+        "_mobile_content_cleanup",
+        lambda: cleanup_calls.append(current[-1]),
+    )
 
     scheduler._push_sweep_all()
 
     assert calls == [("active", True), ("unpaid", False), ("expired-trial", False)]
+    assert cleanup_calls == ["active", "unpaid", "expired-trial"]
+
+
+def test_hosted_recurring_monitor_checks_platform_backup_once_outside_tenants(
+    tmp_path,
+    monkeypatch,
+):
+    platform_dir = tmp_path / "platform"
+    tenant_root = tmp_path / "tenants"
+    tenants = [{"slug": "alpha"}, {"slug": "beta"}]
+    backup_paths: list[str] = []
+    tenant_paths: list[str] = []
+
+    @contextmanager
+    def tenant_runtime(tenant):
+        tokens = config.set_runtime_dirs(tenant_root / tenant["slug"])
+        try:
+            yield
+        finally:
+            config.reset_runtime_dirs(tokens)
+
+    monkeypatch.setattr(config, "SAAS_MODE", True)
+    monkeypatch.setattr(
+        saas,
+        "list_tenants",
+        lambda *, billable_only=False: tenants,
+    )
+    monkeypatch.setattr(saas, "tenant_runtime", tenant_runtime)
+    for name in (
+        "pending_subscription_cancel_sweep",
+        "pending_tenant_offboarding_sweep",
+        "purge_retired_tenant_data",
+        "trial_reminder_sweep",
+        "winback_sweep",
+        "dunning_sweep",
+        "weekly_digest_sweep",
+    ):
+        monkeypatch.setattr(saas, name, lambda: None)
+
+    monkeypatch.setattr(scheduler.ops_monitor.alerts, "is_enabled", lambda: True)
+    monkeypatch.setattr(scheduler.ops_monitor, "_check_disk", lambda: None)
+    monkeypatch.setattr(
+        scheduler.ops_monitor,
+        "_check_backup",
+        lambda: backup_paths.append(str(config.DATA_DIR)),
+    )
+    monkeypatch.setattr(
+        scheduler.recurring,
+        "run_due_plans",
+        lambda: tenant_paths.append(str(config.DATA_DIR)),
+    )
+    for module in (
+        scheduler.booking_reminders,
+        scheduler.gallery_reminders,
+        scheduler.contract_reminders,
+        scheduler.retainer_reminders,
+        scheduler.postshoot_reminders,
+    ):
+        monkeypatch.setattr(module, "sweep", lambda: None)
+
+    tokens = config.set_runtime_dirs(platform_dir)
+    try:
+        scheduler._recurring_sweep_all()
+    finally:
+        config.reset_runtime_dirs(tokens)
+
+    assert backup_paths == [str(platform_dir)]
+    assert tenant_paths == [
+        str(tenant_root / "alpha"),
+        str(tenant_root / "beta"),
+    ]
 
 
 def test_retry_floors_honor_apns_operational_guidance(monkeypatch):

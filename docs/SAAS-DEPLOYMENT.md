@@ -29,18 +29,50 @@ MISE_SAAS_ANNOUNCEMENT_URL=
 MISE_STRIPE_SECRET_KEY=sk_live_xxx
 MISE_SAAS_STRIPE_PRICE_ID=price_xxx
 MISE_SAAS_STRIPE_WEBHOOK_SECRET=whsec_xxx
+MISE_RCLONE_CONFIG_PATH=/opt/mise/secrets/rclone.conf
+MISE_BACKUP_RCLONE_REMOTE=mise-backups-crypt:
+MISE_BACKUP_RCLONE_REMOTE_ENCRYPTED=true
 ```
 
 The Stripe Price behind `MISE_SAAS_STRIPE_PRICE_ID` must be one recurring monthly
 USD price for exactly `$20.00`.
 
+## Encrypted backup credentials
+
+Create a least-privilege object-store remote and a named rclone `crypt` remote that
+wraps it. Generate the config outside the repository, store it at the absolute host
+path in `MISE_RCLONE_CONFIG_PATH` (for example
+`/opt/mise/secrets/rclone.conf`), then set:
+
+```bash
+sudo chown 10001:10001 /opt/mise/secrets/rclone.conf
+sudo chmod 0400 /opt/mise/secrets/rclone.conf
+```
+
+The compose file mounts that regular file read-only at
+`/run/secrets/rclone.conf` in the `backup` service only. The public app container
+must never receive it. Escrow the original crypt password/salt separately off-host
+and prove recovery with that escrow; do not commit the config, put its contents in
+`.env`, or rely on an unencrypted object-store remote. `secrets/` is ignored, but
+filesystem permissions remain mandatory.
+
 ## One-Command Launch
 
 ```bash
 cp .env.example .env
-# edit .env with SaaS values above
-MISE_CADDY_SITE_ADDRESS='mise.example.com, *.mise.example.com' docker compose up --build -d
+# edit .env with the SaaS and encrypted-backup values above
+MISE_CADDY_SITE_ADDRESS='mise.example.com, *.mise.example.com' \
+  ./scripts/launch-hosted-production.sh
 ```
+
+Do not replace this with a direct `docker compose up`. The launch script builds the
+current app and backup images, runs static preflight in the built image, stops any
+old Caddy/backup service, starts Mise privately, waits for health and migrations,
+forces one encrypted manifest-committed backup, runs runtime preflight against the
+mounted data, and only then starts the backup loop and public ingress. Any failed
+gate leaves Caddy stopped. Runtime preflight requires a safe generation stamp,
+`complete=true`, `failures=[]`, matching expected/captured live and parked counts,
+and every listed regular control/live/parked payload.
 
 ## Wildcard TLS — Cloudflare fronting (the supported hosted setup, ADR 0059)
 
@@ -96,10 +128,17 @@ tenant database.
 ## Smoke Checks
 
 ```bash
-python scripts/hosted-preflight.py
+docker compose exec -T mise python scripts/hosted-preflight.py
+docker compose run --rm --no-deps mise python scripts/smoke-saas-hosted.py
 curl -fsS https://mise.example.com/healthz
 curl -fsS https://mise.example.com/pricing
 ```
+
+The first command rechecks runtime backup evidence inside the data-mounted
+container. The hosted smoke script is a synthetic, temporary-database wiring test;
+the HTTPS checks and rehearsal below prove the live deployment. Before inviting a
+customer, complete the manifest-validated active and parked restore drills in
+runbook §10. Never restore by syncing an entire remote tree directly into `/data`.
 
 Create a trial studio from `/pricing`, then verify:
 

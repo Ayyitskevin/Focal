@@ -1,13 +1,28 @@
 import asyncio
 import csv
 import io
+import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from app import config, db, features, passwords, saas, saas_demo, saas_preflight, security
+from app import (
+    config,
+    db,
+    features,
+    hosted_backup,
+    jobs,
+    passwords,
+    saas,
+    saas_demo,
+    saas_preflight,
+    security,
+)
 
 # Fast, hermetic (tmp-path DBs, no network): run in the CI unit gate.
 pytestmark = pytest.mark.unit
@@ -18,9 +33,11 @@ def _configure_saas(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "BASE_URL", "https://mise.test")
     monkeypatch.setattr(config, "SAAS_ROOT_DOMAIN", "mise.test")
     monkeypatch.setattr(config, "SAAS_MARKETING_HOST", "mise.test")
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     monkeypatch.setattr(config, "SAAS_CONTROL_DB_PATH", tmp_path / "control.db")
     monkeypatch.setattr(config, "SAAS_TENANT_DATA_DIR", tmp_path / "tenants")
     monkeypatch.setattr(config, "SAAS_TRIAL_DAYS", 14)
+    monkeypatch.setattr(config, "SAAS_DELETED_STUDIO_LOCAL_PURGE_DAYS", 0)
     saas._MIGRATED_TENANT_DBS.clear()
     saas.migrate_control()
 
@@ -611,20 +628,175 @@ def test_matching_cookies_still_authenticate(tmp_path, monkeypatch):
     assert security.is_admin(op) is True
 
 
-def test_reused_slug_after_delete_does_not_authenticate_old_cookie(tmp_path, monkeypatch):
-    # ADR 0051: slugs are reusable after delete, so the session principal carries the
-    # tenant id — an old "alpha" cookie must not admin the NEW "alpha".
+def test_retired_slug_rejects_reuse_and_old_cookie_has_no_runtime(tmp_path, monkeypatch):
+    # The tenant id remains part of the session principal, but the stronger
+    # invariant is that a retired filesystem/host slug is never rebound at all.
     _configure_saas(tmp_path, monkeypatch)
     monkeypatch.setattr(config, "SECRET_KEY", "test-secret")
     old = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
     old_cookie = _tenant_cookie(old)
     saas.delete_tenant_studio(old)
-    new = saas.create_tenant("alpha", "New Alpha", "new@example.com", "secret123")
-    assert new["id"] != old["id"]
-    with saas.tenant_runtime(new):
-        req = _request("/admin", "alpha.mise.test", cookie=old_cookie)
-        assert security.is_admin(req) is False  # old id ≠ new id
-        assert security.is_admin(_request("/admin", "alpha.mise.test", cookie=_tenant_cookie(new)))
+    with pytest.raises(ValueError, match="already taken"):
+        saas.create_tenant("alpha", "New Alpha", "new@example.com", "secret123")
+    assert saas.tenant_by_slug("alpha") is None
+    with pytest.raises(RuntimeError, match="tenant not found"):
+        with saas.tenant_runtime("alpha"):
+            assert (
+                security.is_admin(_request("/admin", "alpha.mise.test", cookie=old_cookie)) is False
+            )
+
+
+def test_control_upgrade_preserves_legacy_failed_and_succeeded_cancellations(
+    tmp_path,
+    monkeypatch,
+):
+    _configure_saas(tmp_path, monkeypatch)
+    pending = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    succeeded = saas.create_tenant("beta", "Beta Studio", "beta@example.com", "secret123")
+    deleted_at = "2026-07-01T12:00:00Z"
+    with saas.control_connect() as con:
+        con.execute("DROP TABLE tenant_subscription_cancellations")
+        con.execute(
+            """UPDATE tenants
+                  SET deleted_at=?,plan_status='canceled',
+                      stripe_subscription_id='sub_legacy_failed',
+                      cancel_failed_at=?,tombstone_slug='.tenant-1-20260701120000',
+                      storage_parked_at=?
+                WHERE id=?""",
+            (deleted_at, deleted_at, deleted_at, pending["id"]),
+        )
+        con.execute(
+            """UPDATE tenants
+                  SET deleted_at=?,plan_status='canceled',
+                      stripe_subscription_id='sub_legacy_succeeded',
+                      cancel_succeeded_at=?,tombstone_slug='.tenant-2-20260701120000',
+                      storage_parked_at=?
+                WHERE id=?""",
+            (deleted_at, deleted_at, deleted_at, succeeded["id"]),
+        )
+
+    saas.migrate_control()
+
+    with saas.control_connect() as con:
+        rows = con.execute(
+            """SELECT subscription_id,state,attempted_at,succeeded_at
+                 FROM tenant_subscription_cancellations ORDER BY subscription_id"""
+        ).fetchall()
+    assert [tuple(row) for row in rows] == [
+        ("sub_legacy_failed", "pending", deleted_at, None),
+        ("sub_legacy_succeeded", "succeeded", None, deleted_at),
+    ]
+    assert [row["subscription_id"] for row in saas.departed_needs_cancel()] == ["sub_legacy_failed"]
+
+
+def test_control_restart_never_promotes_pending_subscription_from_aggregate_success(
+    tmp_path,
+    monkeypatch,
+):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    deleted_at = "2026-07-01T12:00:00Z"
+    with saas.control_connect() as con:
+        con.execute(
+            """UPDATE tenants
+                  SET deleted_at=?,plan_status='canceled',
+                      stripe_subscription_id='sub_new',
+                      original_slug='alpha',
+                      tombstone_slug='.tenant-1-20260701120000',
+                      storage_parked_at=?
+                WHERE id=?""",
+            (deleted_at, deleted_at, tenant["id"]),
+        )
+        con.execute(
+            """INSERT INTO tenant_subscription_cancellations
+               (tenant_id,subscription_id,state,discovered_at,succeeded_at)
+               VALUES (?,'sub_old','succeeded',?,?)""",
+            (tenant["id"], deleted_at, deleted_at),
+        )
+        con.execute(
+            """INSERT INTO tenant_subscription_cancellations
+               (tenant_id,subscription_id,state,discovered_at)
+               VALUES (?,'sub_new','pending',?)""",
+            (tenant["id"], deleted_at),
+        )
+        saas._refresh_cancel_summary_tx(con, int(tenant["id"]))
+        summary = con.execute(
+            "SELECT cancel_succeeded_at FROM tenants WHERE id=?",
+            (tenant["id"],),
+        ).fetchone()
+    assert summary["cancel_succeeded_at"] == deleted_at
+    assert [row["subscription_id"] for row in saas.departed_needs_cancel()] == ["sub_new"]
+
+    saas.migrate_control()
+
+    with saas.control_connect() as con:
+        rows = con.execute(
+            """SELECT subscription_id,state
+                 FROM tenant_subscription_cancellations
+                WHERE tenant_id=? ORDER BY subscription_id""",
+            (tenant["id"],),
+        ).fetchall()
+    assert [tuple(row) for row in rows] == [
+        ("sub_new", "pending"),
+        ("sub_old", "succeeded"),
+    ]
+    assert [row["subscription_id"] for row in saas.departed_needs_cancel()] == ["sub_new"]
+
+
+def test_billable_tenant_listing_never_enters_deleted_runtime(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    with saas.control_connect() as con:
+        con.execute(
+            "UPDATE tenants SET deleted_at=? WHERE id=?",
+            (saas._iso(saas._now()), tenant["id"]),
+        )
+    assert saas.list_tenants(billable_only=True) == []
+
+
+def test_legacy_reassigned_slug_blocks_offboarding_and_backup_attribution(
+    tmp_path,
+    monkeypatch,
+):
+    _configure_saas(tmp_path, monkeypatch)
+    departed = saas.create_tenant("alpha", "Departed Studio", "departed@example.com", "secret123")
+    departed_path = saas.tenant_data_path("alpha")
+    orphan = tmp_path / "legacy-departed-orphan"
+    departed_path.rename(orphan)
+    saas._MIGRATED_TENANT_DBS.discard(str(saas.tenant_db_path("alpha")))
+    deleted_at = "2026-07-01T12:00:00Z"
+    with saas.control_connect() as con:
+        con.execute(
+            """UPDATE tenants
+                  SET slug='alpha-deleted-1-20260701120000',deleted_at=?,
+                      original_slug='alpha',
+                      tombstone_slug='alpha-deleted-1-20260701120000',
+                      storage_parked_at=NULL,plan_status='canceled'
+                WHERE id=?""",
+            (deleted_at, departed["id"]),
+        )
+    replacement = saas.create_tenant(
+        "alpha", "Replacement Studio", "replacement@example.com", "secret123"
+    )
+    with saas.tenant_runtime(replacement):
+        db.run("INSERT INTO clients (name) VALUES ('Replacement Sentinel')")
+
+    saas.migrate_control()
+
+    legacy = saas.tenant_by_id(departed["id"])
+    assert legacy["storage_reconciliation_required_at"] == deleted_at
+    with pytest.raises(RuntimeError, match="manual reconciliation"):
+        saas.delete_tenant_studio(legacy)
+    saas.pending_tenant_offboarding_sweep()
+    with saas.tenant_runtime(replacement):
+        assert db.one("SELECT name FROM clients")["name"] == "Replacement Sentinel"
+    assert saas.tenant_data_path("alpha").is_dir()
+    with pytest.raises(RuntimeError, match="manual reconciliation"):
+        hosted_backup.run_backup(
+            tmp_path,
+            config.SAAS_TENANT_DATA_DIR,
+            config.SAAS_CONTROL_DB_PATH,
+        )
 
 
 # ── Hosted client-payment isolation (ADR 0049) — fail-closed, per-tenant Stripe ──
@@ -708,16 +880,38 @@ def test_preflight_fails_when_client_charge_would_use_operator_key(tmp_path, mon
 # ── Billing-lifecycle integrity (ADR 0050) — exactly-once webhooks, dunning, throttle ──
 
 
-def _subscription_event(event_id: str, tenant: dict, status: str) -> dict:
+def _subscription_event(
+    event_id: str,
+    tenant: dict,
+    status: str,
+    *,
+    subscription_id: str = "sub_123",
+    event_type: str = "customer.subscription.updated",
+) -> dict:
     return {
         "id": event_id,
-        "type": "customer.subscription.updated",
+        "type": event_type,
         "data": {
             "object": {
-                "id": "sub_123",
+                "id": subscription_id,
                 "status": status,
                 "customer": "cus_123",
                 "metadata": {"tenant_id": str(tenant["id"]), "slug": tenant["slug"]},
+            }
+        },
+    }
+
+
+def _checkout_event(event_id: str, tenant: dict, subscription_id: str) -> dict:
+    return {
+        "id": event_id,
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": "cs_test_late",
+                "customer": "cus_late",
+                "subscription": subscription_id,
+                "metadata": {"tenant_id": str(tenant["id"])},
             }
         },
     }
@@ -739,6 +933,311 @@ def test_saas_webhook_event_applies_exactly_once(tmp_path, monkeypatch):
     saas.update_tenant_billing(tenant["id"], plan_status="past_due")
     assert saas._process_saas_event(event) == {"ok": True, "duplicate": True}
     assert saas.tenant_by_slug("alpha")["plan_status"] == "past_due"
+
+
+def test_out_of_order_old_subscription_cannot_rebind_recovered_account(
+    tmp_path,
+    monkeypatch,
+):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    monkeypatch.setattr(config, "STRIPE_SECRET_KEY", "sk_test_x")
+    cancellations: list[str] = []
+    monkeypatch.setattr(
+        saas,
+        "_stripe",
+        lambda: type(
+            "Stripe",
+            (),
+            {
+                "Subscription": type(
+                    "Subscription",
+                    (),
+                    {
+                        "cancel": staticmethod(
+                            lambda subscription_id, **_kwargs: cancellations.append(subscription_id)
+                        )
+                    },
+                )
+            },
+        ),
+    )
+
+    saas._process_saas_event(
+        _subscription_event(
+            "evt_old_active",
+            tenant,
+            "active",
+            subscription_id="sub_old",
+        )
+    )
+    saas._process_saas_event(
+        _subscription_event(
+            "evt_old_canceled",
+            tenant,
+            "canceled",
+            subscription_id="sub_old",
+            event_type="customer.subscription.deleted",
+        )
+    )
+    saas._process_saas_event(_checkout_event("evt_checkout_new", tenant, "sub_new"))
+    saas._process_saas_event(
+        _subscription_event(
+            "evt_stale_old_active",
+            tenant,
+            "active",
+            subscription_id="sub_old",
+        )
+    )
+    saas._process_saas_event(
+        _subscription_event(
+            "evt_new_active",
+            tenant,
+            "active",
+            subscription_id="sub_new",
+        )
+    )
+
+    recovered = saas.tenant_by_id(tenant["id"])
+    assert recovered["stripe_subscription_id"] == "sub_new"
+    assert recovered["plan_status"] == "active"
+    assert cancellations == []
+    with saas.control_connect() as con:
+        history = con.execute(
+            """SELECT subscription_id,state
+                 FROM tenant_subscription_cancellations
+                WHERE tenant_id=? ORDER BY subscription_id""",
+            (tenant["id"],),
+        ).fetchall()
+    assert [(row["subscription_id"], row["state"]) for row in history] == [("sub_old", "succeeded")]
+
+
+def test_late_nonterminal_event_cannot_reactivate_same_canceled_subscription(
+    tmp_path,
+    monkeypatch,
+):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    saas._process_saas_event(
+        _subscription_event(
+            "evt_same_active",
+            tenant,
+            "active",
+            subscription_id="sub_same",
+        )
+    )
+    saas._process_saas_event(
+        _subscription_event(
+            "evt_same_deleted",
+            tenant,
+            "canceled",
+            subscription_id="sub_same",
+            event_type="customer.subscription.deleted",
+        )
+    )
+
+    saas._process_saas_event(
+        _subscription_event(
+            "evt_same_late_active",
+            tenant,
+            "active",
+            subscription_id="sub_same",
+        )
+    )
+
+    current = saas.tenant_by_id(tenant["id"])
+    assert current["stripe_subscription_id"] == "sub_same"
+    assert current["plan_status"] == "canceled"
+    with saas.control_connect() as con:
+        row = con.execute(
+            """SELECT state FROM tenant_subscription_cancellations
+                WHERE tenant_id=? AND subscription_id='sub_same'""",
+            (tenant["id"],),
+        ).fetchone()
+    assert row["state"] == "succeeded"
+
+
+def test_conflicting_checkout_is_canceled_once_without_overwriting_active_subscription(
+    tmp_path,
+    monkeypatch,
+):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    saas._process_saas_event(
+        _subscription_event(
+            "evt_primary_active",
+            tenant,
+            "active",
+            subscription_id="sub_primary",
+        )
+    )
+    monkeypatch.setattr(config, "STRIPE_SECRET_KEY", "sk_test_x")
+    cancellations: list[str] = []
+    monkeypatch.setattr(
+        saas,
+        "_stripe",
+        lambda: type(
+            "Stripe",
+            (),
+            {
+                "Subscription": type(
+                    "Subscription",
+                    (),
+                    {
+                        "cancel": staticmethod(
+                            lambda subscription_id, **_kwargs: cancellations.append(subscription_id)
+                        )
+                    },
+                )
+            },
+        ),
+    )
+    event = _checkout_event("evt_conflicting_checkout", tenant, "sub_extra")
+
+    assert saas._process_saas_event(event) == {"ok": True, "type": event["type"]}
+    assert saas._process_saas_event(event) == {"ok": True, "duplicate": True}
+
+    current = saas.tenant_by_id(tenant["id"])
+    assert current["stripe_subscription_id"] == "sub_primary"
+    assert current["stripe_customer_id"] == "cus_123"
+    assert current["plan_status"] == "active"
+    assert cancellations == ["sub_extra"]
+    with saas.control_connect() as con:
+        row = con.execute(
+            """SELECT state,attempted_at,succeeded_at
+                 FROM tenant_subscription_cancellations
+                WHERE tenant_id=? AND subscription_id='sub_extra'""",
+            (tenant["id"],),
+        ).fetchone()
+    assert row["state"] == "succeeded"
+    assert row["attempted_at"] is not None
+    assert row["succeeded_at"] is not None
+
+
+def test_delayed_checkout_after_deletion_never_reactivates_and_queues_exact_cancel(
+    tmp_path,
+    monkeypatch,
+):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    saas.delete_tenant_studio(tenant)
+    monkeypatch.setattr(config, "STRIPE_SECRET_KEY", "sk_test_x")
+    calls: list[str] = []
+
+    class _Subscriptions:
+        @staticmethod
+        def cancel(subscription_id, **_kwargs):
+            calls.append(subscription_id)
+            raise RuntimeError("ambiguous network failure")
+
+    monkeypatch.setattr(
+        saas,
+        "_stripe",
+        lambda: type("Stripe", (), {"Subscription": _Subscriptions}),
+    )
+    event = _checkout_event("evt_late_checkout", tenant, "sub_late")
+
+    assert saas._process_saas_event(event) == {"ok": True, "type": event["type"]}
+    deleted = saas.tenant_by_id(tenant["id"])
+    assert deleted["deleted_at"] is not None and deleted["plan_status"] == "canceled"
+    assert deleted["stripe_subscription_id"] is None
+    assert saas.tenant_by_slug("alpha") is None
+    assert [row["subscription_id"] for row in saas.departed_needs_cancel()] == ["sub_late"]
+    assert calls == ["sub_late"]
+
+    # The signed event retry is a no-op and cannot repeat an ambiguous Stripe call.
+    assert saas._process_saas_event(event) == {"ok": True, "duplicate": True}
+    saas.pending_subscription_cancel_sweep()
+    assert calls == ["sub_late"]
+
+
+def test_scheduler_first_attempts_unclaimed_cancellation_once(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    saas.delete_tenant_studio(tenant)
+    event = _checkout_event("evt_crash_window_checkout", tenant, "sub_unclaimed")
+
+    # The durable event/outbox commit lands while Stripe is unavailable. No
+    # external attempt can have happened, so attempted_at remains NULL.
+    saas._process_saas_event(event)
+    row = saas.departed_needs_cancel()[0]
+    assert row["subscription_id"] == "sub_unclaimed"
+    assert row["attempted_at"] is None
+
+    calls: list[str] = []
+    monkeypatch.setattr(config, "STRIPE_SECRET_KEY", "sk_test_x")
+    monkeypatch.setattr(
+        saas,
+        "_stripe",
+        lambda: type(
+            "Stripe",
+            (),
+            {
+                "Subscription": type(
+                    "Subscription",
+                    (),
+                    {
+                        "cancel": staticmethod(
+                            lambda subscription_id, **_kwargs: calls.append(subscription_id)
+                        )
+                    },
+                )
+            },
+        ),
+    )
+
+    saas.pending_subscription_cancel_sweep()
+    saas.pending_subscription_cancel_sweep()
+
+    assert calls == ["sub_unclaimed"]
+    assert saas.departed_needs_cancel() == []
+
+
+@pytest.mark.parametrize(
+    ("event_type", "status"),
+    [
+        ("customer.subscription.deleted", "canceled"),
+        ("customer.subscription.updated", "canceled"),
+    ],
+)
+def test_terminal_subscription_event_authoritatively_resolves_deleted_outbox(
+    tmp_path,
+    monkeypatch,
+    event_type,
+    status,
+):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    with saas.control_connect() as con:
+        con.execute(
+            "UPDATE tenants SET stripe_subscription_id='sub_terminal' WHERE id=?",
+            (tenant["id"],),
+        )
+    # No platform key: deletion durably queues without making an external call.
+    saas.delete_tenant_studio(saas.tenant_by_id(tenant["id"]))
+    assert saas.departed_needs_cancel()
+    event = {
+        "id": f"evt_{event_type}_{status}",
+        "type": event_type,
+        "data": {
+            "object": {
+                "id": "sub_terminal",
+                "status": status,
+                "metadata": {"tenant_id": str(tenant["id"])},
+            }
+        },
+    }
+
+    saas._process_saas_event(event)
+
+    assert saas.departed_needs_cancel() == []
+    with saas.control_connect() as con:
+        row = con.execute(
+            """SELECT state,succeeded_at FROM tenant_subscription_cancellations
+                WHERE tenant_id=? AND subscription_id='sub_terminal'""",
+            (tenant["id"],),
+        ).fetchone()
+    assert row["state"] == "succeeded" and row["succeeded_at"] is not None
 
 
 def test_saas_webhook_failed_effect_stays_retryable(tmp_path, monkeypatch):
@@ -929,16 +1428,598 @@ def test_delete_studio_tombstones_and_parks_data(tmp_path, monkeypatch):
     saas.ensure_tenant_database(tenant)
     assert saas.tenant_data_path("alpha").exists()
     saas.delete_tenant_studio(tenant)
-    # The address frees up; the row survives as a canceled tombstone.
+    # The live address disappears; its slug stays permanently retired so an
+    # already-admitted request can never cross into a replacement filesystem path.
     assert saas.tenant_by_slug("alpha") is None
     row = saas.tenant_by_id(tenant["id"])
-    assert row["slug"].startswith("alpha-deleted-")
+    assert row["slug"] == "alpha"
+    assert row["original_slug"] == "alpha"
+    assert row["tombstone_slug"].startswith(".tenant-")
+    assert row["storage_parked_at"] is not None
     assert row["plan_status"] == "canceled"
     assert row["deleted_at"]
     # The data moved to trash — recoverable, not destroyed.
-    assert not saas.tenant_data_path("alpha").exists()
-    trash = config.SAAS_TENANT_DATA_DIR / ".trash" / row["slug"]
+    assert saas.tenant_data_path("alpha").is_symlink()
+    trash = config.SAAS_TENANT_DATA_DIR / ".trash" / row["tombstone_slug"]
     assert (trash / "mise.db").exists()
+    with pytest.raises(ValueError, match="already taken"):
+        saas.create_tenant(
+            "alpha",
+            "Replacement Studio",
+            "replacement@example.com",
+            "secret123",
+        )
+
+
+def test_user_slug_that_looks_like_a_legacy_tombstone_keeps_exact_identity(
+    tmp_path,
+    monkeypatch,
+):
+    _configure_saas(tmp_path, monkeypatch)
+    slug = "a-deleted-1-20260101000000"
+    tenant = saas.create_tenant(slug, "Pattern Studio", "pattern@example.com", "secret123")
+
+    saas.delete_tenant_studio(tenant)
+
+    deleted = saas.tenant_by_id(tenant["id"])
+    assert deleted["slug"] == slug and deleted["original_slug"] == slug
+    assert deleted["tombstone_slug"].startswith(f".tenant-{tenant['id']}-")
+    assert saas.tenant_by_slug(slug) is None
+
+
+@pytest.mark.parametrize("hostile_kind", ["directory", "symlink"])
+def test_retired_path_guard_rejects_hostile_preexisting_marker(
+    tmp_path,
+    monkeypatch,
+    hostile_kind,
+):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    marker = saas.tenant_data_path("alpha") / saas._RETIRED_PATH_MARKER
+    if hostile_kind == "directory":
+        marker.mkdir()
+    else:
+        outside = tmp_path / "outside-marker"
+        outside.write_text("hostile")
+        marker.symlink_to(outside)
+
+    with pytest.raises(RuntimeError, match="retired-path marker is unsafe"):
+        saas.delete_tenant_studio(tenant)
+
+    interrupted = saas.tenant_by_id(tenant["id"])
+    assert interrupted["deleted_at"] is not None
+    assert interrupted["storage_parked_at"] is None
+    parked = config.SAAS_TENANT_DATA_DIR / ".trash" / interrupted["tombstone_slug"]
+    assert parked.is_dir()
+    assert not saas.tenant_data_path("alpha").exists()
+
+
+def test_stale_runtime_cannot_recreate_database_or_media_after_parking(
+    tmp_path,
+    monkeypatch,
+):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant(
+        "alpha",
+        "Alpha Studio",
+        "alpha@example.com",
+        "secret123",
+    )
+    retired_path = saas.tenant_data_path("alpha")
+
+    with saas.tenant_runtime(tenant):
+        saas.delete_tenant_studio(tenant)
+        assert retired_path.is_symlink()
+        with pytest.raises(sqlite3.OperationalError):
+            db.one("SELECT COUNT(*) FROM assets")
+        with pytest.raises((FileExistsError, NotADirectoryError)):
+            (retired_path / "late-media").mkdir(parents=True, exist_ok=True)
+
+    assert retired_path.is_symlink()
+    assert not (retired_path / "mise.db").exists()
+
+
+def test_delete_studio_scrubs_transient_caption_suggestions_before_parking(
+    tmp_path,
+    monkeypatch,
+):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant(
+        "alpha",
+        "Alpha Studio",
+        "alpha@example.com",
+        "secret123",
+    )
+    saas.ensure_tenant_database(tenant)
+    with saas.tenant_runtime(tenant):
+        client_id = db.run("INSERT INTO clients (name) VALUES ('Avery')")
+        project_id = db.run(
+            "INSERT INTO projects (client_id,title) VALUES (?,?)",
+            (client_id, "Campaign"),
+        )
+        plan_id = db.run(
+            """INSERT INTO recurring_plans
+               (project_id,title,line_items,total_cents,quota)
+               VALUES (?,?,'[]',0,'[]')""",
+            (project_id, "Monthly Social"),
+        )
+        caption_id = db.run(
+            """INSERT INTO retainer_captions (plan_id,period,label,body)
+               VALUES (?,?,?,?)""",
+            (plan_id, "2026-07", "Hero", "Canonical body"),
+        )
+        web_claim = "123e4567-e89b-12d3-a456-426614174000"
+        db.run(
+            """UPDATE retainer_captions
+                  SET ai_claim_token=?,ai_claimed_at=datetime('now')
+                WHERE id=?""",
+            (web_claim, caption_id),
+        )
+        db.run(
+            """INSERT INTO mobile_caption_suggestions
+               (id,caption_id,base_revision,status,context_json,candidate_text,
+                provider,model,completed_at,expires_at)
+               VALUES (?,?,0,'ready',?,?,?,?,datetime('now'),
+                       datetime('now','+1 day'))""",
+            (
+                "00000000-0000-4000-8000-000000000111",
+                caption_id,
+                '{"instruction":"PRIVATE CONTEXT"}',
+                "PRIVATE CANDIDATE",
+                "PRIVATE PROVIDER",
+                "PRIVATE MODEL",
+            ),
+        )
+
+    saas.delete_tenant_studio(tenant)
+
+    tombstone = saas.tenant_by_id(tenant["id"])["tombstone_slug"]
+    parked_database = config.SAAS_TENANT_DATA_DIR / ".trash" / tombstone / "mise.db"
+    with sqlite3.connect(parked_database) as con:
+        con.row_factory = sqlite3.Row
+        caption = con.execute(
+            """SELECT body,status,ai_claim_token,ai_claimed_at
+                 FROM retainer_captions WHERE id=?""",
+            (caption_id,),
+        ).fetchone()
+        suggestion = con.execute("SELECT * FROM mobile_caption_suggestions").fetchone()
+        runtime = con.execute(
+            "SELECT database_identity,offboarding FROM mobile_runtime_state WHERE singleton=1"
+        ).fetchone()
+
+    assert caption["body"] == "Canonical body" and caption["status"] == "draft"
+    assert caption["ai_claim_token"] == web_claim
+    assert caption["ai_claimed_at"] is not None
+    assert suggestion["status"] == "failed"
+    assert suggestion["failure_code"] == "session_ended"
+    for field in (
+        "session_id",
+        "context_json",
+        "candidate_text",
+        "provider",
+        "model",
+    ):
+        assert suggestion[field] is None
+    assert runtime["offboarding"] == 1
+    assert len(runtime["database_identity"]) == 32
+    for artifact in (
+        parked_database,
+        Path(f"{parked_database}-wal"),
+        Path(f"{parked_database}-shm"),
+    ):
+        if artifact.exists():
+            raw = artifact.read_bytes()
+            for private_value in (
+                b"PRIVATE CONTEXT",
+                b"PRIVATE CANDIDATE",
+                b"PRIVATE PROVIDER",
+                b"PRIVATE MODEL",
+            ):
+                assert private_value not in raw
+
+
+def test_delete_studio_restores_mobile_admission_when_tombstone_fails(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    saas.ensure_tenant_database(tenant)
+    original_control_connect = saas.control_connect
+
+    def fail_control_connect():
+        raise RuntimeError("forced control failure")
+
+    monkeypatch.setattr(saas, "control_connect", fail_control_connect)
+    with pytest.raises(RuntimeError, match="forced control failure"):
+        saas.delete_tenant_studio(tenant)
+    monkeypatch.setattr(saas, "control_connect", original_control_connect)
+
+    assert saas.tenant_by_slug("alpha")["deleted_at"] is None
+    with sqlite3.connect(saas.tenant_db_path("alpha")) as con:
+        assert (
+            con.execute(
+                "SELECT offboarding FROM mobile_runtime_state WHERE singleton=1"
+            ).fetchone()[0]
+            == 0
+        )
+
+
+def test_deleted_tenant_job_target_and_slug_are_permanently_isolated(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    original = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    saas.ensure_tenant_database(original)
+    saas.delete_tenant_studio(original)
+    with pytest.raises(ValueError, match="already taken"):
+        saas.create_tenant(
+            "alpha",
+            "Unsafe Replacement Studio",
+            "unsafe@example.com",
+            "secret123",
+        )
+    replacement = saas.create_tenant(
+        "beta",
+        "Replacement Studio",
+        "replacement@example.com",
+        "secret123",
+    )
+    saas.ensure_tenant_database(replacement)
+
+    with pytest.raises(RuntimeError, match="no longer available"):
+        with jobs._job_runtime(int(original["id"])):
+            pytest.fail("a deleted tenant ID must never enter another studio runtime")
+    with jobs._job_runtime(int(replacement["id"])):
+        assert saas.current_tenant()["id"] == replacement["id"]
+
+
+def test_delete_move_failure_reserves_slug_and_retry_finishes(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    saas.ensure_tenant_database(tenant)
+    source = saas.tenant_data_path("alpha")
+    original_rename = type(source).rename
+
+    def fail_source_move(path, target):
+        if path == source:
+            raise OSError("forced move failure")
+        return original_rename(path, target)
+
+    monkeypatch.setattr(type(source), "rename", fail_source_move)
+    with pytest.raises(OSError, match="forced move failure"):
+        saas.delete_tenant_studio(tenant)
+
+    reserved = saas.tenant_by_id(tenant["id"])
+    assert reserved is not None and reserved["deleted_at"]
+    assert source.exists()
+    with pytest.raises(ValueError, match="already taken"):
+        saas.create_tenant(
+            "alpha",
+            "Replacement Studio",
+            "replacement@example.com",
+            "secret123",
+        )
+
+    monkeypatch.setattr(type(source), "rename", original_rename)
+    saas.delete_tenant_studio(reserved)
+
+    final = saas.tenant_by_id(tenant["id"])
+    assert saas.tenant_by_slug("alpha") is None
+    assert final["slug"] == "alpha"
+    assert (config.SAAS_TENANT_DATA_DIR / ".trash" / final["tombstone_slug"] / "mise.db").exists()
+    with pytest.raises(ValueError, match="already taken"):
+        saas.create_tenant(
+            "alpha",
+            "Replacement Studio",
+            "replacement@example.com",
+            "secret123",
+        )
+
+
+def test_storage_retry_never_repeats_confirmed_stripe_cancel(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant(
+        "alpha",
+        "Alpha Studio",
+        "alpha@example.com",
+        "secret123",
+    )
+    with saas.control_connect() as con:
+        con.execute(
+            "UPDATE tenants SET stripe_subscription_id='sub_once' WHERE id=?",
+            (tenant["id"],),
+        )
+    monkeypatch.setattr(config, "STRIPE_SECRET_KEY", "sk_test_x")
+    cancellations = []
+    monkeypatch.setattr(
+        saas,
+        "_stripe",
+        lambda: type(
+            "S",
+            (),
+            {
+                "Subscription": type(
+                    "Sub",
+                    (),
+                    {
+                        "cancel": staticmethod(
+                            lambda subscription_id, **_kwargs: cancellations.append(subscription_id)
+                        )
+                    },
+                )
+            },
+        ),
+    )
+    source = saas.tenant_data_path("alpha")
+    original_rename = type(source).rename
+
+    def fail_move(path, target):
+        if path == source:
+            raise OSError("forced move failure after cancel")
+        return original_rename(path, target)
+
+    monkeypatch.setattr(type(source), "rename", fail_move)
+    with pytest.raises(OSError, match="forced move failure after cancel"):
+        saas.delete_tenant_studio(saas.tenant_by_id(tenant["id"]))
+    after_failure = saas.tenant_by_id(tenant["id"])
+    assert after_failure["cancel_failed_at"] is None
+    assert after_failure["cancel_succeeded_at"] is not None
+
+    monkeypatch.setattr(type(source), "rename", original_rename)
+    saas.delete_tenant_studio(after_failure)
+
+    assert cancellations == ["sub_once"]
+
+
+def test_delete_queues_every_subscription_observed_across_the_scrub_window(
+    tmp_path,
+    monkeypatch,
+):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    with saas.control_connect() as con:
+        con.execute(
+            "UPDATE tenants SET stripe_subscription_id='sub_old' WHERE id=?",
+            (tenant["id"],),
+        )
+    stale = saas.tenant_by_id(tenant["id"])
+    with saas.control_connect() as con:
+        con.execute(
+            "UPDATE tenants SET stripe_subscription_id='sub_new' WHERE id=?",
+            (tenant["id"],),
+        )
+    monkeypatch.setattr(config, "STRIPE_SECRET_KEY", "sk_test_x")
+    cancellations: list[str] = []
+    monkeypatch.setattr(
+        saas,
+        "_stripe",
+        lambda: type(
+            "Stripe",
+            (),
+            {
+                "Subscription": type(
+                    "Subscription",
+                    (),
+                    {
+                        "cancel": staticmethod(
+                            lambda subscription_id, **_kwargs: cancellations.append(subscription_id)
+                        )
+                    },
+                )
+            },
+        ),
+    )
+
+    saas.delete_tenant_studio(stale)
+
+    assert cancellations == ["sub_new", "sub_old"]
+    with saas.control_connect() as con:
+        rows = con.execute(
+            """SELECT subscription_id,state
+                 FROM tenant_subscription_cancellations
+                WHERE tenant_id=? ORDER BY subscription_id""",
+            (tenant["id"],),
+        ).fetchall()
+    assert [(row["subscription_id"], row["state"]) for row in rows] == [
+        ("sub_new", "succeeded"),
+        ("sub_old", "succeeded"),
+    ]
+
+
+def test_deleted_webhook_can_confirm_cancel_before_sync_response_returns(
+    tmp_path,
+    monkeypatch,
+):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    with saas.control_connect() as con:
+        con.execute(
+            "UPDATE tenants SET stripe_subscription_id='sub_race' WHERE id=?",
+            (tenant["id"],),
+        )
+    monkeypatch.setattr(config, "STRIPE_SECRET_KEY", "sk_test_x")
+    calls: list[str] = []
+
+    def cancel(subscription_id, **_kwargs):
+        calls.append(subscription_id)
+        saas._process_saas_event(
+            {
+                "id": "evt_cancel_race",
+                "type": "customer.subscription.deleted",
+                "data": {
+                    "object": {
+                        "id": subscription_id,
+                        "status": "canceled",
+                        "metadata": {"tenant_id": str(tenant["id"])},
+                    }
+                },
+            }
+        )
+
+    monkeypatch.setattr(
+        saas,
+        "_stripe",
+        lambda: type(
+            "Stripe",
+            (),
+            {"Subscription": type("Subscription", (), {"cancel": staticmethod(cancel)})},
+        ),
+    )
+
+    saas.delete_tenant_studio(saas.tenant_by_id(tenant["id"]))
+
+    final = saas.tenant_by_id(tenant["id"])
+    assert calls == ["sub_race"]
+    assert final["storage_parked_at"] is not None
+    assert saas.departed_needs_cancel() == []
+
+
+def test_pending_offboarding_sweep_finishes_crash_after_control_commit(
+    tmp_path,
+    monkeypatch,
+):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+
+    class SimulatedProcessDeath(BaseException):
+        pass
+
+    original_finish = saas._finish_mobile_usage_after_committed_offboarding
+    monkeypatch.setattr(
+        saas,
+        "_finish_mobile_usage_after_committed_offboarding",
+        lambda _path: (_ for _ in ()).throw(SimulatedProcessDeath()),
+    )
+    with pytest.raises(SimulatedProcessDeath):
+        saas.delete_tenant_studio(tenant)
+    interrupted = saas.tenant_by_id(tenant["id"])
+    assert interrupted["deleted_at"] is not None
+    assert interrupted["storage_parked_at"] is None
+    assert saas.tenant_data_path("alpha").is_dir()
+
+    monkeypatch.setattr(
+        saas,
+        "_finish_mobile_usage_after_committed_offboarding",
+        original_finish,
+    )
+    saas.pending_tenant_offboarding_sweep()
+
+    final = saas.tenant_by_id(tenant["id"])
+    assert final["storage_parked_at"] is not None
+    assert saas.tenant_data_path("alpha").is_symlink()
+    assert (config.SAAS_TENANT_DATA_DIR / ".trash" / final["tombstone_slug"] / "mise.db").is_file()
+
+
+def test_local_deleted_data_purge_is_default_off_and_explicitly_armed(
+    tmp_path,
+    monkeypatch,
+):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
+    saas.delete_tenant_studio(tenant)
+    deleted = saas.tenant_by_id(tenant["id"])
+    parked = config.SAAS_TENANT_DATA_DIR / ".trash" / deleted["tombstone_slug"]
+
+    assert saas.purge_retired_tenant_data() == 0
+    assert parked.is_dir()
+
+    monkeypatch.setattr(config, "SAAS_DELETED_STUDIO_LOCAL_PURGE_DAYS", 1)
+    with saas.control_connect() as con:
+        con.execute(
+            "UPDATE tenants SET storage_parked_at=? WHERE id=?",
+            (saas._iso(saas._now() - timedelta(days=2)), tenant["id"]),
+        )
+    assert saas.purge_retired_tenant_data() == 1
+    final = saas.tenant_by_id(tenant["id"])
+    assert not parked.exists()
+    assert final["local_data_purged_at"] is not None
+    assert saas.tenant_data_path("alpha").is_symlink()
+
+
+def test_recovered_tenant_can_retire_a_second_slug(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant(
+        "alpha",
+        "Alpha Studio",
+        "alpha@example.com",
+        "secret123",
+    )
+    saas.delete_tenant_studio(tenant)
+    first_tombstone = saas.tenant_by_id(tenant["id"])["tombstone_slug"]
+    parked = config.SAAS_TENANT_DATA_DIR / ".trash" / first_tombstone
+    recovered_path = saas.tenant_data_path("beta")
+    parked.rename(recovered_path)
+    with sqlite3.connect(recovered_path / "mise.db") as con:
+        con.execute(
+            """UPDATE mobile_runtime_state
+                  SET offboarding=0,updated_at=datetime('now')
+                WHERE singleton=1"""
+        )
+    with saas.control_connect() as con:
+        con.execute(
+            """UPDATE tenants
+                  SET slug='beta',original_slug='beta',tombstone_slug=NULL,
+                      storage_parked_at=NULL,local_data_purge_started_at=NULL,
+                      local_data_purged_at=NULL,deleted_at=NULL,plan_status='active',
+                      cancel_failed_at=NULL,cancel_attempted_at=NULL,
+                      cancel_succeeded_at=NULL
+                WHERE id=?""",
+            (tenant["id"],),
+        )
+
+    saas.delete_tenant_studio(saas.tenant_by_id(tenant["id"]))
+
+    with saas.control_connect() as con:
+        retired = {
+            row[0]
+            for row in con.execute(
+                "SELECT slug FROM retired_tenant_slugs WHERE tenant_id=?",
+                (tenant["id"],),
+            )
+        }
+    assert retired == {"alpha", "beta"}
+    assert saas.tenant_data_path("alpha").is_symlink()
+    assert saas.tenant_data_path("beta").is_symlink()
+
+
+def test_concurrent_delete_is_rejected_without_reopening_admission(tmp_path, monkeypatch):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant(
+        "alpha",
+        "Alpha Studio",
+        "alpha@example.com",
+        "secret123",
+    )
+    entered = threading.Event()
+    release = threading.Event()
+    original_scrub = saas._scrub_mobile_caption_suggestions_for_offboarding
+
+    def blocking_scrub(path):
+        original_scrub(path)
+        entered.set()
+        assert release.wait(timeout=5)
+
+    monkeypatch.setattr(
+        saas,
+        "_scrub_mobile_caption_suggestions_for_offboarding",
+        blocking_scrub,
+    )
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(saas.delete_tenant_studio, tenant)
+        assert entered.wait(timeout=5)
+        second = pool.submit(saas.delete_tenant_studio, tenant)
+        with pytest.raises(RuntimeError, match="already in progress"):
+            second.result(timeout=5)
+        with sqlite3.connect(saas.tenant_db_path("alpha")) as con:
+            assert (
+                con.execute(
+                    "SELECT offboarding FROM mobile_runtime_state WHERE singleton=1"
+                ).fetchone()[0]
+                == 1
+            )
+        release.set()
+        first.result(timeout=5)
+
+    final = saas.tenant_by_id(tenant["id"])
+    assert final["deleted_at"] is not None
+    assert final["slug"] == "alpha"
+    assert final["storage_parked_at"] is not None
 
 
 def test_delete_studio_route_requires_exact_confirmation(tmp_path, monkeypatch):

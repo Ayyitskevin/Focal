@@ -15,8 +15,8 @@ services:
 
   backup:
     # Hosted backups (ADR 0057): daily consistent snapshots of every tenant DB +
-    # the control DB, optional rclone off-site sync of snapshots + media. Reuses
-    # the app image (Python sqlite3 backup API + rclone are in it).
+    # the control DB, plus an encrypted manifest-last copy of the current
+    # generation and versioned allowlisted durable media.
     build: .
     restart: unless-stopped
     env_file:
@@ -25,8 +25,18 @@ services:
       MISE_DATA_DIR: /data
       MISE_SAAS_CONTROL_DB_PATH: /data/saas-control.db
       MISE_SAAS_TENANT_DATA_DIR: /data/tenants
+      RCLONE_CONFIG: /run/secrets/rclone.conf
     volumes:
       - mise-data:/data
+      # Backup credentials/decryption material are intentionally unavailable to
+      # the web container. Create this git-ignored file as host UID/GID 10001,
+      # mode 0400, and escrow its crypt key separately off-host.
+      - type: bind
+        source: ${MISE_RCLONE_CONFIG_PATH:-/dev/null}
+        target: /run/secrets/rclone.conf
+        read_only: true
+        bind:
+          create_host_path: false
     entrypoint: ["python", "scripts/hosted-backup.py", "--loop"]
     healthcheck:
       disable: true

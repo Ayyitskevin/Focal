@@ -1,10 +1,10 @@
-"""Finishing-touches review pass: tombstones stop haunting the operator KPIs.
+"""Finishing-touches review pass: departed rows stop haunting operator KPIs.
 
 A deleted studio's row survives on purpose (ADR 0051: billing linkage, C4 exit
 reasons) — but it was still being COUNTED: every deletion permanently inflated
 the Studios total and the attention/support queue (tombstones read as
 'canceled'), dragged the growth rates down with zero-score ghosts, and rendered
-tombstone slugs in the console table and CSV. Departed studios are now a
+deleted studio identities in the console table and CSV. Departed studios are now a
 separate count, visible but out of every live metric.
 """
 
@@ -36,10 +36,10 @@ def test_departed_studios_leave_every_live_metric(tmp_path, monkeypatch):
 
     saas.delete_tenant_studio(doomed)
     counts = saas.operator_tenant_overview()["counts"]
-    assert counts["total"] == 1  # not 2: the tombstone is no longer a studio
+    assert counts["total"] == 1  # not 2: the deleted row is no longer a studio
     assert counts["departed"] == 1  # ...but the departure is still visible
     assert counts["attention"] == 0  # a deletion is not a support case forever
-    # The console table and CSV stop rendering tombstone slugs.
+    # The live console table and CSV omit deleted studio identities.
     overview = saas.operator_tenant_overview()
     slugs = [row["tenant"]["slug"] for row in overview["rows"]]
     assert slugs == ["alpha"]

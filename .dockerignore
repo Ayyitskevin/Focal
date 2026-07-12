@@ -11,3 +11,11 @@ static/media
 *.db-wal
 .env
 .env.*
+secrets
+certs
+backups
+_backups
+_bak
+*.db.gz
+*.zip
+node_modules

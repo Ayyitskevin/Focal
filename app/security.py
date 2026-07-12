@@ -278,9 +278,9 @@ def admin_principal(request: Request) -> str:
     - Single-tenant (default): the legacy ``"admin"`` — unchanged, so existing self-hosted
       sessions keep working byte-for-byte after this ships.
     - Hosted: ``"tenant:<id>:<slug>"`` on a tenant host, ``"operator"`` on the platform/root
-      host. The tenant **id** is in the payload because slugs are reusable after a studio is
-      deleted (ADR 0051): a cookie minted for the old "alpha" must not authenticate against a
-      NEW tenant that later registers "alpha" — same slug, different id, different principal.
+      host. Deleted slugs are now permanently retired (ADR 0051). The immutable tenant **id**
+      remains in the payload as defense-in-depth for legacy installations that reassigned a
+      slug before retirement records existed, and for any operator-controlled recovery path.
 
     A tenant's own cookie replayed at another tenant subdomain or the operator console therefore
     no longer authenticates: the payload won't equal the target context's principal, and it can't
@@ -323,8 +323,9 @@ def client_session_payload(kind: str, resource_id: int) -> str:
     working byte-for-byte. Hosted: ``"<kind>:<tenant_id>:<id>"``. Portal/project ids
     restart per tenant and SECRET_KEY is global, so without the tenant-id prefix a
     copied ``portal:5`` cookie would validate against another studio's portal 5. The
-    immutable tenant **id** (not the reusable slug — ADR 0051) prevents a reclaimed
-    slug from resurrecting a stale session."""
+    immutable tenant **id** remains the authority even though deleted slugs are now
+    permanently retired (ADR 0051); it also protects legacy reassignment and
+    operator-controlled recovery paths from resurrecting a stale session."""
     if not config.SAAS_MODE:
         return f"{kind}:{resource_id}"
     from . import saas

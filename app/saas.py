@@ -8,11 +8,14 @@ SQLite database and file-storage root.
 from __future__ import annotations
 
 import csv
+import fcntl
 import hashlib
 import io
 import logging
+import os
 import re
 import secrets
+import shutil
 import sqlite3
 import tempfile
 import zipfile
@@ -71,6 +74,7 @@ _RESERVED_SLUGS = {
     "webhooks",
     "www",
 }
+_RETIRED_PATH_MARKER = ".mise-retired-path"
 
 
 def _stripe():
@@ -169,6 +173,12 @@ def tenant_db_path(slug: str) -> Path:
     return tenant_data_path(slug) / "mise.db"
 
 
+def _tenant_storage_key(tenant_id: int, deleted_at: datetime) -> str:
+    """Return an internal, user-inexpressible key for a parked tenant tree."""
+
+    return f".tenant-{tenant_id}-{deleted_at.strftime('%Y%m%d%H%M%S')}"
+
+
 def control_connect() -> sqlite3.Connection:
     config.SAAS_CONTROL_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(config.SAAS_CONTROL_DB_PATH, timeout=30)
@@ -208,6 +218,18 @@ def migrate_control() -> None:
             CREATE INDEX IF NOT EXISTS idx_tenants_slug ON tenants(slug);
             CREATE INDEX IF NOT EXISTS idx_tenants_subscription
                 ON tenants(stripe_subscription_id);
+            CREATE TABLE IF NOT EXISTS tenant_subscription_cancellations (
+                tenant_id INTEGER NOT NULL REFERENCES tenants(id),
+                subscription_id TEXT NOT NULL,
+                state TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (state IN ('pending','succeeded')),
+                discovered_at TEXT NOT NULL,
+                attempted_at TEXT,
+                succeeded_at TEXT,
+                PRIMARY KEY (tenant_id, subscription_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_tenant_subscription_cancellations_state
+                ON tenant_subscription_cancellations(state, discovered_at);
             CREATE TABLE IF NOT EXISTS saas_events (
                 id TEXT PRIMARY KEY,
                 type TEXT NOT NULL,
@@ -231,6 +253,29 @@ def migrate_control() -> None:
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS retired_tenant_slugs (
+                slug TEXT PRIMARY KEY,
+                tenant_id INTEGER NOT NULL REFERENCES tenants(id),
+                retired_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_retired_tenant_slugs_tenant
+                ON retired_tenant_slugs(tenant_id);
+            CREATE TRIGGER IF NOT EXISTS trg_tenants_reject_retired_slug_insert
+            BEFORE INSERT ON tenants
+            WHEN EXISTS (
+                SELECT 1 FROM retired_tenant_slugs WHERE slug=NEW.slug
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'retired tenant slug');
+            END;
+            CREATE TRIGGER IF NOT EXISTS trg_tenants_reject_retired_slug_update
+            BEFORE UPDATE OF slug ON tenants
+            WHEN NEW.slug<>OLD.slug AND EXISTS (
+                SELECT 1 FROM retired_tenant_slugs WHERE slug=NEW.slug
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'retired tenant slug');
+            END;
             """
         )
         _ensure_column(con, "tenants", "custom_domain", "custom_domain TEXT")
@@ -284,12 +329,160 @@ def migrate_control() -> None:
         _ensure_column(con, "tenants", "dunning_notice_sent_at", "dunning_notice_sent_at TEXT")
         _ensure_column(con, "tenants", "dunning_final_sent_at", "dunning_final_sent_at TEXT")
         # Offboarding tombstone (ADR 0051): set when the owner deletes the studio; the
-        # slug is renamed so the address frees up, and the row keeps billing linkage.
+        # row keeps billing linkage. The original slug is permanently reserved in
+        # retired_tenant_slugs before its data directory can move; otherwise an
+        # already-admitted request could reopen the recycled filesystem path and
+        # cross into a replacement studio.
         _ensure_column(con, "tenants", "deleted_at", "deleted_at TEXT")
-        # Set when the best-effort Stripe cancel on delete FAILED (transient 5xx): the
-        # subscription may still be charging, so the operator console surfaces it for a
-        # manual cancel until they resolve it. Cleared by the resolve action.
+        _ensure_column(con, "tenants", "original_slug", "original_slug TEXT")
+        _ensure_column(con, "tenants", "tombstone_slug", "tombstone_slug TEXT")
+        _ensure_column(con, "tenants", "storage_parked_at", "storage_parked_at TEXT")
+        _ensure_column(
+            con,
+            "tenants",
+            "storage_reconciliation_required_at",
+            "storage_reconciliation_required_at TEXT",
+        )
+        _ensure_column(
+            con,
+            "tenants",
+            "local_data_purge_started_at",
+            "local_data_purge_started_at TEXT",
+        )
+        _ensure_column(
+            con,
+            "tenants",
+            "local_data_purged_at",
+            "local_data_purged_at TEXT",
+        )
+        for row in con.execute(
+            """SELECT id,slug,deleted_at,original_slug,tombstone_slug,storage_parked_at
+                 FROM tenants"""
+        ):
+            stored_slug = str(row["slug"])
+            deleted_at = row["deleted_at"]
+            if deleted_at is None:
+                con.execute(
+                    "UPDATE tenants SET original_slug=COALESCE(original_slug,slug) WHERE id=?",
+                    (int(row["id"]),),
+                )
+                continue
+            tenant_id = int(row["id"])
+            legacy = re.fullmatch(rf"(.+)-deleted-{tenant_id}-\d{{14}}", stored_slug)
+            retired = con.execute(
+                """SELECT slug FROM retired_tenant_slugs
+                    WHERE tenant_id=? ORDER BY retired_at,slug""",
+                (tenant_id,),
+            ).fetchall()
+            pending_at_stored_slug = tenant_data_path(stored_slug).is_dir()
+            original_slug = str(
+                row["original_slug"]
+                or (retired[-1]["slug"] if retired else None)
+                or (
+                    stored_slug
+                    if pending_at_stored_slug
+                    else (legacy.group(1) if legacy else stored_slug)
+                )
+            )
+            deleted_time = _parse_iso(str(deleted_at))
+            if deleted_time is None:
+                raise RuntimeError("tenant deletion timestamp is invalid")
+            # Pre-boundary releases renamed both the control slug and trash path
+            # to <original>-deleted-<id>-<timestamp>. Preserve that exact parked
+            # key when upgrading. New deletions use an internal dot-prefixed key
+            # that can never collide with a valid public tenant slug.
+            legacy_path = config.SAAS_TENANT_DATA_DIR / ".trash" / stored_slug
+            tombstone_slug = str(
+                row["tombstone_slug"]
+                or (stored_slug if legacy and legacy_path.is_dir() else None)
+                or _tenant_storage_key(tenant_id, deleted_time)
+            )
+            parked_at = row["storage_parked_at"]
+            if (
+                parked_at is None
+                and (config.SAAS_TENANT_DATA_DIR / ".trash" / tombstone_slug).is_dir()
+            ):
+                parked_at = str(deleted_at)
+            con.execute(
+                """UPDATE tenants
+                      SET original_slug=?,tombstone_slug=?,storage_parked_at=?
+                    WHERE id=?""",
+                (original_slug, tombstone_slug, parked_at, tenant_id),
+            )
+        active_slugs = {
+            str(row["slug"])
+            for row in con.execute("SELECT slug FROM tenants WHERE deleted_at IS NULL")
+        }
+        for row in con.execute(
+            """SELECT id,slug,deleted_at,storage_parked_at
+                 FROM tenants WHERE deleted_at IS NOT NULL"""
+        ):
+            original = con.execute(
+                "SELECT original_slug FROM tenants WHERE id=?",
+                (int(row["id"]),),
+            ).fetchone()
+            original_slug = str(original["original_slug"])
+            # A deployment predating permanent reservation may already have
+            # reassigned a slug. Do not disrupt that active studio during backfill;
+            # all deletions after this migration are reserved transactionally.
+            if original_slug in active_slugs:
+                if row["storage_parked_at"] is None:
+                    con.execute(
+                        """UPDATE tenants
+                              SET storage_reconciliation_required_at=
+                                  COALESCE(storage_reconciliation_required_at,deleted_at)
+                            WHERE id=?""",
+                        (int(row["id"]),),
+                    )
+                continue
+            con.execute(
+                """INSERT OR IGNORE INTO retired_tenant_slugs
+                   (slug,tenant_id,retired_at) VALUES (?,?,?)""",
+                (original_slug, int(row["id"]), str(row["deleted_at"])),
+            )
+        # Durable cancellation outbox for studio deletion. `cancel_failed_at` means
+        # pending-or-failed and is set in the same transaction as deleted_at, before
+        # Stripe I/O. `cancel_succeeded_at` prevents a later storage-move retry from
+        # repeating an already-confirmed cancellation.
         _ensure_column(con, "tenants", "cancel_failed_at", "cancel_failed_at TEXT")
+        _ensure_column(con, "tenants", "cancel_attempted_at", "cancel_attempted_at TEXT")
+        _ensure_column(con, "tenants", "cancel_succeeded_at", "cancel_succeeded_at TEXT")
+        con.execute(
+            """INSERT INTO tenant_subscription_cancellations
+               (tenant_id,subscription_id,state,discovered_at,succeeded_at)
+               SELECT id,stripe_subscription_id,'succeeded',
+                      COALESCE(deleted_at,cancel_succeeded_at),cancel_succeeded_at
+                 FROM tenants
+                WHERE deleted_at IS NOT NULL AND cancel_succeeded_at IS NOT NULL
+                  AND stripe_subscription_id IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM tenant_subscription_cancellations existing
+                       WHERE existing.tenant_id=tenants.id
+                  )
+               ON CONFLICT(tenant_id,subscription_id) DO UPDATE SET
+                   state='succeeded',succeeded_at=excluded.succeeded_at"""
+        )
+        # Preserve unresolved cancellation work from pre-outbox deployments. A
+        # legacy failure proves an external call was attempted, so mark it
+        # attempted and require reconciliation rather than blind retry.
+        con.execute(
+            """INSERT INTO tenant_subscription_cancellations
+               (tenant_id,subscription_id,state,discovered_at,attempted_at)
+               SELECT id,stripe_subscription_id,'pending',cancel_failed_at,
+                      COALESCE(cancel_attempted_at,cancel_failed_at)
+                 FROM tenants
+                WHERE deleted_at IS NOT NULL AND cancel_failed_at IS NOT NULL
+                  AND stripe_subscription_id IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM tenant_subscription_cancellations existing
+                       WHERE existing.tenant_id=tenants.id
+                  )
+               ON CONFLICT(tenant_id,subscription_id) DO NOTHING"""
+        )
+        for cancellation in con.execute(
+            "SELECT DISTINCT tenant_id FROM tenant_subscription_cancellations"
+        ):
+            _refresh_cancel_summary_tx(con, int(cancellation["tenant_id"]))
         # Feedback triage (Batch D2): 'new' is the operator's queue, 'done' is the
         # archive — triaged notes leave the console but are never deleted (C4 exit
         # reasons keep their record value). Existing rows backfill to 'new'.
@@ -329,7 +522,9 @@ def _meta_set(key: str, value: str) -> None:
 
 def tenant_by_slug(slug: str) -> dict | None:
     with control_connect() as con:
-        row = con.execute("SELECT * FROM tenants WHERE slug=?", (slug,)).fetchone()
+        row = con.execute(
+            "SELECT * FROM tenants WHERE slug=? AND deleted_at IS NULL", (slug,)
+        ).fetchone()
     return _row_to_dict(row)
 
 
@@ -363,7 +558,7 @@ def list_tenants(*, billable_only: bool = False) -> list[dict]:
     where = ""
     params: tuple = ()
     if billable_only:
-        where = "WHERE plan_status IN ('trialing','active','past_due')"
+        where = "WHERE deleted_at IS NULL AND plan_status IN ('trialing','active','past_due')"
     with control_connect() as con:
         rows = con.execute(f"SELECT * FROM tenants {where} ORDER BY id", params).fetchall()
     return [dict(r) for r in rows]
@@ -770,19 +965,189 @@ def recent_tenant_feedback(limit: int = 50, status: str | None = None) -> list[d
     return [dict(r) for r in rows]
 
 
-def departed_needs_cancel() -> list[dict]:
-    """Deleted studios whose platform-subscription cancel FAILED and is unresolved.
+def _subscription_id(value: object) -> str | None:
+    candidate = str(value or "").strip()
+    if not candidate or len(candidate) > 255 or any(ord(char) < 32 for char in candidate):
+        return None
+    return candidate
 
-    These are excluded from operator_tenant_overview (they're tombstones), so this
-    is the only console surface for a departure that may still be billing — the
-    'never a silent live charge' guarantee delete_tenant_studio promises.
-    """
+
+def _refresh_cancel_summary_tx(con: sqlite3.Connection, tenant_id: int) -> None:
+    summary = con.execute(
+        """SELECT MIN(CASE WHEN state='pending' THEN discovered_at END) AS pending_since,
+                  MAX(CASE WHEN state='pending' THEN attempted_at END) AS attempted_at,
+                  MAX(CASE WHEN state='succeeded' THEN succeeded_at END) AS succeeded_at
+             FROM tenant_subscription_cancellations WHERE tenant_id=?""",
+        (tenant_id,),
+    ).fetchone()
+    con.execute(
+        """UPDATE tenants
+              SET cancel_failed_at=?,cancel_attempted_at=?,cancel_succeeded_at=?
+            WHERE id=?""",
+        (
+            summary["pending_since"],
+            summary["attempted_at"],
+            summary["succeeded_at"],
+            tenant_id,
+        ),
+    )
+
+
+def _queue_subscription_cancel_tx(
+    con: sqlite3.Connection,
+    tenant_id: int,
+    subscription_id: object,
+    discovered_at: str,
+) -> bool:
+    """Durably queue one exact Stripe subscription while control state is locked."""
+
+    normalized = _subscription_id(subscription_id)
+    if normalized is None:
+        return False
+    inserted = con.execute(
+        """INSERT INTO tenant_subscription_cancellations
+           (tenant_id,subscription_id,discovered_at)
+           VALUES (?,?,?) ON CONFLICT(tenant_id,subscription_id) DO NOTHING""",
+        (tenant_id, normalized, discovered_at),
+    ).rowcount
+    _refresh_cancel_summary_tx(con, tenant_id)
+    return inserted == 1
+
+
+def _record_subscription_canceled_tx(
+    con: sqlite3.Connection,
+    tenant_id: int,
+    subscription_id: object,
+    confirmed_at: str,
+) -> bool:
+    """Consume Stripe's authoritative deletion event for one exact subscription."""
+
+    normalized = _subscription_id(subscription_id)
+    if normalized is None:
+        return False
+    con.execute(
+        """INSERT INTO tenant_subscription_cancellations
+           (tenant_id,subscription_id,state,discovered_at,succeeded_at)
+           VALUES (?,?,'succeeded',?,?)
+           ON CONFLICT(tenant_id,subscription_id) DO UPDATE SET
+               state='succeeded',succeeded_at=excluded.succeeded_at""",
+        (tenant_id, normalized, confirmed_at, confirmed_at),
+    )
+    _refresh_cancel_summary_tx(con, tenant_id)
+    return True
+
+
+def _claim_subscription_cancel(tenant_id: int, subscription_id: str) -> bool:
+    """Claim the one allowed external cancellation attempt before doing I/O."""
+
+    now = _iso(_now())
+    with control_connect() as con:
+        changed = con.execute(
+            """UPDATE tenant_subscription_cancellations
+                  SET attempted_at=?
+                WHERE tenant_id=? AND subscription_id=?
+                  AND state='pending' AND attempted_at IS NULL""",
+            (now, tenant_id, subscription_id),
+        ).rowcount
+        _refresh_cancel_summary_tx(con, tenant_id)
+    return changed == 1
+
+
+def _complete_subscription_cancel(tenant_id: int, subscription_id: str) -> None:
+    now = _iso(_now())
+    with control_connect() as con:
+        changed = con.execute(
+            """UPDATE tenant_subscription_cancellations
+                  SET state='succeeded',succeeded_at=?
+                WHERE tenant_id=? AND subscription_id=? AND state='pending'""",
+            (now, tenant_id, subscription_id),
+        ).rowcount
+        if changed != 1:
+            state = con.execute(
+                """SELECT state FROM tenant_subscription_cancellations
+                    WHERE tenant_id=? AND subscription_id=?""",
+                (tenant_id, subscription_id),
+            ).fetchone()
+            # Stripe's authoritative deleted webhook can win the race with the
+            # synchronous cancel response. That is already the desired outcome.
+            if state is None or state["state"] != "succeeded":
+                raise RuntimeError("subscription cancellation is no longer pending")
+        _refresh_cancel_summary_tx(con, tenant_id)
+
+
+def _attempt_pending_subscription_cancellations(tenant_id: int) -> None:
+    """Attempt each never-attempted cancellation once; ambiguity is human-owned."""
+
+    if not config.STRIPE_SECRET_KEY:
+        return
     with control_connect() as con:
         rows = con.execute(
-            """SELECT id, studio_name, owner_email, stripe_subscription_id, cancel_failed_at
-               FROM tenants WHERE cancel_failed_at IS NOT NULL ORDER BY cancel_failed_at DESC"""
+            """SELECT c.subscription_id,t.studio_name,t.original_slug,t.slug
+                 FROM tenant_subscription_cancellations c
+                JOIN tenants t ON t.id=c.tenant_id
+                WHERE c.tenant_id=? AND c.state='pending'
+                  AND c.attempted_at IS NULL
+                ORDER BY c.discovered_at,c.subscription_id""",
+            (tenant_id,),
+        ).fetchall()
+    for row in rows:
+        subscription_id = str(row["subscription_id"])
+        if not _claim_subscription_cancel(tenant_id, subscription_id):
+            continue
+        try:
+            _stripe().Subscription.cancel(subscription_id, api_key=config.STRIPE_SECRET_KEY)
+        except Exception:
+            # The request may have reached Stripe. Never blind-retry an ambiguous
+            # paid-side effect; the exact subscription stays in the operator queue.
+            slug = str(row["original_slug"] or row["slug"])
+            log.exception("stripe cancel unresolved for %s subscription %s", slug, subscription_id)
+            from . import alerts  # lazy: alerts -> features would cycle at import time
+
+            alerts.notify(
+                f"Stripe cancellation needs reconciliation for studio "
+                f"{row['studio_name']} ({slug}) — subscription {subscription_id}. "
+                "Verify it in Stripe, then resolve that exact row in /admin/saas."
+            )
+        else:
+            _complete_subscription_cancel(tenant_id, subscription_id)
+
+
+def departed_needs_cancel() -> list[dict]:
+    """One operator row per unresolved platform-subscription cancellation."""
+
+    with control_connect() as con:
+        rows = con.execute(
+            """SELECT t.id,t.studio_name,t.owner_email,c.subscription_id,
+                      c.discovered_at AS cancel_failed_at,c.attempted_at
+                 FROM tenant_subscription_cancellations c
+                 JOIN tenants t ON t.id=c.tenant_id
+                WHERE c.state='pending'
+                ORDER BY c.discovered_at,c.subscription_id"""
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def pending_subscription_cancel_sweep() -> None:
+    """Continuously surface unresolved money-side effects without retrying them."""
+
+    rows = departed_needs_cancel()
+    # A process may die after the outbox commit but before its first Stripe call.
+    # attempted_at=NULL proves no external attempt was claimed, so one call is
+    # still safe. Rows with an ambiguous prior attempt remain human-only.
+    for tenant_id in {int(row["id"]) for row in rows if row["attempted_at"] is None}:
+        _attempt_pending_subscription_cancellations(tenant_id)
+    rows = departed_needs_cancel()
+    if not rows:
+        return
+    from . import alerts
+
+    oldest = rows[0]["cancel_failed_at"]
+    alerts.ops_alert(
+        "stripe_cancel_pending",
+        f"{len(rows)} Stripe subscription cancellation(s) remain unresolved "
+        f"(oldest {oldest}). Reconcile each exact subscription at "
+        f"{platform_url('/admin/saas#cancel-failures')}; ambiguous attempts are never retried.",
+    )
 
 
 def operator_tenant_export_csv(overview: dict | None = None) -> str:
@@ -940,8 +1305,8 @@ def create_tenant(
                 """INSERT INTO tenants
                    (slug, studio_name, owner_email, admin_password_hash,
                     trial_started_at, trial_ends_at,
-                    signup_source, signup_campaign, signup_referrer)
-                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                    signup_source, signup_campaign, signup_referrer, original_slug)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
                 (
                     slug,
                     studio_name,
@@ -952,6 +1317,7 @@ def create_tenant(
                     signup_source,
                     signup_campaign,
                     signup_referrer,
+                    slug,
                 ),
             )
             tenant_id = cur.lastrowid
@@ -1027,7 +1393,9 @@ def update_tenant_billing(
         updates.append("stripe_subscription_id=?")
         params.append(stripe_subscription_id)
     params.append(tenant_id)
-    sql = f"UPDATE tenants SET {', '.join(updates)} WHERE id=?"
+    # Billing webhooks may arrive after a studio has been deleted. They can add
+    # cancellation work, but they must never reactivate or rebind its account row.
+    sql = f"UPDATE tenants SET {', '.join(updates)} WHERE id=? AND deleted_at IS NULL"
     if con is not None:
         # Join the caller's open transaction (webhook exactly-once: the billing
         # effect must commit atomically with the idempotency marker).
@@ -1209,60 +1577,507 @@ def build_studio_export(tenant: dict) -> Path:
     return tmp_zip
 
 
-def delete_tenant_studio(tenant: dict) -> None:
-    """Offboard a studio: tombstone the row, stop billing, park the data in trash.
+def _scrub_mobile_caption_suggestions_for_offboarding(database_path: Path) -> None:
+    """Close mobile admission and scrub transient content before trash retention.
 
-    Deliberately NOT a hard rm: the data dir moves to .trash/<tombstone> so an
-    accidental deletion stays operator-recoverable for the retention window
-    (runbook), while the slug frees up immediately. The control row keeps its
-    Stripe linkage so any final billing events land on the tombstone, not nowhere.
-
-    Order matters. The tombstone UPDATE commits FIRST (durable, reversible by the
-    operator); only then do we fire the *irreversible* Stripe cancel — so a control-DB
-    failure can never strand a canceled subscription against a still-live-looking row.
-    The tombstone slug carries the tenant id so it can never collide (unique index),
-    even on a same-second retry. Idempotent: a row already tombstoned is a no-op.
+    The immediate transaction is the deletion barrier. Suggestion creation and
+    session issuance take the same SQLite write lock and re-check the durable
+    marker, so they either commit before this scrub or fail after it; no admitted
+    request can insert transient provider context in the gap before the DB move.
     """
-    if tenant.get("deleted_at"):
+    if not database_path.is_file():
         return
-    slug = tenant["slug"]
-    tombstone = f"{slug}-deleted-{tenant['id']}-{_now().strftime('%Y%m%d%H%M%S')}"
-    now = _iso(_now())
-    with control_connect() as con:
-        con.execute(
-            "UPDATE tenants SET slug=?, plan_status='canceled', deleted_at=?, "
-            "custom_domain=NULL, updated_at=? WHERE id=? AND deleted_at IS NULL",
-            (tombstone, now, now, tenant["id"]),
+    with sqlite3.connect(database_path) as con:
+        con.row_factory = sqlite3.Row
+        con.execute("PRAGMA foreign_keys=ON")
+        con.execute("PRAGMA secure_delete=ON")
+        con.execute("PRAGMA busy_timeout=30000")
+        con.execute("BEGIN IMMEDIATE")
+        runtime_table = con.execute(
+            """SELECT 1 FROM sqlite_master
+                WHERE type='table' AND name='mobile_runtime_state'"""
+        ).fetchone()
+        suggestion_table = con.execute(
+            """SELECT 1 FROM sqlite_master
+                WHERE type='table' AND name='mobile_caption_suggestions'"""
+        ).fetchone()
+        if runtime_table is None or suggestion_table is None:
+            return
+        updated = con.execute(
+            """UPDATE mobile_runtime_state
+                  SET offboarding=1,updated_at=datetime('now')
+                WHERE singleton=1 AND offboarding=0"""
         )
-    # DB is now committed and the studio is logically gone. Deleting must stop the
-    # $20 charge — best-effort cancel; on failure the row is already canceled and the
-    # operator console surfaces it for manual follow-up (never a silent live charge).
-    if config.STRIPE_SECRET_KEY and tenant.get("stripe_subscription_id"):
-        try:
-            _stripe().Subscription.cancel(
-                tenant["stripe_subscription_id"], api_key=config.STRIPE_SECRET_KEY
-            )
-        except Exception:
-            # A swallowed cancel used to be a silent live charge: the tombstone is
-            # excluded from the console, so nothing surfaced it. Stamp it (the console
-            # lists cancel-failed departures for a manual Stripe cancel) and ping now.
-            log.exception("stripe cancel failed for %s (operator follow-up needed)", slug)
-            with control_connect() as con:
-                con.execute("UPDATE tenants SET cancel_failed_at=? WHERE id=?", (now, tenant["id"]))
-            from . import alerts  # lazy: alerts→features would cycle at import time
+        state = con.execute(
+            """SELECT database_identity,offboarding
+                 FROM mobile_runtime_state WHERE singleton=1"""
+        ).fetchone()
+        if (
+            state is None
+            or not re.fullmatch(r"[0-9a-f]{32}", str(state["database_identity"] or ""))
+            or state["offboarding"] != 1
+            or updated.rowcount not in {0, 1}
+        ):
+            raise RuntimeError("tenant mobile runtime state is invalid")
 
-            alerts.notify(
-                f"Stripe cancel FAILED for deleted studio {tenant['studio_name']} "
-                f"({slug}) — subscription {tenant['stripe_subscription_id']} may still be "
-                "charging. Cancel it in Stripe, then resolve it in /admin/saas."
+        # Reuse the normal family-revocation path so access/refresh credentials,
+        # device tokens, and session-bound suggestion payloads disappear in this
+        # same transaction. A final broad scrub also covers already-revoked or
+        # detached historical rows.
+        from . import mobile_auth
+
+        now_ts = int(_now().timestamp())
+        session_ids = [
+            str(row["id"])
+            for row in con.execute("SELECT id FROM api_sessions WHERE revoked_at IS NULL")
+        ]
+        for session_id in session_ids:
+            mobile_auth._revoke_session_tx(con, session_id, now_ts, "studio_offboarding")
+        # Web caption claims are non-content UUID/timestamp metadata. Preserve
+        # them across both parking and a failed-offboarding reopen: an outbound
+        # provider thread may still be running, and clearing its claim would let
+        # the restored studio start a second outcome-ambiguous paid call.
+        con.execute(
+            """UPDATE mobile_caption_usage
+                  SET state='finished',finished_at=COALESCE(finished_at,datetime('now'))
+                WHERE state='active' AND id IN (
+                    SELECT id FROM mobile_caption_suggestions
+                     WHERE provider_attempted_at IS NULL
+                )"""
+        )
+        con.execute(
+            """UPDATE mobile_caption_suggestions
+                  SET session_id=NULL,
+                      status=CASE
+                          WHEN status IN ('queued','running','ready','failed')
+                          THEN 'failed'
+                          ELSE status
+                      END,
+                      context_json=NULL,
+                      candidate_text=NULL,
+                      provider=NULL,
+                      model=NULL,
+                      failure_code=CASE
+                          WHEN status IN ('queued','running','ready','failed')
+                          THEN 'session_ended'
+                          ELSE NULL
+                      END,
+                      completed_at=CASE
+                          WHEN status IN ('queued','running','ready','failed')
+                          THEN COALESCE(completed_at, datetime('now'))
+                          ELSE completed_at
+                      END"""
+        )
+        con.commit()
+        # This database is about to become the raw operator-recovery artifact in
+        # `.trash`. Rebuild it after secure logical scrubbing and truncate WAL so
+        # prior prompt/candidate bytes do not follow it into retention.
+        con.execute("VACUUM")
+        checkpoint = con.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        if checkpoint is None or int(checkpoint[0]) != 0:
+            raise RuntimeError("tenant offboarding WAL checkpoint is busy")
+
+
+def _restore_mobile_runtime_after_failed_offboarding(database_path: Path) -> None:
+    """Reopen mobile admission only when the control-plane tombstone did not land."""
+
+    if not database_path.is_file():
+        return
+    with sqlite3.connect(database_path) as con:
+        con.execute("PRAGMA busy_timeout=30000")
+        con.execute("BEGIN IMMEDIATE")
+        table = con.execute(
+            """SELECT 1 FROM sqlite_master
+                WHERE type='table' AND name='mobile_runtime_state'"""
+        ).fetchone()
+        if table is not None:
+            con.execute(
+                """UPDATE mobile_runtime_state
+                      SET offboarding=0,updated_at=datetime('now')
+                    WHERE singleton=1"""
             )
-    data_dir = tenant_data_path(slug)
+
+
+def _finish_mobile_usage_after_committed_offboarding(database_path: Path) -> None:
+    """Release every remaining capacity claim after deletion is irreversible."""
+
+    if not database_path.is_file():
+        return
+    with sqlite3.connect(f"file:{database_path}?mode=rw", uri=True) as con:
+        table = con.execute(
+            """SELECT 1 FROM sqlite_master
+                WHERE type='table' AND name='mobile_caption_usage'"""
+        ).fetchone()
+        if table is not None:
+            con.execute(
+                """UPDATE mobile_caption_usage
+                      SET state='finished',finished_at=COALESCE(finished_at,datetime('now'))
+                    WHERE state='active'"""
+            )
+
+
+def _parked_tenant_path(tenant_id: int, storage_key: str) -> Path:
+    """Resolve only a direct, tenant-bound child of the private trash namespace."""
+
+    if Path(storage_key).name != storage_key or len(storage_key) > 160:
+        raise RuntimeError("tenant storage key is invalid")
+    internal = re.fullmatch(rf"\.tenant-{tenant_id}-\d{{14}}", storage_key)
+    legacy = re.fullmatch(rf".+-deleted-{tenant_id}-\d{{14}}", storage_key)
+    if internal is None and legacy is None:
+        raise RuntimeError("tenant storage key is not bound to this tenant")
+    return config.SAAS_TENANT_DATA_DIR / ".trash" / storage_key
+
+
+def _install_retired_path_guard(data_dir: Path, parked: Path) -> None:
+    """Leave the old tenant path as a non-directory symlink after parking.
+
+    Stale media code commonly calls ``mkdir(parents=True)``. Pointing the retired
+    slug at a read-only marker file makes those writes fail instead of recreating
+    data outside the controlled trash-retention tree.
+    """
+
+    marker = parked / _RETIRED_PATH_MARKER
+    expected = b"retired tenant filesystem path; do not remove\n"
+    try:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        fd = os.open(marker, flags, 0o400)
+    except FileExistsError:
+        pass
+    else:
+        try:
+            os.write(fd, expected)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    if marker.is_symlink() or not marker.is_file():
+        raise RuntimeError("tenant retired-path marker is unsafe")
+    read_flags = os.O_RDONLY | (os.O_NOFOLLOW if hasattr(os, "O_NOFOLLOW") else 0)
+    fd = os.open(marker, read_flags)
+    try:
+        actual = os.read(fd, len(expected) + 1)
+    finally:
+        os.close(fd)
+    if actual != expected:
+        raise RuntimeError("tenant retired-path marker is invalid")
+    marker.chmod(0o400)
+    if data_dir.is_symlink():
+        try:
+            if data_dir.resolve(strict=True).samefile(marker):
+                return
+        except OSError:
+            pass
+        raise RuntimeError("tenant retired-path guard is invalid")
     if data_dir.exists():
-        trash = config.SAAS_TENANT_DATA_DIR / ".trash"
-        trash.mkdir(parents=True, exist_ok=True)
-        data_dir.rename(trash / tombstone)
-    _MIGRATED_TENANT_DBS.discard(str(tenant_db_path(slug)))
-    log.info("tenant %s deleted by owner (tombstone %s)", slug, tombstone)
+        raise RuntimeError("tenant data path unexpectedly exists after parking")
+    data_dir.symlink_to(marker.resolve())
+
+
+@contextmanager
+def _tenant_deletion_lock(tenant_id: int):
+    """Serialize offboarding across app workers without blocking on contention."""
+
+    lock_dir = config.SAAS_TENANT_DATA_DIR / ".delete-locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    with (lock_dir / f"{tenant_id}.lock").open("a+") as handle:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError("tenant deletion is already in progress") from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def delete_tenant_studio(tenant: dict) -> None:
+    """Serialize and execute one retry-safe studio offboarding pass."""
+
+    tenant_id = int(tenant["id"])
+    with _tenant_deletion_lock(tenant_id):
+        _delete_tenant_studio_locked(tenant)
+
+
+def _delete_tenant_studio_locked(tenant: dict) -> None:
+    """Close admission, reserve identity, queue billing work, and park storage."""
+
+    tenant_id = int(tenant["id"])
+    current = tenant_by_id(tenant_id)
+    if current is None:
+        raise RuntimeError("tenant no longer exists")
+    if current.get("storage_reconciliation_required_at"):
+        raise RuntimeError("tenant storage identity requires manual reconciliation")
+
+    # Capture every subscription identity observed around the comparatively slow
+    # secure scrub. A webhook may replace the active subscription during this
+    # window; the control transaction below queues both the old and fresh values.
+    observed_subscriptions = {
+        value
+        for value in (
+            _subscription_id(tenant.get("stripe_subscription_id")),
+            _subscription_id(current.get("stripe_subscription_id")),
+        )
+        if value is not None
+    }
+    already_deleted = bool(current.get("deleted_at"))
+    original_slug = str(
+        current.get("original_slug") or current["slug"] if already_deleted else current["slug"]
+    )
+    database_path = tenant_db_path(original_slug)
+
+    if not current.get("storage_parked_at") and not current.get("local_data_purged_at"):
+        try:
+            _scrub_mobile_caption_suggestions_for_offboarding(database_path)
+        except Exception:
+            if not already_deleted:
+                _restore_mobile_runtime_after_failed_offboarding(database_path)
+            raise
+
+    deleted_time = _parse_iso(current.get("deleted_at")) if already_deleted else _now()
+    if deleted_time is None:
+        raise RuntimeError("tenant deletion timestamp is invalid")
+    deleted_at = str(current["deleted_at"]) if already_deleted else _iso(deleted_time)
+    storage_key = str(current.get("tombstone_slug") or _tenant_storage_key(tenant_id, deleted_time))
+    _parked_tenant_path(tenant_id, storage_key)  # fail closed before committing it
+
+    try:
+        with control_connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            fresh_row = con.execute("SELECT * FROM tenants WHERE id=?", (tenant_id,)).fetchone()
+            if fresh_row is None:
+                raise RuntimeError("tenant no longer exists")
+            fresh = dict(fresh_row)
+            fresh_deleted = bool(fresh.get("deleted_at"))
+            if fresh_deleted:
+                original_slug = str(fresh.get("original_slug") or original_slug)
+                deleted_at = str(fresh["deleted_at"])
+                deleted_time = _parse_iso(deleted_at)
+                if deleted_time is None:
+                    raise RuntimeError("tenant deletion timestamp is invalid")
+                storage_key = str(
+                    fresh.get("tombstone_slug") or _tenant_storage_key(tenant_id, deleted_time)
+                )
+                _parked_tenant_path(tenant_id, storage_key)
+            else:
+                # A recovered tenant may have a different live slug. Bind this
+                # deletion to the current path, never a prior retirement record.
+                original_slug = str(fresh["slug"])
+                deleted_time = _now()
+                deleted_at = _iso(deleted_time)
+                storage_key = _tenant_storage_key(tenant_id, deleted_time)
+                con.execute(
+                    """INSERT INTO retired_tenant_slugs
+                       (slug,tenant_id,retired_at) VALUES (?,?,?)
+                       ON CONFLICT(slug) DO NOTHING""",
+                    (original_slug, tenant_id, deleted_at),
+                )
+                reservation = con.execute(
+                    "SELECT tenant_id FROM retired_tenant_slugs WHERE slug=?",
+                    (original_slug,),
+                ).fetchone()
+                if reservation is None or int(reservation["tenant_id"]) != tenant_id:
+                    raise RuntimeError("tenant slug retirement could not be reserved")
+                changed = con.execute(
+                    """UPDATE tenants
+                          SET plan_status='canceled',deleted_at=?,original_slug=?,
+                              tombstone_slug=?,storage_parked_at=NULL,
+                              local_data_purge_started_at=NULL,local_data_purged_at=NULL,
+                              custom_domain=NULL,updated_at=?
+                        WHERE id=? AND slug=? AND deleted_at IS NULL""",
+                    (
+                        deleted_at,
+                        original_slug,
+                        storage_key,
+                        deleted_at,
+                        tenant_id,
+                        original_slug,
+                    ),
+                ).rowcount
+                if changed != 1:
+                    raise RuntimeError("tenant deletion reservation was not committed")
+
+            fresh_subscription = _subscription_id(fresh.get("stripe_subscription_id"))
+            if fresh_subscription is not None:
+                observed_subscriptions.add(fresh_subscription)
+            for subscription_id in sorted(observed_subscriptions):
+                _queue_subscription_cancel_tx(
+                    con,
+                    tenant_id,
+                    subscription_id,
+                    deleted_at,
+                )
+    except Exception:
+        # Only a studio that remains active may reopen admission. Once deleted_at
+        # commits, the operation is a retryable offboarding—not a rollback.
+        latest = tenant_by_id(tenant_id)
+        if latest is not None and not latest.get("deleted_at"):
+            _restore_mobile_runtime_after_failed_offboarding(database_path)
+        raise
+
+    database_path = tenant_db_path(original_slug)
+    _finish_mobile_usage_after_committed_offboarding(database_path)
+    _attempt_pending_subscription_cancellations(tenant_id)
+
+    latest = tenant_by_id(tenant_id)
+    if latest is None:
+        raise RuntimeError("tenant no longer exists")
+    if latest.get("local_data_purged_at"):
+        return
+    storage_key = str(latest.get("tombstone_slug") or storage_key)
+    parked = _parked_tenant_path(tenant_id, storage_key)
+    data_dir = tenant_data_path(original_slug)
+    if latest.get("storage_parked_at"):
+        if not parked.is_dir() or parked.is_symlink():
+            raise RuntimeError("parked tenant storage is missing or unsafe")
+        if not data_dir.is_symlink():
+            raise RuntimeError("retired tenant path guard is missing")
+        return
+
+    if data_dir.is_symlink():
+        if not parked.is_dir() or parked.is_symlink():
+            raise RuntimeError("tenant retired-path guard has no parked studio")
+        _install_retired_path_guard(data_dir, parked)
+    elif data_dir.is_dir():
+        parked.parent.mkdir(parents=True, exist_ok=True)
+        if parked.exists() or parked.is_symlink():
+            raise RuntimeError("tenant trash target already exists")
+        data_dir.rename(parked)
+        _install_retired_path_guard(data_dir, parked)
+    elif parked.is_dir() and not parked.is_symlink():
+        # Crash recovery after the atomic directory move but before its control stamp.
+        _install_retired_path_guard(data_dir, parked)
+    else:
+        raise RuntimeError("tenant data is missing from both live and trash paths")
+
+    parked_at = _iso(_now())
+    with control_connect() as con:
+        changed = con.execute(
+            """UPDATE tenants SET storage_parked_at=?,updated_at=?
+                WHERE id=? AND deleted_at IS NOT NULL AND storage_parked_at IS NULL
+                  AND tombstone_slug=?""",
+            (parked_at, parked_at, tenant_id, storage_key),
+        ).rowcount
+    if changed != 1:
+        final = tenant_by_id(tenant_id)
+        if final is None or not final.get("storage_parked_at"):
+            raise RuntimeError("tenant storage park was not committed")
+    _MIGRATED_TENANT_DBS.discard(str(database_path))
+    log.info("tenant %s deleted and parked as %s", original_slug, storage_key)
+
+
+def purge_retired_tenant_data() -> int:
+    """Hard-purge locally parked studios after the documented recovery window."""
+
+    retention_days = int(config.SAAS_DELETED_STUDIO_LOCAL_PURGE_DAYS)
+    if retention_days == 0:
+        return 0
+    if retention_days < 0:
+        raise RuntimeError("deleted-studio local purge days cannot be negative")
+    cutoff = _now() - timedelta(days=retention_days)
+    # A backup generation and a purge must never enumerate/mutate the trash tree
+    # concurrently. They share this process-independent platform lock.
+    from .hosted_backup import _exclusive_backup_lock
+
+    purged = 0
+    with _exclusive_backup_lock(Path(config.DATA_DIR)):
+        with control_connect() as con:
+            rows = con.execute(
+                """SELECT id,tombstone_slug,storage_parked_at,
+                          local_data_purge_started_at,local_data_purged_at
+                     FROM tenants
+                    WHERE deleted_at IS NOT NULL AND storage_parked_at IS NOT NULL
+                      AND local_data_purged_at IS NULL
+                    ORDER BY id"""
+            ).fetchall()
+        for raw in rows:
+            row = dict(raw)
+            parked_time = _parse_iso(row.get("storage_parked_at"))
+            if parked_time is None or parked_time > cutoff:
+                continue
+            tenant_id = int(row["id"])
+            storage_key = str(row.get("tombstone_slug") or "")
+            parked = _parked_tenant_path(tenant_id, storage_key)
+            with _tenant_deletion_lock(tenant_id):
+                started = _iso(_now())
+                with control_connect() as con:
+                    changed = con.execute(
+                        """UPDATE tenants
+                              SET local_data_purge_started_at=
+                                  COALESCE(local_data_purge_started_at,?)
+                            WHERE id=? AND deleted_at IS NOT NULL
+                              AND storage_parked_at IS NOT NULL
+                              AND local_data_purged_at IS NULL""",
+                        (started, tenant_id),
+                    ).rowcount
+                if changed != 1:
+                    continue
+                if parked.is_symlink():
+                    raise RuntimeError("parked tenant storage must not be a symlink")
+                if parked.exists():
+                    if not parked.is_dir():
+                        raise RuntimeError("parked tenant storage is not a directory")
+                    shutil.rmtree(parked)
+                purged_at = _iso(_now())
+                with control_connect() as con:
+                    changed = con.execute(
+                        """UPDATE tenants SET local_data_purged_at=?,updated_at=?
+                            WHERE id=? AND local_data_purge_started_at IS NOT NULL
+                              AND local_data_purged_at IS NULL""",
+                        (purged_at, purged_at, tenant_id),
+                    ).rowcount
+                if changed != 1:
+                    raise RuntimeError("tenant data purge was not committed")
+                purged += 1
+    return purged
+
+
+def pending_tenant_offboarding_sweep() -> None:
+    """Finish crash-interrupted storage parking for already-deleted studios."""
+
+    with control_connect() as con:
+        rows = con.execute(
+            """SELECT * FROM tenants
+                WHERE deleted_at IS NOT NULL AND storage_parked_at IS NULL
+                  AND local_data_purged_at IS NULL
+                  AND storage_reconciliation_required_at IS NULL
+                ORDER BY deleted_at,id"""
+        ).fetchall()
+    failures: list[str] = []
+    for raw in rows:
+        tenant = dict(raw)
+        try:
+            delete_tenant_studio(tenant)
+        except Exception:
+            slug = str(tenant.get("original_slug") or tenant["slug"])
+            failures.append(slug)
+            log.exception("pending tenant offboarding retry failed for %s", slug)
+    if failures:
+        from . import alerts
+
+        shown = ", ".join(failures[:10]) + ("…" if len(failures) > 10 else "")
+        alerts.ops_alert(
+            "tenant_offboarding_pending",
+            f"{len(failures)} deleted studio offboarding operation(s) still need "
+            f"storage reconciliation: {shown}. Inspect /admin/saas and platform logs.",
+        )
+    with control_connect() as con:
+        collisions = con.execute(
+            """SELECT id,original_slug FROM tenants
+                WHERE deleted_at IS NOT NULL
+                  AND storage_reconciliation_required_at IS NOT NULL
+                ORDER BY id"""
+        ).fetchall()
+    if collisions:
+        from . import alerts
+
+        shown = ", ".join(str(row["original_slug"] or row["id"]) for row in collisions[:10])
+        alerts.ops_alert(
+            "tenant_storage_identity_collision",
+            f"{len(collisions)} legacy deleted studio row(s) conflict with an active "
+            f"storage slug ({shown}). Automation is blocked; reconcile control and paths "
+            "offline before clearing the marker.",
+        )
 
 
 def operator_update_tenant_status(tenant_id: int, plan_status: str) -> dict:
@@ -2239,6 +3054,7 @@ def _process_saas_event(event) -> dict:
     """
     obj = event["data"]["object"]
     event_type = event["type"]
+    queued_tenant_ids: set[int] = set()
     with control_connect() as con:
         try:
             con.execute(
@@ -2251,33 +3067,137 @@ def _process_saas_event(event) -> dict:
             metadata = obj.get("metadata") or {}
             tenant_id = int(metadata.get("tenant_id") or 0)
             if tenant_id:
-                # Attach the Stripe customer + subscription, but do NOT set plan_status
-                # here. This event and customer.subscription.created race — Stripe does
-                # not order them — and hardcoding "trialing" would clobber the real
-                # "active" status of a LAPSED tenant who just re-subscribed (recovery
-                # checkout runs with trial_days=0, so Stripe activates immediately),
-                # leaving a just-paid customer locked out by tenant_has_access() until
-                # the next subscription event. The customer.subscription.* branch below
-                # carries the authoritative status regardless of which arrives last.
-                update_tenant_billing(
-                    tenant_id,
-                    stripe_customer_id=obj.get("customer"),
-                    stripe_subscription_id=obj.get("subscription"),
-                    con=con,
-                )
+                tenant = con.execute("SELECT * FROM tenants WHERE id=?", (tenant_id,)).fetchone()
+                if tenant is not None and tenant["deleted_at"] is not None:
+                    if _queue_subscription_cancel_tx(
+                        con,
+                        tenant_id,
+                        obj.get("subscription"),
+                        _iso(_now()),
+                    ):
+                        queued_tenant_ids.add(tenant_id)
+                elif tenant is not None:
+                    # Checkout and subscription.created can race. The latter owns
+                    # status; checkout only attaches customer/subscription identity.
+                    incoming = _subscription_id(obj.get("subscription"))
+                    current = _subscription_id(tenant["stripe_subscription_id"])
+                    replacement_allowed = tenant["plan_status"] in {
+                        "canceled",
+                        "incomplete_expired",
+                    }
+                    if incoming is not None and (
+                        current is None or current == incoming or replacement_allowed
+                    ):
+                        update_tenant_billing(
+                            tenant_id,
+                            stripe_customer_id=obj.get("customer"),
+                            stripe_subscription_id=incoming,
+                            con=con,
+                        )
+                    elif incoming is not None:
+                        _queue_subscription_cancel_tx(
+                            con,
+                            tenant_id,
+                            incoming,
+                            _iso(_now()),
+                        )
+                        queued_tenant_ids.add(tenant_id)
         elif event_type.startswith("customer.subscription."):
             metadata = obj.get("metadata") or {}
             tenant_id = int(metadata.get("tenant_id") or 0)
-            tenant = tenant_by_id(tenant_id) if tenant_id else tenant_by_subscription(obj["id"])
-            if tenant:
+            if tenant_id:
+                tenant = con.execute("SELECT * FROM tenants WHERE id=?", (tenant_id,)).fetchone()
+            else:
+                tenant = con.execute(
+                    "SELECT * FROM tenants WHERE stripe_subscription_id=?",
+                    (obj["id"],),
+                ).fetchone()
+            if tenant is not None and tenant["deleted_at"] is not None:
+                resolved_id = int(tenant["id"])
+                event_at = _iso(_now())
+                if event_type == "customer.subscription.deleted" or obj.get("status") == "canceled":
+                    _record_subscription_canceled_tx(
+                        con,
+                        resolved_id,
+                        obj.get("id"),
+                        event_at,
+                    )
+                elif _queue_subscription_cancel_tx(
+                    con,
+                    resolved_id,
+                    obj.get("id"),
+                    event_at,
+                ):
+                    queued_tenant_ids.add(resolved_id)
+            elif tenant is not None:
                 status = obj.get("status") or "incomplete"
-                update_tenant_billing(
-                    tenant["id"],
-                    plan_status=status,
-                    stripe_customer_id=obj.get("customer"),
-                    stripe_subscription_id=obj["id"],
-                    con=con,
+                resolved_id = int(tenant["id"])
+                incoming = _subscription_id(obj.get("id"))
+                current = _subscription_id(tenant["stripe_subscription_id"])
+                terminal = event_type == "customer.subscription.deleted" or status == "canceled"
+                history = (
+                    con.execute(
+                        """SELECT state FROM tenant_subscription_cancellations
+                            WHERE tenant_id=? AND subscription_id=?""",
+                        (resolved_id, incoming),
+                    ).fetchone()
+                    if incoming is not None
+                    else None
                 )
+                if incoming is None:
+                    pass
+                elif terminal:
+                    _record_subscription_canceled_tx(
+                        con,
+                        resolved_id,
+                        incoming,
+                        _iso(_now()),
+                    )
+                    if current in {None, incoming}:
+                        update_tenant_billing(
+                            resolved_id,
+                            plan_status=status,
+                            stripe_customer_id=obj.get("customer"),
+                            stripe_subscription_id=incoming,
+                            con=con,
+                        )
+                elif history is not None:
+                    # Stripe subscription IDs are not resurrectable after a
+                    # terminal event. Ignore every later nonterminal delivery for
+                    # an ID already queued/confirmed for cancellation, including
+                    # the still-current ID, so event reordering cannot restore access.
+                    pass
+                elif current in {None, incoming}:
+                    update_tenant_billing(
+                        resolved_id,
+                        plan_status=status,
+                        stripe_customer_id=obj.get("customer"),
+                        stripe_subscription_id=incoming,
+                        con=con,
+                    )
+                else:
+                    replacement_allowed = tenant["plan_status"] in {
+                        "canceled",
+                        "incomplete_expired",
+                    }
+                    if replacement_allowed:
+                        update_tenant_billing(
+                            resolved_id,
+                            plan_status=status,
+                            stripe_customer_id=obj.get("customer"),
+                            stripe_subscription_id=incoming,
+                            con=con,
+                        )
+                    else:
+                        _queue_subscription_cancel_tx(
+                            con,
+                            resolved_id,
+                            incoming,
+                            _iso(_now()),
+                        )
+                        queued_tenant_ids.add(resolved_id)
+    for tenant_id in queued_tenant_ids:
+        _attempt_pending_subscription_cancellations(tenant_id)
     return {"ok": True, "type": event_type}
 
 
@@ -2471,7 +3391,9 @@ async def delete_studio(
         alerts.notify(
             f"Studio deleted: {tenant['studio_name']} ({tenant['slug']}) — why: {preview}"
         )
-    delete_tenant_studio(tenant)
+    # Secure SQLite compaction and parking can be expensive for a large studio;
+    # never block the shared async request loop while it runs.
+    await run_in_threadpool(delete_tenant_studio, tenant)
     resp = RedirectResponse(platform_url("/pricing?deleted=1"), status_code=303)
     security.delete_session_cookie(resp, security.ADMIN_COOKIE)
     return resp
@@ -2591,19 +3513,29 @@ async def operator_feedback_done(request: Request, feedback_id: int):
 
 
 @router.post("/admin/saas/{tenant_id}/cancel-resolved")
-async def operator_cancel_resolved(request: Request, tenant_id: int):
-    """Clear a failed-cancel flag once the operator has cancelled in Stripe by hand.
+async def operator_cancel_resolved(
+    request: Request,
+    tenant_id: int,
+    subscription_id: str = Form(...),
+):
+    """Mark a pending/failed cancel resolved after authoritative manual cancel.
 
     The stamp is a follow-up reminder, not a state machine — this just dismisses it
     from the console after the manual cancel is done."""
     require_platform_admin(request)
+    normalized = _subscription_id(subscription_id)
+    if normalized is None:
+        raise HTTPException(status_code=404)
     with control_connect() as con:
         cur = con.execute(
-            "UPDATE tenants SET cancel_failed_at=NULL WHERE id=? AND cancel_failed_at IS NOT NULL",
-            (tenant_id,),
+            """UPDATE tenant_subscription_cancellations
+                  SET state='succeeded',succeeded_at=?
+                WHERE tenant_id=? AND subscription_id=? AND state='pending'""",
+            (_iso(_now()), tenant_id, normalized),
         )
         if cur.rowcount == 0:
             raise HTTPException(status_code=404)
+        _refresh_cancel_summary_tx(con, tenant_id)
     return RedirectResponse("/admin/saas#cancel-failures", status_code=303)
 
 

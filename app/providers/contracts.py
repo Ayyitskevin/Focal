@@ -90,6 +90,9 @@ class ProviderResult:
     cost_usd: float | None = None
     tokens: int | None = None
     error: str | None = None
+    # In-memory at-most-once signal. None means the adapter cannot prove whether
+    # external work began; it is deliberately omitted from persisted provenance.
+    provider_attempted: bool | None = None
 
     @property
     def ok(self) -> bool:
@@ -129,6 +132,7 @@ class ProviderResult:
             status=ResultStatus.DISABLED,
             review=review,
             error="not configured",
+            provider_attempted=False,
         )
 
     @classmethod
@@ -141,6 +145,7 @@ class ProviderResult:
         *,
         review: ReviewRequirement = ReviewRequirement.HUMAN_REVIEW,
         latency_ms: int | None = None,
+        provider_attempted: bool | None = True,
     ) -> ProviderResult:
         """A call was attempted but did not yield a usable output. Non-mutating."""
         if status.is_ok:
@@ -152,4 +157,5 @@ class ProviderResult:
             review=review,
             latency_ms=latency_ms,
             error=error,
+            provider_attempted=provider_attempted,
         )

@@ -28,14 +28,22 @@ into the hosted `$20/month` beta.
 - `MISE_SAAS_SUPPORT_EMAIL` is set to the inbox you actually read — it is the
   public support contact **and** where the weekly operator digest lands
   (unset, both fall back to the Gmail sender).
-- `python scripts/hosted-preflight.py` returns `READY` with `0 fail`.
+- A least-privilege rclone `crypt` config exists outside the repo at the absolute
+  `MISE_RCLONE_CONFIG_PATH`, is host UID/GID 10001 and mode 0400, and is mounted
+  only into `backup`. `MISE_BACKUP_RCLONE_REMOTE_ENCRYPTED=true` is set and the
+  crypt password/salt has been escrowed and recovery-tested separately off-host.
+- `scripts/launch-hosted-production.sh` completes both containerized preflight
+  gates and returns `READY` with `0 fail`; no direct Compose launch bypasses it.
 - CI is green, including the `dependency-audit` job (see `docs/SECURITY.md`).
 - `/admin/saas` launch checklist is clear or every remaining item has an owner.
 - A test F&B studio and a test wedding studio can log in, load demo data, open
   billing, and reach account settings.
-- The compose `backup` sidecar heartbeat is fresh, `MISE_BACKUP_RCLONE_REMOTE`
-  points off-site, and the restore drill from the runbook (§10) has been done
-  once for real.
+- The compose `backup` sidecar heartbeat is fresh and its remote commit has a
+  `manifest.json` with `complete=true`, `failures=[]`, and matching
+  expected/captured live and parked counts; every listed regular control/live/parked
+  payload is present. The same-generation active and parked restore drills from
+  runbook §10 have both been done for real. Remote history and old generations have
+  an explicit lifecycle; Mise never purges them automatically.
 
 ## Beta Acquisition Links
 
@@ -66,7 +74,10 @@ For Podman Compose hosts:
 MISE_COMPOSE_CMD='podman compose' MISE_CADDY_SITE_ADDRESS='mise.example.com, *.mise.example.com' bash scripts/launch-hosted-production.sh
 ```
 
-The script runs hosted preflight first, then starts the Docker/Caddy stack.
+The script builds both current images, runs static preflight in the built image,
+stops old Caddy/backup, starts Mise privately, waits for health/migrations,
+forces one encrypted manifest-committed backup, runs runtime preflight, and only
+then starts the backup loop and Caddy. Any failed gate keeps public ingress down.
 
 ## Beta Invitation Email
 
@@ -123,7 +134,8 @@ the feedback queue in `/admin/saas` has been triaged, going public is:
 2. **Verify the funnel is open** (five minutes, in a private browser window):
    - `/pricing` no longer shows the invite-code field.
    - A test signup with a throwaway slug goes straight to the new studio's
-     onboarding (delete it from the studio's own billing page afterwards).
+     onboarding. Choose it deliberately: deleting the test studio permanently
+     retires that slug, so it can never be used for another studio.
    - `/admin/saas` shows the **Public — open signup live** badge in the page
      header. If it still says the gate is armed, the old env var is still set.
 3. **Invite the waitlist.** Download the CSV from `/admin/saas` — everyone on

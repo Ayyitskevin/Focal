@@ -20,9 +20,10 @@ from healthy ones in the operator console, and no automated trial-ending touchpo
 customer lifecycle in one narrative test — gated signup, welcome email, exactly-once
 activation webhook, tenant Stripe connect (fail-closed → live), dunning grace, paywall
 recovery billing immediately after a spent trial, export, delete-with-billing-cancel,
-and slug reclaim with stale-cookie rejection. It runs in the CI unit gate, so the state
-machine behind the launch is re-proven on every push; the manual rehearsal then only
-has to prove wiring (DNS/TLS/real Stripe/SMTP).
+permanent slug-retirement rejection, and successful provisioning under a different
+unused slug. It runs in the CI unit gate, so the state machine behind the launch is
+re-proven on every push; the manual rehearsal then only has to prove wiring
+(DNS/TLS/real Stripe/SMTP).
 
 **2. The playbook as the agent interface.** `docs/LAUNCH-PLAYBOOK.md` scripts Phases
 3–5 as ordered checklists with **ready-to-paste agent briefs** per stage (the

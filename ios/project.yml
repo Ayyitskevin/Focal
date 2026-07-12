@@ -42,6 +42,7 @@ targets:
           UIApplicationSupportsMultipleScenes: false
         NSFaceIDUsageDescription: "Use Face ID to unlock your Mise studio."
         MiseServerBaseURL: "$(MISE_SERVER_BASE_URL)"
+        MiseContentSuggestionsEnabled: "$(MISE_CONTENT_SUGGESTIONS_ENABLED)"
         MiseAPNsEnvironment: "$(MISE_APNS_ENVIRONMENT)"
     entitlements:
       path: Mise/Supporting/Mise.entitlements

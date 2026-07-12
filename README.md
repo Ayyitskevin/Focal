@@ -51,10 +51,13 @@ too) and sign in with your `MISE_ADMIN_PASSWORD`. Then your first gallery:
 3. **Publish with a 4-digit PIN** and send the client their `/g/<slug>` link
    and PIN. That's the whole delivery loop.
 
-For production, run the Docker stack (`docker compose up --build`) — it adds
-Caddy TLS ingress and daily backups; set `MISE_BASE_URL` to your public URL so
-emailed links and copy-link buttons carry the right address. Full deploy notes:
-[docs/SAAS-DEPLOYMENT.md](docs/SAAS-DEPLOYMENT.md) and the operator runbook.
+Raw `docker compose up` is for local/development rehearsal only. Hosted
+production must configure the encrypted backup remote and run
+`MISE_CADDY_SITE_ADDRESS='domain, *.domain' ./scripts/launch-hosted-production.sh`;
+that gate keeps Caddy stopped until the current app and backup images, migrations,
+forced manifest-committed backup, and runtime preflight all pass. Single-tenant
+production uses the service/backup topology in [ops/BACKUP.md](ops/BACKUP.md).
+Full hosted deploy notes: [docs/SAAS-DEPLOYMENT.md](docs/SAAS-DEPLOYMENT.md).
 
 ## Hosted SaaS Mode
 
@@ -68,7 +71,8 @@ Hosted mode adds:
 - 14-day trial and Stripe subscription billing for the flat $20 plan
 - root-host operator console at `/admin/saas`
 - public demo tour at `/demo`
-- launch readiness checks with `python scripts/hosted-preflight.py`
+- containerized static/runtime launch gates through
+  `scripts/launch-hosted-production.sh`
 - onboarding checklist, demo data, and niche preset packs
 - signup source tracking from tagged trial links such as
   `/pricing?utm_source=newsletter&utm_campaign=beta`
@@ -97,13 +101,17 @@ Production billing uses:
 The price is locked in code at `2000` cents. Do not make it configurable unless
 the product model changes.
 
-## One-Command Local SaaS Launch
+## One-Command Hosted Production Launch
 
 ```bash
 cp .env.example .env
-# edit .env with hosted values
-docker compose up --build
+# edit .env with hosted + encrypted-backup values, then:
+MISE_CADDY_SITE_ADDRESS='mise.example.com, *.mise.example.com' \
+  ./scripts/launch-hosted-production.sh
 ```
+
+Do not substitute a direct Compose start: it bypasses the private health,
+forced-backup, and runtime-evidence gates.
 
 Minimum hosted env:
 
@@ -122,6 +130,9 @@ MISE_STRIPE_SECRET_KEY=sk_live_xxx
 MISE_SAAS_STRIPE_PRICE_ID=price_xxx
 MISE_SAAS_STRIPE_WEBHOOK_SECRET=whsec_xxx
 MISE_SAAS_SUPPORT_EMAIL=you@example.com  # weekly digest + public support contact
+MISE_RCLONE_CONFIG_PATH=/opt/mise/secrets/rclone.conf
+MISE_BACKUP_RCLONE_REMOTE=mise-backups-crypt:
+MISE_BACKUP_RCLONE_REMOTE_ENCRYPTED=true
 # Optional: the Stripe API version the code is pinned to. Defaults to the tested
 # contract, so a stripe-python upgrade can't silently change API behavior. Bump it
 # deliberately (after a Stripe test-mode rehearsal), not as a side effect of a
@@ -129,11 +140,12 @@ MISE_SAAS_SUPPORT_EMAIL=you@example.com  # weekly digest + public support contac
 # MISE_STRIPE_API_VERSION=2026-05-27.dahlia
 ```
 
-Run readiness checks before launch:
+After the gated launch succeeds, these containerized diagnostics may be run
+again without bypassing its static/private/backup/runtime ordering:
 
 ```bash
-python scripts/hosted-preflight.py
-python scripts/smoke-saas-hosted.py
+docker compose exec -T mise python scripts/hosted-preflight.py
+docker compose run --rm --no-deps mise python scripts/smoke-saas-hosted.py
 ```
 
 For a trial user the first ten minutes look like: open `/pricing`, start the

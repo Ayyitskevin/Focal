@@ -8,8 +8,9 @@ from app.public.packages import record_package_lead
 
 @pytest.fixture()
 def isolated_db(tmp_path):
-    token = db.set_request_db_path(tmp_path / "mise.db")
-    db.migrate()
+    database_path = tmp_path / "mise.db"
+    db.migrate(database_path)
+    token = db.set_request_db_path(database_path)
     yield
     db.reset_request_db_path(token)
 

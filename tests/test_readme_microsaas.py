@@ -8,7 +8,7 @@ def test_readme_keeps_flat_hosted_positioning():
         "Exactly **$20/month**",
         "No paid tiers",
         "14-day trial",
-        "python scripts/hosted-preflight.py",
+        "MISE_RCLONE_CONFIG_PATH",
         "/admin/saas",
         "/demo",
         "docs/LAUNCH-KIT.md",
@@ -36,7 +36,7 @@ def test_launch_kit_keeps_public_launch_assets():
         "MISE_CADDY_SITE_ADDRESS",
         "5-Post X Launch Thread",
         "Prioritized 7-Day Launch Checklist",
-        "python scripts/hosted-preflight.py",
+        "manifest-committed backup",
         "scripts/launch-hosted-production.sh",
     ]
     for phrase in required:
@@ -55,9 +55,30 @@ def test_beta_launch_docs_keep_invite_and_security_checklist():
         "exactly `$20/month`",
         "Beta Acquisition Links",
         "at-risk trials",
-        "python scripts/hosted-preflight.py",
+        "manifest-committed backup",
+        "scripts/launch-hosted-production.sh",
     ]
     for phrase in required:
         assert phrase in text
     assert "docker compose" in script
     assert "python scripts/hosted-preflight.py" in script
+
+
+def test_hosted_launch_gates_current_images_before_public_ingress():
+    script = Path("scripts/launch-hosted-production.sh").read_text()
+
+    build = script.index("compose build mise backup")
+    static = script.index(
+        "compose run --rm --no-deps mise python scripts/hosted-preflight.py --static"
+    )
+    stop = script.index("compose stop caddy backup")
+    app = script.index("compose up -d mise")
+    forced_backup = script.index(
+        "compose run --rm --no-deps --entrypoint python backup scripts/hosted-backup.py"
+    )
+    runtime = script.index("compose exec -T mise python scripts/hosted-preflight.py")
+    public = script.index("compose up -d backup caddy")
+
+    assert build < static < stop < app < forced_backup < runtime < public
+    assert "\npython scripts/hosted-preflight.py --static\n" not in script
+    assert "compose up --build -d mise backup" not in script

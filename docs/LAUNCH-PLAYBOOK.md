@@ -23,7 +23,8 @@ Only the operator can do these (they need your identity/payment details):
 - [ ] **VPS**: 2 vCPU / 4 GB / 80 GB SSD is plenty for beta (Hetzner CX32-class ≈ €8/mo
       or DigitalOcean/Vultr equivalent). Ubuntu LTS, SSH key auth only.
 - [ ] **Stripe** account activated (business details, payout bank).
-- [ ] **Off-site backup target**: Backblaze B2 bucket (or any S3/rclone remote) + keys.
+- [ ] **Off-site backup target**: Backblaze B2 bucket (or another rclone backend),
+      least-privilege credentials, and a separate rclone `crypt` password/salt escrow.
 - [ ] **Gmail app password** for the platform sender (or the operator's existing one).
 - [ ] Optional but recommended: **Telegram bot** (BotFather) + your chat id for alerts.
 
@@ -40,14 +41,24 @@ Checklist (details in `docs/SAAS-DEPLOYMENT.md`):
 - [ ] `git clone` the repo; `cp Caddyfile.cloudflare Caddyfile`; `cp .env.example .env`
       and fill every uncommented hosted var (SECRET_KEY via the documented one-liner;
       `MISE_SAAS_MODE=true`; root domain; support email; **`MISE_SAAS_INVITE_CODE`** for
-      the private beta; Telegram; backup knobs incl. the rclone remote).
-- [ ] Configure rclone for the backup remote inside the box (`rclone config`), then
+      the private beta; Telegram; backup remote, encryption acknowledgement, and
+      `MISE_RCLONE_CONFIG_PATH`).
+- [ ] Create a rclone config whose named `crypt` remote wraps the object-store remote.
+      Store it outside the repo (for example `/opt/mise/secrets/rclone.conf`), set host
+      UID/GID `10001:10001` and mode `0400`, escrow the crypt password/salt separately
+      off-host, and set `MISE_RCLONE_CONFIG_PATH` to that absolute path. Never put the
+      config contents or crypt key in `.env`.
+- [ ] Run
       `MISE_CADDY_SITE_ADDRESS='domain, *.domain' ./scripts/launch-hosted-production.sh`
-      — the preflight must print **READY** before compose starts.
+      — it must build the current app/backup images, pass the containerized static gate,
+      stop old ingress/backup, health-check the private app, commit one encrypted backup,
+      pass the runtime gate, and only then start the backup loop and public ingress.
 - [ ] Verify: `https://domain/healthz`, `/pricing`, `/terms` all 200; a made-up
       subdomain shows the "unknown studio" page **with valid TLS**.
-- [ ] Force one backup pass and a restore drill per runbook §10; confirm the marker file
-      and the off-site objects exist.
+- [ ] Confirm the launch script's forced backup: the success marker names a remote
+      `manifest.json` generation with `complete=true`, `failures=[]`, matching
+      expected/captured counts, and every listed control/live/parked payload. Complete
+      the same-generation control + live + parked quarantine drill in runbook §10.
 - [ ] External uptime monitor (UptimeRobot free) on `https://domain/healthz`.
 
 **Agent brief (paste to the agent that has SSH access):**
@@ -58,12 +69,16 @@ Checklist (details in `docs/SAAS-DEPLOYMENT.md`):
 > repo to `/opt/mise`, `cp Caddyfile.cloudflare Caddyfile`, place the Cloudflare Origin
 > cert pair the operator gives you at `certs/`, fill `.env` from `.env.example` (ask the
 > operator for each secret — never invent or reuse values; require MISE_SAAS_INVITE_CODE
-> to be set), run `rclone config` for the backup remote, then run
+> to be set). Create a least-privilege rclone `crypt` config at
+> `/opt/mise/secrets/rclone.conf`, owned by host UID/GID 10001 with mode 0400; set
+> `MISE_RCLONE_CONFIG_PATH` to it and escrow its crypt password/salt separately off-host.
+> Then run
 > `MISE_CADDY_SITE_ADDRESS='<domain>, *.<domain>' ./scripts/launch-hosted-production.sh`.
-> Do not proceed past a failing preflight — report it. Afterwards run the Stage 3.2
-> verification checklist from `docs/LAUNCH-PLAYBOOK.md` and report each item pass/fail,
-> including one forced backup pass (`docker compose exec backup python
-> scripts/hosted-backup.py`) and the runbook §10 restore drill on a scratch tenant.
+> Do not bypass any static, health, forced-backup, or runtime gate. Afterwards run the
+> Stage 3.2 verification checklist from `docs/LAUNCH-PLAYBOOK.md` and report each item
+> pass/fail, including the launch script's forced manifest-committed backup and runbook
+> §10's same-generation control + live + parked quarantine drill. Do not start a second
+> pass while the backup lock is held.
 > Never print secret values into logs or chat.
 
 ## Stage 3.3 — Stripe wiring (agent-assisted; operator clicks in the dashboard)
@@ -73,7 +88,8 @@ Checklist (details in `docs/SAAS-DEPLOYMENT.md`):
 - [ ] Webhook endpoint `https://domain/webhooks/stripe/saas` with events
       `checkout.session.completed`, `customer.subscription.updated`,
       `customer.subscription.deleted` → signing secret → `MISE_SAAS_STRIPE_WEBHOOK_SECRET`.
-- [ ] Test keys into `.env` (`MISE_STRIPE_SECRET_KEY=sk_test_…`), restart, preflight READY.
+- [ ] Put test keys into `.env` (`MISE_STRIPE_SECRET_KEY=sk_test_…`) and rerun the gated
+      launch script; require runtime preflight `READY` before testing.
 - [ ] Customer emails/receipts ON in Stripe settings; Billing Portal enabled
       (cancel allowed); retry schedule = Smart Retries (pairs with the 10-day grace).
 
@@ -91,14 +107,16 @@ Checklist (details in `docs/SAAS-DEPLOYMENT.md`):
    `4000 0000 0000 0341` card) → studio shows the **warn** banner, stays accessible.
 5. Cancel the subscription in the portal → paywall appears → **Restart subscription**
    from `/admin/billing` works.
-6. Export the studio zip; then **Delete studio** → Stripe sub canceled, slug freed,
-   `.trash` parking present; re-signup on the same slug works.
+6. Export the studio zip; then **Delete studio** → the exact Stripe subscription is
+   canceled or appears in the operator reconciliation queue, `.trash` parking and the
+   retired-path guard are present, the old subdomain 404s, and re-signup on that
+   permanently retired slug is rejected. A different unused slug still provisions.
 7. A second signup WITHOUT the invite code must bounce with 403.
 8. Watch Telegram: the ops heartbeat should stay quiet; stop the backup container for a
    day only if you want to see the stale alarm fire (optional).
 
 - [ ] **Only after all eight pass:** swap live keys (`sk_live_…`, live Price, live
-      webhook + secret), restart, preflight READY, and run steps 1→2 once more with a
+      webhook + secret), rerun the gated launch script, and run steps 1→2 once more with a
       real card, then refund yourself in the dashboard.
 
 **Agent brief:**
@@ -130,7 +148,7 @@ Checklist (details in `docs/SAAS-DEPLOYMENT.md`):
       `/support` FAQ entry. Track time-per-ticket — the solo-supportability budget.
 - [ ] Exit criteria to go public: ≥10 trials, ≥5 activated **with real client data**
       (not just seed clicks — check galleries have uploads), ≥3 paid conversions, zero
-      isolation/billing incidents, restore drill re-run once mid-beta.
+      isolation/billing incidents, manifest-validated restore drill re-run once mid-beta.
 
 **Agent brief (weekly beta review):**
 
@@ -148,7 +166,8 @@ Checklist (details in `docs/SAAS-DEPLOYMENT.md`):
 - [ ] Announce: communities the beta users came from, the founder's own client base,
       photography newsletters. The landing copy in the launch kit is ready.
 - [ ] Post-launch backlog (in priority order, from the audit): per-tenant storage
-      quotas · `.trash` hard-purge job · demo-page product screenshots · Stripe Connect
+      quotas · reviewed remote retention/purge tooling · demo-page product screenshots ·
+      Stripe Connect
       onboarding (replaces BYO keys) · Cloudflare for SaaS custom domains · per-tenant
       sending domains (Postmark/SES) · activation timestamps + cohort views.
 

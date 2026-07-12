@@ -1,8 +1,8 @@
 # Mise for iOS — architecture and delivery plan
 
-Status: Milestones 1–5A implementation complete; Milestone 5B.1 native cull and
-Milestone 5B.2 native AI activity implementations staged; current-Xcode and
-physical-device release validation pending
+Status: Milestones 1–5A implementation complete; Milestone 5B.1 native cull,
+Milestone 5B.2 native AI activity, and Milestone 5B.3 native Content implementations
+staged; current-Xcode and physical-device release validation pending
 Minimum OS: iOS 17 / iPadOS 17
 UI: SwiftUI
 State: Observation-based MVVM with async/await
@@ -151,7 +151,7 @@ The root UI changes with the principal, not just with screen visibility.
 - Studio: projects/pipeline and CRM clients.
 - Calendar: month/agenda on iPhone; split calendar/agenda on iPad.
 - Galleries: delivery state, upload/progress, cull/vision, proofing activity.
-- More: proposals, contracts, invoices, financials, AI/content, settings.
+- More: proposals, contracts, invoices, financials, Content, AI activity, settings.
 
 ### Shared client access
 
@@ -179,7 +179,8 @@ Offline is cache-first for safe reads, deliberately narrow for writes.
 | Favorites/comments | optimistic only when queued operation has a stable ID |
 | Contract signatures/payments | never complete offline; server-confirmed only |
 | Booking | draft selection offline, but revalidate and book online atomically |
-| AI commands | online command; cache result/status for later display |
+| Owner caption workspace | protected list/detail cache; manual saves require the network |
+| Caption suggestions | online only; operation and candidate remain memory-only |
 | Owner AI activity | validated latest-500 metadata cache; read-only offline display |
 | Owner cull review | first-page cache; media/decisions require an online owner session |
 
@@ -249,6 +250,33 @@ polling or offline command queue. The read contract intentionally has no detail
 route or server-side filtering in this slice; the smaller surface is sufficient for
 the bounded native feed.
 
+### Native owner Content boundary
+
+Milestone 5B.3 adds native retainer-caption management without giving a model
+authority over studio or client state:
+
+- Caption list/detail responses are normalized owner projections with monotonic
+  revisions, opaque identity tokens, strong ETags, and tenant-bound pagination.
+  The app may cache those canonical reads in the protected owner namespace.
+- Manual body saves are online, idempotent, and require the exact current ETag.
+  Approved captions are read-only; every accepted mobile write remains a draft.
+- Generation is separately disabled by default on both server and app. When armed,
+  a POST creates a session-bound queued operation and a worker makes at most one
+  provider attempt. The provider never writes a caption.
+- Suggestion GET responses use 'no-store'. Candidate text and operation state remain
+  in memory only, never the tenant JSON cache or an offline queue. Use Suggestion
+  changes only the local editor; explicit Save is a second, version-checked command.
+- Session loss, TTL expiry, provider error, malformed output, approval, concurrent
+  editing, and delete/reinsert races all fail without applying model output.
+  Revocation and periodic cleanup scrub transient context and candidate text.
+- The native surface has no approve, publish, send, delivery-credit, invoice,
+  contract, or payment command.
+
+See the
+[Content suggestions operations runbook](IOS-CONTENT-SUGGESTIONS-OPERATIONS.md)
+for provider/privacy release holds, migration ordering, staging, retention, and
+rollback.
+
 ## 7. Push notifications and deep links
 
 Backend additions:
@@ -275,6 +303,7 @@ Supported owner links use HTTPS universal links:
 - `/app/projects/{id}`
 - `/app/galleries/{id}/assets/{id}`
 - `/app/bookings/{id}`
+- `/app/content/captions/{id}`
 - existing `/g`, `/portal`, `/w`, `/p`, `/c`, and `/i` links as exchange/fallback
   entry points
 
@@ -425,14 +454,29 @@ file-protected, and explicitly initiated by the client.
 - remaining acceptance evidence: current-Xcode generation/build/tests, VoiceOver and
   accessibility-size inspection, offline/reauth device checks, and TestFlight rehearsal
 
+#### Milestone 5B.3 — native owner Content workspace (implementation staged)
+
+- owner-only caption list/detail with strong validators, bounded tenant cursor, and
+  protected cache-first canonical reads
+- explicit versioned manual editing with approved captions read-only and no
+  publication/delivery/money transition
+- default-off asynchronous immutable suggestions, one-attempt worker claim,
+  session/TTL scrubbing, safe closed failures, and explicit reviewed save
+- memory-only candidate review, separate local Use/Discard actions, same-process
+  stable retry intent, accepted-handle recovery, conflict preservation, adaptive
+  Content navigation, and deep-link parsing
+- focused backend/Swift contract tests and the
+  [Content operations runbook](IOS-CONTENT-SUGGESTIONS-OPERATIONS.md)
+- remaining acceptance evidence: processor/DPA/privacy/cost approval, current-Xcode
+  generation/build/tests, protected-cache inspection, physical-device accessibility,
+  and internal TestFlight rehearsal
+
 #### Remaining Milestone 5B and App Store operations
 
-- Content-generation previews/commands remain future slices; AI drafts must stay
-  human-reviewed and must never auto-publish
 - privacy-safe telemetry, performance budgets, TestFlight rollout, and App Store
   submission evidence
 
-Milestones 5B.1–5B.2 do not complete the broader AI roadmap or App Store release. The
+Milestones 5B.1–5B.3 do not complete the broader AI roadmap or App Store release. The
 Milestone 5A physical APNs/TestFlight checks also remain required before submission.
 
 ## 11. Product decisions still open

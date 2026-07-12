@@ -28,24 +28,29 @@ from .providers import registry
 log = logging.getLogger("mise.jobs")
 
 _pool: ThreadPoolExecutor | None = None
+_content_pool: ThreadPoolExecutor | None = None
 MAX_ATTEMPTS = 3
+_MOBILE_CONTENT_JOB = "mobile_caption_suggestion"
 
 
-def _current_tenant_slug() -> str | None:
+def _current_tenant_id() -> int | None:
     if not config.SAAS_MODE:
         return None
     from . import saas
 
     tenant = saas.current_tenant()
-    return tenant["slug"] if tenant else None
+    return int(tenant["id"]) if tenant else None
 
 
 @contextmanager
-def _job_runtime(tenant_slug: str | None):
-    if config.SAAS_MODE and tenant_slug:
+def _job_runtime(tenant_id: int | None):
+    if config.SAAS_MODE and tenant_id is not None:
         from . import saas
 
-        with saas.tenant_runtime(tenant_slug):
+        tenant = saas.tenant_by_id(tenant_id)
+        if tenant is None or tenant.get("deleted_at"):
+            raise RuntimeError("tenant job target is no longer available")
+        with saas.tenant_runtime(tenant):
             yield
     else:
         yield
@@ -208,6 +213,14 @@ def _h_apns_delivery(payload: dict) -> None:
     push_notifications.deliver(int(payload["delivery_id"]))
 
 
+def _h_mobile_caption_suggestion(payload: dict) -> None:
+    # Lazy import avoids jobs -> mobile router -> jobs at module import. The
+    # generic queue has already restored the exact hosted tenant runtime.
+    from . import mobile_content_api
+
+    mobile_content_api.run_caption_suggestion(str(payload["suggestion_id"]))
+
+
 HANDLERS = {
     "image_derivatives": _h_image,
     "social_crops": _h_crops,
@@ -231,6 +244,7 @@ HANDLERS = {
     "qwen_writeback_gallery": lambda p: qwen_writeback.writeback_gallery(p["gallery_id"]),
     "mobile_policy_effect": _h_mobile_policy_effect,
     "apns_delivery": _h_apns_delivery,
+    "mobile_caption_suggestion": _h_mobile_caption_suggestion,
     # Local keeper-scoring for the cull deck: per-asset Qwen scores into argus_keeper_score.
     # Score-only, asset_id-keyed, inert unless MISE_CULL_SCORER + a challenger URL are set;
     # independent of the production cutover (ADR 0033).
@@ -248,20 +262,30 @@ def enqueue_in_transaction(con, kind: str, payload: dict) -> int:
     )
 
 
+def _executor_for(kind: str) -> ThreadPoolExecutor | None:
+    return _content_pool if kind == _MOBILE_CONTENT_JOB else _pool
+
+
+def _submit(job_id: int, tenant_id: int | None, kind: str) -> None:
+    executor = _executor_for(kind)
+    if executor is not None:
+        executor.submit(_execute, job_id, tenant_id)
+
+
 def kick(job_id: int) -> None:
     """Submit an already-persisted job when a worker pool is available."""
-    if _pool:
-        _pool.submit(_execute, job_id, _current_tenant_slug())
+    job = db.one("SELECT kind FROM jobs WHERE id=?", (job_id,))
+    if job is not None:
+        _submit(job_id, _current_tenant_id(), str(job["kind"]))
 
 
 # ── queue machinery ────────────────────────────────────────────────────────
 
 
 def enqueue(kind: str, payload: dict) -> int:
-    tenant_slug = _current_tenant_slug()
+    tenant_id = _current_tenant_id()
     job_id = db.run("INSERT INTO jobs (kind, payload) VALUES (?,?)", (kind, json.dumps(payload)))
-    if _pool:
-        _pool.submit(_execute, job_id, tenant_slug)
+    _submit(job_id, tenant_id, kind)
     return job_id
 
 
@@ -281,8 +305,8 @@ def _claim(job_id: int) -> "db.sqlite3.Row | None":
         con.close()
 
 
-def _execute(job_id: int, tenant_slug: str | None = None) -> None:
-    with _job_runtime(tenant_slug):
+def _execute(job_id: int, tenant_id: int | None = None) -> None:
+    with _job_runtime(tenant_id):
         job = _claim(job_id)
         if not job:
             return
@@ -305,14 +329,15 @@ def _execute(job_id: int, tenant_slug: str | None = None) -> None:
             )
             if status == "failed" and "asset_id" in payload:
                 db.run("UPDATE assets SET status='failed' WHERE id=?", (payload["asset_id"],))
-            if status == "queued" and _pool:
-                _pool.submit(_execute, job_id, tenant_slug)
+            if status == "queued":
+                _submit(job_id, tenant_id, str(job["kind"]))
 
 
 def retry(job_id: int) -> bool:
-    tenant_slug = _current_tenant_slug()
+    tenant_id = _current_tenant_id()
     con = db.connect()
     try:
+        job = con.execute("SELECT kind FROM jobs WHERE id=?", (job_id,)).fetchone()
         cur = con.execute(
             "UPDATE jobs SET status='queued', attempts=0, error=NULL, "
             "updated_at=datetime('now') WHERE id=? AND status='failed'",
@@ -324,21 +349,25 @@ def retry(job_id: int) -> bool:
     if cur.rowcount != 1:
         return False
     log.info("job %s retried by admin", job_id)
-    if _pool:
-        _pool.submit(_execute, job_id, tenant_slug)
+    if job is not None:
+        _submit(job_id, tenant_id, str(job["kind"]))
     return True
 
 
 def pending_count() -> int:
-    if config.SAAS_MODE and not _current_tenant_slug():
+    if config.SAAS_MODE and _current_tenant_id() is None:
         return 0
     row = db.one("SELECT COUNT(*) AS n FROM jobs WHERE status IN ('queued','running')")
     return row["n"] if row else 0
 
 
 def start() -> None:
-    global _pool
+    global _pool, _content_pool
     _pool = ThreadPoolExecutor(max_workers=config.JOB_WORKERS, thread_name_prefix="mise-job")
+    _content_pool = ThreadPoolExecutor(
+        max_workers=config.MOBILE_CONTENT_WORKERS,
+        thread_name_prefix="mise-content",
+    )
     if config.SAAS_MODE:
         from . import saas
 
@@ -348,26 +377,29 @@ def start() -> None:
                 continue
             with saas.tenant_runtime(tenant):
                 db.run("UPDATE jobs SET status='queued' WHERE status='running'")
-                backlog = db.all_("SELECT id FROM jobs WHERE status='queued' ORDER BY id")
+                backlog = db.all_("SELECT id,kind FROM jobs WHERE status='queued' ORDER BY id")
             for row in backlog:
-                _pool.submit(_execute, row["id"], tenant["slug"])
+                _submit(int(row["id"]), int(tenant["id"]), str(row["kind"]))
             total += len(backlog)
         if total:
             log.info("re-queued %d tenant jobs from previous run", total)
         return
     db.run("UPDATE jobs SET status='queued' WHERE status='running'")
-    backlog = db.all_("SELECT id FROM jobs WHERE status='queued' ORDER BY id")
+    backlog = db.all_("SELECT id,kind FROM jobs WHERE status='queued' ORDER BY id")
     for row in backlog:
-        _pool.submit(_execute, row["id"])
+        _submit(int(row["id"]), None, str(row["kind"]))
     if backlog:
         log.info("re-queued %d jobs from previous run", len(backlog))
 
 
 def stop() -> None:
-    global _pool
+    global _pool, _content_pool
     if _pool:
         _pool.shutdown(wait=False, cancel_futures=True)
         _pool = None
+    if _content_pool:
+        _content_pool.shutdown(wait=False, cancel_futures=True)
+        _content_pool = None
     # Release the persistent HTTP/2 connection and provider-token cache.
     from . import apns
 

@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, claude/ios-ai-activity ]
 
 jobs:
   smoke:
@@ -37,9 +37,9 @@ jobs:
           .venv/bin/pip install --upgrade pip
           .venv/bin/pip install -r requirements.txt pytest httpx
 
-      - name: Run unit tests (fast feedback)
+      - name: Run backend tests (core smoke isolated below)
         run: |
-          .venv/bin/python -m pytest tests/ --ignore=tests/test_smoke.py -q -m unit --tb=short
+          .venv/bin/python -m pytest tests/ --ignore=tests/test_smoke.py -q --tb=short
 
       - name: Lint with ruff
         run: |
@@ -58,6 +58,39 @@ jobs:
           MISE_ADMIN_PASSWORD=test-pw \
           MISE_ENV_FILE=/nonexistent \
             .venv/bin/python -m pytest tests/test_smoke.py -q --tb=short
+
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: |
+          xcodegen --version
+          xcodegen generate
+
+      - name: Run Swift 6 simulator tests
+        working-directory: ios
+        shell: bash
+        run: |
+          set -euo pipefail
+          device_id="$(
+            xcrun simctl list devices available -j |
+              python3 -c 'import json, sys; devices = json.load(sys.stdin)["devices"]; print(next(device["udid"] for runtime in devices.values() for device in runtime if device.get("isAvailable", True) and device["name"].startswith("iPhone")))'
+          )"
+          xcodebuild test \
+            -project Mise.xcodeproj \
+            -scheme Mise \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$device_id" \
+            -derivedDataPath "$RUNNER_TEMP/MiseDerivedData" \
+            CODE_SIGNING_ALLOWED=NO
 
   # Fails the build when any pinned dependency has a published CVE (ADR 0065).
   # A separate job so an OSV/PyPI outage never blocks the test gate above; a

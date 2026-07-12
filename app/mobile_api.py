@@ -23,6 +23,7 @@ from . import (
     mobile_ai_runs_api,
     mobile_auth,
     mobile_client_delivery_api,
+    mobile_content_api,
     mobile_cull_api,
     mobile_devices_api,
     mobile_gallery_calendar_api,
@@ -568,6 +569,7 @@ def revoke_session(request: Request, session_id: str) -> Response:
 # application's single JSON/problem boundary.
 app.include_router(mobile_devices_api.router)
 app.include_router(mobile_ai_runs_api.router)
+app.include_router(mobile_content_api.router)
 app.include_router(mobile_owner_api.router)
 app.include_router(mobile_gallery_calendar_api.router)
 app.include_router(mobile_client_delivery_api.router)

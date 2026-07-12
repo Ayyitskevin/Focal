@@ -267,6 +267,41 @@ def test_caption_adapter_malformed_response_is_invalid(monkeypatch):
     assert r.output is None
 
 
+def test_caption_adapter_non_object_response_is_invalid(monkeypatch):
+    monkeypatch.setattr(caption_ai, "is_enabled", lambda: True)
+    monkeypatch.setattr(caption_ai, "draft_caption", lambda ctx: ["not", "an", "object"])
+    result = adapters.LegacyOdysseusCaptionAdapter().draft({"label": "Hero"})
+    assert result.status is ResultStatus.INVALID_RESPONSE
+    assert result.output is None
+
+
+def test_caption_adapter_preserves_typed_invalid_response(monkeypatch):
+    monkeypatch.setattr(caption_ai, "is_enabled", lambda: True)
+
+    def malformed(_ctx):
+        raise caption_ai.CaptionDraftError("AI drafting provider returned an invalid response")
+
+    monkeypatch.setattr(caption_ai, "draft_caption", malformed)
+    result = adapters.LegacyOdysseusCaptionAdapter().draft({"label": "Hero"})
+    assert result.status is ResultStatus.INVALID_RESPONSE
+    assert result.output is None
+
+
+def test_caption_adapter_preserves_pre_network_failure_signal(monkeypatch):
+    monkeypatch.setattr(caption_ai, "is_enabled", lambda: True)
+
+    def invalid_request(_ctx):
+        raise caption_ai.CaptionDraftError(
+            "AI drafting request is invalid",
+            provider_attempted=False,
+        )
+
+    monkeypatch.setattr(caption_ai, "draft_caption", invalid_request)
+    result = adapters.LegacyOdysseusCaptionAdapter().draft({"label": "Hero"})
+    assert result.status is ResultStatus.PROVIDER_ERROR
+    assert result.provider_attempted is False
+
+
 def test_caption_adapter_disabled(monkeypatch):
     monkeypatch.setattr(caption_ai, "is_enabled", lambda: False)
     r = adapters.LegacyOdysseusCaptionAdapter().draft({"label": "Hero"})

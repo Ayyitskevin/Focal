@@ -15,11 +15,16 @@ off-site backups, Telegram bot for alerts, sending mailbox.
 1. `.env` from `.env.example` with hosted production values — unique
    `MISE_SECRET_KEY` / `MISE_ADMIN_PASSWORD`, `MISE_SAAS_MODE=true`,
    `MISE_COOKIE_SECURE=true`, root domain + marketing host, Stripe live price
-   + webhook secret, mail creds, `MISE_BACKUP_RCLONE_REMOTE`.
-2. **Arm the beta gate:** set `MISE_SAAS_INVITE_CODE`. While set, signup
+   + webhook secret, mail creds, `MISE_BACKUP_RCLONE_REMOTE`,
+   `MISE_BACKUP_RCLONE_REMOTE_ENCRYPTED=true`, and the absolute
+   `MISE_RCLONE_CONFIG_PATH`.
+2. Create a least-privilege rclone `crypt` config outside the repo, make it
+   host UID/GID 10001 and mode 0400, and escrow/test the crypt password/salt
+   separately off-host. The config is mounted read-only into `backup`, never `mise`.
+3. **Arm the beta gate:** set `MISE_SAAS_INVITE_CODE`. While set, signup
    refuses without the code; going public later is unsetting this one var.
    → security checklist in `BETA-LAUNCH.md`.
-3. TLS: Cloudflare fronting per `Caddyfile.cloudflare` + Origin CA cert.
+4. TLS: Cloudflare fronting per `Caddyfile.cloudflare` + Origin CA cert.
    → ADR 0059 / `SAAS-DEPLOYMENT.md`.
 
 ## 2. Launch
@@ -28,8 +33,11 @@ off-site backups, Telegram bot for alerts, sending mailbox.
 MISE_CADDY_SITE_ADDRESS='<root>, *.<root>' bash scripts/launch-hosted-production.sh
 ```
 
-The script runs `python scripts/hosted-preflight.py` first and refuses to
-start until it reports `READY` with `0 fail`.
+The script builds both current images and runs static preflight inside the built
+image before touching the running stack. It then stops old Caddy/backup, starts
+Mise privately, waits for health/migrations, forces one encrypted backup whose
+`manifest.json` commits last, and runs runtime preflight. Only then does it start
+the backup loop and Caddy. Do not replace it with direct `docker compose up`.
 
 ## 3. Verify (all scripted or clickable, ~15 minutes)
 
@@ -43,9 +51,13 @@ start until it reports `READY` with `0 fail`.
 - [ ] Stripe **test-mode** money rehearsal (checkout → webhook → invoice
       paid) per `LAUNCH-PLAYBOOK.md` Stage 3.3, then flip to live keys.
 - [ ] Export the test studio from `/admin/billing` — the ZIP contains the DB
-      and media. Delete the test studio; its subdomain now 404s.
-- [ ] Backup sidecar heartbeat is fresh; the off-site remote shows today's
-      snapshots; the restore drill has been done once (runbook §10).
+      and media. Delete it; its subdomain now 404s, the original slug is
+      permanently retired, and a different unused slug still provisions.
+- [ ] Backup sidecar heartbeat is fresh; the off-site remote has a committed
+      `manifest.json` with `complete=true`, `failures=[]`, and matching
+      expected/captured live and parked counts; every listed regular
+      control/live/parked payload is present. Runbook §10's control + live + parked
+      quarantine drill has been completed from one generation.
 - [ ] Telegram test alert arrives (fail a login 5× on a junk gallery —
       the lockout alert should name the tenant).
 - [ ] CI on `main` is green, including `dependency-audit`.
@@ -68,8 +80,20 @@ attributes signups. Success criteria and the feedback loop live there too.
 - Day-to-day: `MISE-SOLO-STUDIO-OS-RUNBOOK.md`; weekly beta review cadence in
   `LAUNCH-PLAYBOOK.md` Stage 4.
 
-## Rollback
+## Rollback / disaster recovery
 
-The stack is one compose project on one volume: `docker compose down`,
-restore the volume from the latest snapshot (runbook §10), `docker compose
-up`. DNS and Stripe state live outside the box and survive a rebuild.
+Never restore “the latest directory” or sync a remote tree directly into `/data`.
+Stop Mise and backup, choose one manifest-committed generation, and require
+`complete=true`, `failures=[]`, matching expected/captured counts, and the exact
+same-generation control, live, and parked archives. Download DBs and the media
+mirror into quarantine; restore only control-derived `media`, `brand`, and
+`receipts` roots, reconstruct retired-path guards, then validate SQLite schema,
+foreign keys, tenant/database identities, and Stripe state before reopening.
+
+The media mirror runs after DB capture and is not a point-in-time transaction;
+use versioned `tenants-history` to reconcile changed/missing files. Restored
+native sessions/tokens are revoked, push registrations are disabled, and pending
+native deliveries/jobs are failed, so owners must log in and register for push
+again. Incident recovery may also require rotating signed-cookie secrets. Finish
+through the gated launch script and a new forced backup. Runbook §10 owns the
+complete sequence; DNS and Stripe remain external sources of truth.

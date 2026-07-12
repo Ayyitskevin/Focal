@@ -129,13 +129,29 @@ nothing until you set the relevant flag. Flags live in flow's `.env`
 > capabilities, and schema are gone; the historical ADRs (0009/0011/0012/0018–0020/0022/0023)
 > are marked Superseded.
 
-### Content / captions (Odysseus, Dionysus) — ADR 0006
+### Content / captions (Odysseus, Dionysus) — ADRs 0006, 0068
 
 - **What it does:** caption / copy drafts (Odysseus) and pack-draft provenance (Dionysus).
 - **Arm:** `MISE_PROVIDER_FACADE_CONTENT=true` routes caption drafting through the facade and
   records Dionysus pack-draft outcomes to the ledger (additive, ledger-only). Off = legacy
   behavior, no ledger rows.
 - **Bounded:** every caption is a draft requiring your approval where it's used.
+- **Native Content:** owner list/detail and manual draft saves work without AI. Optional
+  asynchronous suggestions require both `MISE_MOBILE_CONTENT_SUGGESTIONS=true` and the iOS
+  build flag; both default off. Provider output is immutable, session-bound, no-store, and
+  memory-only on iOS until an explicit version-checked save. It cannot approve, publish,
+  deliver, invoice, or charge. See
+  [`IOS-CONTENT-SUGGESTIONS-OPERATIONS.md`](IOS-CONTENT-SUGGESTIONS-OPERATIONS.md).
+- **Transport gate:** Odysseus caption calls now require direct HTTPS and reject redirects;
+  HTTP tailnet/LAN endpoints disable the existing web button. Do not arm web or native
+  drafting until runtime certificate/no-redirect checks pass staging. Web/native paid-call
+  claims with ambiguous outcomes are never automatically replayed; the web claim remains
+  blocked until an operator reconciles provider/billing state and clears the exact
+  identity/claim-bound row using the Content operations runbook. Any future replay remains
+  blocked until provider-side durable `Idempotency-Key` handling is proven.
+- **Cost boundary:** Odysseus currently reports no token/cost values to Mise. Per-tenant
+  daily quota limits requests, not total spend; configure processor/provider-account budget
+  alerts and a hard cutoff before enablement.
 
 ### Products (Aphrodite) — ADR 0021 — **foundation only, dormant**
 
@@ -305,6 +321,11 @@ arm it. The controlled cutover to `2025-09-03` (data-source model) is its own ru
 | Env var | Default | Effect |
 | --- | --- | --- |
 | `MISE_PROVIDER_FACADE_CONTENT` | `false` | Route captions through the facade + Dionysus pack provenance to the ledger |
+| `MISE_MOBILE_CONTENT_SUGGESTIONS` | `false` | Server capability + creation/worker kill switch for native caption suggestions |
+| `MISE_MOBILE_CONTENT_DAILY_LIMIT` | `10` | Per-tenant rolling-day request cap; not a global spend ceiling |
+| `MISE_MOBILE_CONTENT_CONCURRENT_LIMIT` | `1` | Per-tenant queued/running cap |
+| `MISE_MOBILE_CONTENT_SUGGESTION_TTL_HOURS` | `24` | Transient input/output retention, clamped to 1–168 hours |
+| `MISE_MOBILE_CONTENT_WORKERS` | `1` | Dedicated content-provider pool, clamped to 1–4; separate from generic jobs |
 | `MISE_CULL_UI` | `false` | Arm AI-assisted culling — the keep/cut deck **and** the client-delivery gate (one switch; see §2) |
 | `MISE_CULL_SCORER` | `false` | Arm the local keeper-scorer (deck "Re-score with local AI"); needs `MISE_VISION_CHALLENGER_URL`. Writes `argus_keeper_score` only; independent of the cutover |
 | `MISE_VISION_SHADOW` | `false` | Shadow-compare a challenger vs Argus into the ledger (needs a challenger URL) |
@@ -328,8 +349,9 @@ Provider arming (Argus / Odysseus URLs + tokens) and all other settings are in
 
 ## 6. Migrations & rollback
 
-All consolidation migrations are **additive and forward-only** — applying them with the
-feature dormant changes nothing. Run via the app's normal `db.migrate()` on boot.
+Run migrations through the app's normal `db.migrate()` on boot. Most are additive and
+dormant behind flags; the table below calls out destructive decommissioning and the red-light
+085 rollback instead of assuming every migration is forward-only.
 
 | Migration | Adds | Rollback |
 | --- | --- | --- |
@@ -337,11 +359,15 @@ feature dormant changes nothing. Run via the app's normal `db.migrate()` on boot
 | `067_validation_set.sql` | `validation_items` + `validation_scores` | `rollback/067_validation_set.sql` |
 | `075_decommission_albums_offers.sql` | **drops** `album_drafts`/`album_placements` + 13 `plutus_*` columns (decommission, ADR 0026) | `rollback/075…` (recreates the dropped schema; the features stay gone in code) |
 | `077_asset_cull_state.sql` | `assets.cull_state` + `cull_decided_at/cull_source` + index | `rollback/077…` (DROP COLUMN; SQLite ≥3.45) |
+| `085_mobile_caption_suggestions.sql` | Caption revisions/identities + web generation claim + immutable DB identity/offboarding barrier + session-bound suggestion operations | `rollback/085…` (atomic; removes its marker so `db.migrate()` can reapply the complete shape) |
 
-Each rollback is safe because the tables/columns are dormant and referenced by no money,
-invoice, or business record. Rolling a feature back is normally a **flag**, not a migration —
-reach for a rollback script only to remove the schema itself. (The album/offer migrations
-066/068/069/070 that 075 reverses are historical — their schema no longer exists.)
+Rolling a feature back is normally a **flag**, not a migration. Migration 085 is a red-light
+auth/privacy boundary: stop creation, settle jobs, take and restore-check a backup, restore
+compatible application code, then run its rollback. Its schema drops and migration-marker
+delete share one `BEGIN IMMEDIATE`; failure leaves the applied shape intact, while success
+makes the migration deliberately re-applicable. Never delete only the marker. (The
+album/offer migrations 066/068/069/070 that 075 reverses are historical — their schema no
+longer exists.)
 
 ---
 
@@ -403,34 +429,161 @@ update the relevant section and add/observe the matching ADR.*
 ## 10. Hosted backups & restore (ADR 0057)
 
 The compose `backup` sidecar runs `scripts/hosted-backup.py --loop`: every
-`MISE_BACKUP_INTERVAL_HOURS` (default 24) it takes a **consistent, integrity-checked,
-gzipped snapshot of every tenant database and the control DB** into
-`/data/backups/<stamp>/`, prunes snapshots older than `MISE_BACKUP_RETENTION_DAYS`
-(default 14), and stamps `/data/backups/.last-hosted-backup`. The hourly ops sweep
-alerts on Telegram when that marker is missing or older than
-`MISE_BACKUP_STALE_HOURS` — silence is not evidence; the marker asserts the positive.
+`MISE_BACKUP_INTERVAL_HOURS` (default 24) it uses SQLite's backup API to make a consistent
+copy of the control DB, then uses that exact control snapshot as the inventory for every
+live and parked tenant DB. Raw work stays in a whole-generation
+`/data/backups/.generation-<stamp>/` directory; per-file `.mise-staging-*` directories and
+partial gzip files never enter the remote allowlist. Verified tenant archives are written as
+`tenants/<slug>.db.gz`, parked archives as `trash/<storage-key>.db.gz`, and the control
+archive as `saas-control.db.gz`.
 
-**Local snapshots live on the same volume as the data** — they protect against
-corruption and mistakes, not disk loss. Set `MISE_BACKUP_RCLONE_REMOTE` (e.g.
-`b2:mise-backups`; configure rclone credentials in the container env) and each pass
-also syncs the snapshot dir **and the full tenant media tree** off-site. An
-unset remote reports `offsite: off`; a broken one reports `failed:*` and exits
-non-zero — never a silent no-op.
+Destination tenant copies revoke native API sessions/tokens, disable and clear push
+registrations, fail pending native push/content jobs, finish active content-usage claims,
+and scrub transient suggestion context/candidates/provider metadata. They are committed and
+`VACUUM`ed before schema, `PRAGMA quick_check`, foreign-key, and gzip validation. The live
+database is never scrubbed by the backup job.
 
-### Restore drill (practice this before you need it)
+The pass writes `manifest.json` with the generation stamp, expected live/parked identities,
+captured counts, and `failures`, then atomically renames the whole staging directory to
+`/data/backups/<stamp>/`. Here `complete=true` means the generation structure was published;
+it does **not** override a non-empty `failures` list. A restore candidate is clean only when
+`failures=[]`, `captured_live == len(expected_live)`, and
+`captured_parked == len(expected_parked)`.
 
-1. `docker compose exec backup ls /data/backups/` — pick a snapshot stamp.
-2. Restore one tenant DB:
-   `docker compose exec backup sh -c 'gunzip -c /data/backups/<stamp>/tenants/<slug>.db.gz > /data/tenants/<slug>/mise.db.restore'`
-3. Verify it opens: `python3 -c "import sqlite3;print(sqlite3.connect('/data/tenants/<slug>/mise.db.restore').execute('PRAGMA quick_check').fetchone())"` (run inside the container).
-4. Swap it in with the app stopped for that step:
-   `docker compose stop mise && mv .../mise.db.restore .../mise.db && docker compose start mise`
-   (also delete stale `mise.db-wal`/`mise.db-shm` beside it).
-5. Full-disk-loss recovery: provision a new host, `rclone sync <remote>/tenants /data/tenants`
-   and `rclone sync <remote>/backups /data/backups`, restore each tenant DB from the newest
-   snapshot as above (the live DB files in the media sync are NOT crash-consistent — always
-   restore DBs from snapshots), then bring the stack up and run the preflight.
-6. Manual one-off pass anytime: `docker compose exec backup python scripts/hosted-backup.py`.
+Each hosted pass holds a non-blocking exclusive `.hosted-backup.lock`; an overlapping
+timer/manual pass fails closed instead of snapshotting, pruning, or syncing concurrently.
+The single-tenant shell path uses its own `.backup.lock` with the same rule. A lock-contention
+exit is not a fresh backup and must remain visible to monitoring.
+
+Live tenant snapshots are under `tenants/`; sanitized parked-studio snapshots are under
+`trash/`. The pass prunes local snapshots older than `MISE_BACKUP_RETENTION_DAYS` (default
+14), stamps `/data/backups/.last-hosted-backup` only after the complete evidence update, and
+writes separate tenant/off-site failure markers. A successful off-site pass writes the
+committed stamp into `.last-hosted-backup-offsite-success`. The hourly ops sweep alerts on
+missing, stale, partial, or failed evidence. Silence is not evidence.
+
+### Encrypted off-site configuration and commit order
+
+**Local snapshots share the data volume** — they protect against corruption and mistakes,
+not disk loss. Create a least-privilege object-store remote plus a named rclone `crypt`
+remote. Store its config outside the repo (for example
+`/opt/mise/secrets/rclone.conf`), set host ownership to UID/GID `10001:10001` and mode
+`0400`, point `MISE_RCLONE_CONFIG_PATH` at that regular file, set
+`MISE_BACKUP_RCLONE_REMOTE=<crypt-name>:` and
+`MISE_BACKUP_RCLONE_REMOTE_ENCRYPTED=true`, and escrow/test the crypt password/salt
+separately off-host. The compose mount is read-only and backup-only; never put config or
+crypt-key contents in `.env` or expose them to the web container.
+
+One off-site pass is deliberately ordered:
+
+1. `rclone sync` only the exact control-derived tenant roots and only their durable
+   `media/`, `brand/`, and `receipts/` children. Live SQLite files and companions,
+   `tmp/`, generated `zips/`, and orphan roots are denied. Replaced/deleted media moves to
+   `tenants-history/<stamp>/`.
+2. Copy only the current generation payload to `backups/<stamp>/`, explicitly excluding
+   `manifest.json`.
+3. Copy that generation's `manifest.json` to its final remote path last. Its presence is
+   the remote commit record; a remote generation without it is incomplete and must never
+   be restored.
+
+An unset remote reports `offsite: off`; a missing config or broken sync reports `failed:*`
+and exits non-zero. Remote DB generations, media history, and objects uploaded by older
+versions are **not automatically pruned**. Local retention and optional local deleted-studio
+purge do not claim remote erasure. Configure a reviewed remote lifecycle, inventory current
+and history for raw DB/WAL/SHM/journal files, export ZIPs, generated `zips/`, partial work,
+and unsanitized archives, and obtain human approval before deleting any of it.
+
+### The DB/media time boundary
+
+Each SQLite archive is point-in-time consistent, but the media mirror runs after DB capture
+and is not part of the same transaction. Remote `tenants/` is the latest successful media
+mirror, while `tenants-history/<stamp>/` contains objects displaced during that sync—not a
+self-contained snapshot. Prefer the newest clean generation and reconcile current/history
+against project records when files changed around the backup window. Never describe a
+generation plus media as an atomic point-in-time image.
+
+### Select a restore generation (never “the newest directory”)
+
+Before any drill or recovery, copy candidate material into a quarantine path, never directly
+into `/data/tenants`. Accept exactly one stamp only after all of these checks pass:
+
+- `format_version == 1`, `complete == true`, and manifest `stamp` equals the directory;
+- `control == "saas-control.db.gz"`, `failures == []`, and expected identities are safe,
+  unique direct path names;
+- captured live/parked counts equal their expected-list lengths, with exactly the matching
+  regular, non-symlink archives under `tenants/` and `trash/`;
+- every decompressed DB passes schema/migration checks, `PRAGMA quick_check`, and
+  `PRAGMA foreign_key_check`; and
+- the control snapshot maps each live slug and parked storage key to the intended immutable
+  tenant id. Do not combine a control DB from one stamp with tenant DBs from another.
+
+### Non-destructive restore drill
+
+1. Select one clean local or remote manifest generation using the checks above.
+2. Restore its control DB plus at least one listed live DB and one listed parked DB into a
+   throwaway quarantine directory. Never overwrite a running database for a drill.
+3. Run the full SQLite/schema/identity checks and verify the restored live tenant has no
+   unrevoked native API session/token, no active push device or token ciphertext, and no
+   queued/running native push/content job. In-flight suggestions must be content-free
+   `failed/session_ended` and never resume.
+4. Exercise the crypt-key escrow on a clean machine periodically; a config file without its
+   separately escrowed key is not a restorable backup.
+
+### Full disk-loss recovery
+
+1. Provision the new host and restore the reviewed rclone crypt config/key. Keep Caddy,
+   Mise, and the backup loop stopped.
+2. Download only one validated `backups/<stamp>/` generation into quarantine. Restore its
+   `saas-control.db.gz`, every `expected_live` archive, and every `expected_parked` archive
+   from that same stamp. Preserve the failed host/volume separately if it still exists.
+3. Download remote `tenants/` and any needed `tenants-history/` material into a separate
+   media quarantine. From the validated control inventory, install only
+   `<live-slug>/{media,brand,receipts}` and
+   `.trash/<parked-key>/{media,brand,receipts}`. Reject raw databases, scratch/export ZIPs,
+   orphan roots, symlinks, and anything not named by that control snapshot.
+4. Install live DBs as `/data/tenants/<slug>/mise.db`, parked DBs as
+   `/data/tenants/.trash/<storage-key>/mise.db`, and the same-generation control DB as
+   `/data/saas-control.db`. With services stopped, recreate and verify each deleted
+   tenant's read-only `.mise-retired-path` marker and original-slug symlink guard. Permanent
+   `retired_tenant_slugs` reservations remain intact.
+5. Re-run all DB/schema/foreign-key and database-identity checks. Reconcile each platform
+   subscription and cancellation-outbox row against Stripe before granting access; restored
+   billing state is not newer than Stripe. Re-verify custom domains.
+6. Finish through `scripts/launch-hosted-production.sh`. It starts Mise privately, runs
+   migrations/health, forces a new encrypted manifest commit, passes runtime preflight, and
+   only then opens Caddy. Owners must log in again and re-register for push. For compromise
+   recovery, also rotate `MISE_SECRET_KEY`/passwords as directed in `docs/SECURITY.md`;
+   database sanitization does not invalidate every signed browser cookie.
+
+Manual one-off pass on a healthy stack:
+
+```sh
+docker compose stop backup
+docker compose run --rm --no-deps --entrypoint python backup scripts/hosted-backup.py
+docker compose start backup
+```
+
+Restart the backup service even when the one-off reports failure, then investigate the
+failure marker/log before treating freshness as restored. Never `exec` a second pass
+inside the running loop; the shared lock correctly rejects that overlap.
+
+Deletion permanently records the original slug in `retired_tenant_slugs` before parking;
+routine trash/backup retention never removes that reservation. Secure scrub/`VACUUM` runs
+off the async request loop, but can hold SQLite locks, take time, and need roughly another
+database-sized working copy plus temp/filesystem headroom. Check capacity first; failure must
+abort rather than treat a partial park as success.
+
+Restoring one deleted studio requires the same-generation control and parked archive plus
+its quarantined durable media. Stop app/backup, preserve current state, identify the
+immutable tenant id, and choose a new human-approved slug/path that is neither active nor
+retired. The original slug remains permanently retired—do not delete, transfer, or bypass
+that reservation. Reconcile Stripe first, restore the matching parked identity, rebuild the
+retired-path guard as appropriate for the retained tombstone, and verify
+`PRAGMA quick_check`, foreign keys, and `mobile_runtime_state` identity before a final
+`BEGIN IMMEDIATE` clears `offboarding`. Native API sessions/tokens stay revoked, push stays
+disabled until re-registration, custom domains require re-verification, and the owner must
+sign in again. If any assertion fails, keep the app stopped and admission closed. The
+complete fail-closed sequence is in the native Content operations runbook.
 
 ## 11. Hosted operations — the /admin/saas cockpit
 

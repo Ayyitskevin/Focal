@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import re
+import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -18,6 +20,7 @@ BAD_SECRET_VALUES = {
     "saas-smoke-secret",
     "unused-in-saas-mode",
 }
+_BACKUP_GENERATION_RE = re.compile(r"^[0-9]{8}-[0-9]{6}-[0-9]{6}$")
 
 
 def _check(key: str, label: str, status: str, detail: str, fix: str = "") -> dict:
@@ -60,7 +63,79 @@ def _writable_dir(path: Path, *, create: bool, probe: bool) -> tuple[bool, str]:
         return False, f"{path} is not writable: {exc}"
 
 
-def check_readiness(*, project_root: Path | None = None, write_probes: bool = False) -> dict:
+def _safe_inventory_names(value: object) -> list[str] | None:
+    if not isinstance(value, list):
+        return None
+    names: list[str] = []
+    for item in value:
+        if (
+            not isinstance(item, str)
+            or not item
+            or len(item) > 160
+            or item in {".", ".."}
+            or "/" in item
+            or "\\" in item
+            or "\x00" in item
+            or Path(item).name != item
+        ):
+            return None
+        names.append(item)
+    if len(names) != len(set(names)):
+        return None
+    return names
+
+
+def _runtime_generation_evidence(
+    backups_dir: Path,
+    generation: str,
+) -> tuple[bool, str]:
+    if not _BACKUP_GENERATION_RE.fullmatch(generation):
+        return False, "off-site success marker has an invalid generation name"
+    generation_dir = backups_dir / generation
+    manifest_path = generation_dir / "manifest.json"
+    if (
+        generation_dir.is_symlink()
+        or not generation_dir.is_dir()
+        or manifest_path.is_symlink()
+        or not manifest_path.is_file()
+    ):
+        return False, "committed generation or manifest is missing or unsafe"
+    try:
+        manifest = json.loads(manifest_path.read_text())
+    except (OSError, ValueError):
+        return False, "committed generation manifest is unreadable"
+    expected_live = _safe_inventory_names(manifest.get("expected_live"))
+    expected_parked = _safe_inventory_names(manifest.get("expected_parked"))
+    captured_live = manifest.get("captured_live")
+    captured_parked = manifest.get("captured_parked")
+    if (
+        manifest.get("format_version") != 1
+        or manifest.get("complete") is not True
+        or manifest.get("stamp") != generation
+        or manifest.get("control") != "saas-control.db.gz"
+        or manifest.get("failures") != []
+        or expected_live is None
+        or expected_parked is None
+        or type(captured_live) is not int
+        or type(captured_parked) is not int
+        or captured_live != len(expected_live)
+        or captured_parked != len(expected_parked)
+    ):
+        return False, "manifest inventory is incomplete or count-mismatched"
+    required = [generation_dir / "saas-control.db.gz"]
+    required.extend(generation_dir / "tenants" / f"{name}.db.gz" for name in expected_live)
+    required.extend(generation_dir / "trash" / f"{name}.db.gz" for name in expected_parked)
+    if any(path.is_symlink() or not path.is_file() for path in required):
+        return False, "manifest inventory is missing one or more database payloads"
+    return True, "manifest inventory and payload counts match"
+
+
+def check_readiness(
+    *,
+    project_root: Path | None = None,
+    write_probes: bool = False,
+    require_runtime_evidence: bool = True,
+) -> dict:
     """Return a structured hosted-launch readiness report.
 
     ``write_probes`` creates missing data directories and writes short temp files.
@@ -229,9 +304,14 @@ def check_readiness(*, project_root: Path | None = None, write_probes: bool = Fa
             )
         )
 
-    control_ok, control_detail = _writable_dir(
-        Path(config.SAAS_CONTROL_DB_PATH).parent, create=write_probes, probe=write_probes
-    )
+    if require_runtime_evidence:
+        control_ok, control_detail = _writable_dir(
+            Path(config.SAAS_CONTROL_DB_PATH).parent,
+            create=write_probes,
+            probe=write_probes,
+        )
+    else:
+        control_ok, control_detail = True, "deferred to the data-mounted runtime gate"
     checks.append(
         _check(
             "control_db",
@@ -241,9 +321,14 @@ def check_readiness(*, project_root: Path | None = None, write_probes: bool = Fa
             "Mount a writable directory for MISE_SAAS_CONTROL_DB_PATH.",
         )
     )
-    tenant_ok, tenant_detail = _writable_dir(
-        Path(config.SAAS_TENANT_DATA_DIR), create=write_probes, probe=write_probes
-    )
+    if require_runtime_evidence:
+        tenant_ok, tenant_detail = _writable_dir(
+            Path(config.SAAS_TENANT_DATA_DIR),
+            create=write_probes,
+            probe=write_probes,
+        )
+    else:
+        tenant_ok, tenant_detail = True, "deferred to the data-mounted runtime gate"
     checks.append(
         _check(
             "tenant_data",
@@ -253,6 +338,74 @@ def check_readiness(*, project_root: Path | None = None, write_probes: bool = Fa
             "Mount a writable MISE_SAAS_TENANT_DATA_DIR volume.",
         )
     )
+
+    if config.SAAS_MODE:
+        from .hosted_backup import (
+            FAILURE_MARKER_NAME,
+            OFFSITE_FAILURE_MARKER_NAME,
+            OFFSITE_SUCCESS_MARKER_NAME,
+        )
+
+        backups_dir = Path(config.DATA_DIR) / "backups"
+        success_marker = backups_dir / OFFSITE_SUCCESS_MARKER_NAME
+        failure_marker = backups_dir / OFFSITE_FAILURE_MARKER_NAME
+        tenant_failure_marker = backups_dir / FAILURE_MARKER_NAME
+        static_ready = bool(config.BACKUP_RCLONE_REMOTE and config.BACKUP_RCLONE_REMOTE_ENCRYPTED)
+        evidence_ready = False
+        evidence_detail = ""
+        age_hours: float | None = None
+        generation = ""
+        if static_ready and success_marker.is_file() and not success_marker.is_symlink():
+            generation = success_marker.read_text().strip()
+            age_hours = (time.time() - success_marker.stat().st_mtime) / 3600
+            generation_ready, evidence_detail = _runtime_generation_evidence(
+                backups_dir,
+                generation,
+            )
+            evidence_ready = bool(
+                0 <= age_hours <= config.BACKUP_STALE_HOURS
+                and not (failure_marker.exists() or failure_marker.is_symlink())
+                and not (tenant_failure_marker.exists() or tenant_failure_marker.is_symlink())
+                and generation_ready
+            )
+        remote_ready = static_ready and (evidence_ready or not require_runtime_evidence)
+        if evidence_ready and age_hours is not None:
+            remote_detail = (
+                f"encrypted off-site sync to {config.BACKUP_RCLONE_REMOTE} "
+                f"committed complete generation {generation} {age_hours:.1f}h ago"
+            )
+        elif static_ready and not require_runtime_evidence:
+            remote_detail = (
+                "encrypted remote is configured; runtime sync proof is deferred "
+                "to the post-start container gate"
+            )
+        elif not config.BACKUP_RCLONE_REMOTE:
+            remote_detail = "MISE_BACKUP_RCLONE_REMOTE is missing"
+        elif not config.BACKUP_RCLONE_REMOTE_ENCRYPTED:
+            remote_detail = "encrypted-remote acknowledgement is missing"
+        elif failure_marker.exists() or failure_marker.is_symlink():
+            remote_detail = "latest off-site sync is pending or failed"
+        elif tenant_failure_marker.exists() or tenant_failure_marker.is_symlink():
+            remote_detail = "latest generation skipped one or more tenant databases"
+        elif not success_marker.is_file() or success_marker.is_symlink():
+            remote_detail = "successful off-site sync evidence is missing or unsafe"
+        elif age_hours is None or not 0 <= age_hours <= config.BACKUP_STALE_HOURS:
+            remote_detail = "successful off-site sync evidence is stale"
+        elif evidence_detail:
+            remote_detail = evidence_detail
+        else:
+            remote_detail = "successful off-site sync evidence is stale"
+        checks.append(
+            _check(
+                "offsite_backup",
+                "Encrypted off-site backup",
+                "pass" if remote_ready else "fail",
+                remote_detail,
+                "Mount a backup-only rclone crypt config, set the remote + encrypted "
+                "acknowledgement, force a pass, and restore-check one complete "
+                "manifest generation before launch.",
+            )
+        )
 
     for filename in ("Dockerfile", "docker-compose.yml", "Caddyfile"):
         exists = (project_root / filename).exists()

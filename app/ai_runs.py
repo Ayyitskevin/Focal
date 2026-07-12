@@ -14,6 +14,7 @@ caller decides whether to act on an ``OK`` result; this just logs that the call 
 
 from __future__ import annotations
 
+import sqlite3
 from typing import TYPE_CHECKING
 
 from . import db
@@ -29,6 +30,7 @@ def record(
     subject_id: int | None = None,
     correlation_id: str | None = None,
     idempotency_key: str | None = None,
+    connection: sqlite3.Connection | None = None,
 ) -> int:
     """Append one provenance row for ``result``; returns the new row id.
 
@@ -36,24 +38,31 @@ def record(
     ``("retainer_caption", 42)``). All values are bound parameters.
     """
     p = result.provenance()
-    return db.run(
-        """INSERT INTO ai_runs
+    sql = """INSERT INTO ai_runs
                (capability, provider, status, review, model, latency_ms, cost_usd,
                 tokens, error, subject_type, subject_id, correlation_id, idempotency_key)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (
-            p["capability"],
-            p["provider"],
-            p["status"],
-            p["review"],
-            p["model"],
-            p["latency_ms"],
-            p["cost_usd"],
-            p["tokens"],
-            p["error"],
-            subject_type,
-            subject_id,
-            correlation_id,
-            idempotency_key,
-        ),
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+    params = (
+        p["capability"],
+        p["provider"],
+        p["status"],
+        p["review"],
+        p["model"],
+        p["latency_ms"],
+        p["cost_usd"],
+        p["tokens"],
+        p["error"],
+        subject_type,
+        subject_id,
+        correlation_id,
+        idempotency_key,
+    )
+    if connection is not None:
+        row_id = connection.execute(sql, params).lastrowid
+        if row_id is None:
+            raise RuntimeError("AI provenance insert did not return an id")
+        return int(row_id)
+    return db.run(
+        sql,
+        params,
     )

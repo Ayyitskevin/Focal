@@ -4,6 +4,7 @@ struct AppConfiguration: Sendable {
     let serverBaseURL: URL
     let clientVersion: String
     let apnsEnvironment: APNsEnvironment
+    let contentSuggestionsEnabled: Bool
 
     init(bundle: Bundle = .main) throws {
         guard
@@ -61,6 +62,19 @@ struct AppConfiguration: Sendable {
             apnsEnvironment = .production
         default:
             throw ConfigurationError.invalidAPNsEnvironment
+        }
+
+        // This local kill switch intentionally fails closed. The server's
+        // per-workspace capability is checked separately before controls appear.
+        contentSuggestionsEnabled = Self.enabledFeatureFlag(
+            bundle.object(forInfoDictionaryKey: "MiseContentSuggestionsEnabled")
+        )
+    }
+
+    static func enabledFeatureFlag(_ value: Any?) -> Bool {
+        switch String(describing: value ?? "").lowercased() {
+        case "1", "true", "yes": true
+        default: false
         }
     }
 

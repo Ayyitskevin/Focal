@@ -16,6 +16,10 @@ final class AppRouteTests: XCTestCase {
         XCTAssertEqual(parser.parsePath("/app/projects/42"), .project(42))
         XCTAssertEqual(parser.parsePath("/app/bookings/9"), .booking(9))
         XCTAssertEqual(
+            parser.parsePath("/app/content/captions/81"),
+            .contentCaption(81)
+        )
+        XCTAssertEqual(
             parser.parsePath("/app/galleries/7/assets/11"),
             .gallery(id: 7, assetID: 11)
         )
@@ -36,6 +40,9 @@ final class AppRouteTests: XCTestCase {
             "https://north.mise.example/app/bookings/0",
             "https://north.mise.example/app/bookings/-1",
             "https://north.mise.example/app/bookings/9223372036854775808",
+            "https://north.mise.example/app/content/captions/0",
+            "https://north.mise.example/app/content/captions/-1",
+            "https://north.mise.example/app/content/captions/1/extra",
         ]
         for value in invalid {
             XCTAssertNil(parser.parseUniversalLink(URL(string: value)!), value)

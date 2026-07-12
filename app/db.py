@@ -34,14 +34,49 @@ def reset_request_db_path(token) -> None:
 
 
 def connect(path: Path | None = None) -> sqlite3.Connection:
+    runtime_path = _DB_PATH_CTX.get()
     db_path = Path(path) if path is not None else current_db_path()
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(db_path, timeout=30)
+    if path is None and runtime_path is not None:
+        # A hosted tenant runtime is provisioned before its ContextVar is set.
+        # Every later connection must open that existing DB fail-closed: studio
+        # offboarding can move the directory while an old request/job is alive,
+        # and sqlite's normal connect would silently recreate an orphan database.
+        con = sqlite3.connect(
+            f"{db_path.resolve().as_uri()}?mode=rw",
+            uri=True,
+            timeout=30,
+        )
+    else:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        con = sqlite3.connect(db_path, timeout=30)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
+    con.execute("PRAGMA secure_delete=ON")
     con.execute("PRAGMA foreign_keys=ON")
     con.execute("PRAGMA busy_timeout=30000")
     return con
+
+
+def checkpoint_truncate(path: Path | None = None) -> bool:
+    """Best-effort WAL truncation without ever creating a missing database."""
+
+    db_path = (Path(path) if path is not None else current_db_path()).resolve()
+    try:
+        con = sqlite3.connect(
+            f"{db_path.as_uri()}?mode=rw",
+            uri=True,
+            timeout=1,
+        )
+    except sqlite3.Error:
+        return False
+    try:
+        con.execute("PRAGMA busy_timeout=1000")
+        row = con.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        return bool(row is not None and int(row[0]) == 0)
+    except sqlite3.Error:
+        return False
+    finally:
+        con.close()
 
 
 def migrate(path: Path | None = None) -> None:

@@ -13,7 +13,7 @@ from datetime import timedelta
 
 import pytest
 
-from app import config, features, passwords, saas, security
+from app import config, features, saas, security
 
 pytestmark = pytest.mark.unit
 
@@ -194,7 +194,7 @@ def test_full_hosted_lifecycle_rehearsal(tmp_path, monkeypatch):
     assert "trial_period_days" not in checkout_calls[0]["subscription_data"]
 
     # 7. Ownership promises: export the whole studio, then delete it —
-    #    delete cancels billing and frees the address (ADR 0051).
+    #    delete cancels billing and permanently retires the address (ADR 0051).
     saas.ensure_tenant_database(tenant)
     zip_path = saas.build_studio_export(saas.tenant_by_slug("rehearsal"))
     try:
@@ -208,8 +208,8 @@ def test_full_hosted_lifecycle_rehearsal(tmp_path, monkeypatch):
     tombstone = saas.tenant_by_id(tenant["id"])
     assert tombstone["deleted_at"] and tombstone["plan_status"] == "canceled"
 
-    # 8. The address is genuinely reusable: a new signup can claim the freed slug,
-    #    and the old admin cookie does NOT work against the new studio (ADR 0048/0051).
+    # 8. The retired address is permanently reserved. This prevents any request or
+    #    job admitted before parking from crossing into a replacement data path.
     again = asyncio.run(
         saas.start_trial(
             _request("/start-trial", "mise.test", method="POST"),
@@ -220,10 +220,8 @@ def test_full_hosted_lifecycle_rehearsal(tmp_path, monkeypatch):
             invite_code="beta-rehearsal",
         )
     )
-    assert again.status_code == 303
-    reborn = saas.tenant_by_slug("rehearsal")
-    assert reborn["id"] != tenant["id"]
-    with saas.tenant_runtime("rehearsal"):
-        stale = _request("/admin/account", "rehearsal.mise.test", cookie=cookie)
-        assert security.is_admin(stale) is False  # id-bound principal rejects the reclaim
-        assert passwords.verify_password("secret456", reborn["admin_password_hash"])
+    assert again.status_code == 400
+    assert saas.tenant_by_slug("rehearsal") is None
+    with pytest.raises(RuntimeError, match="tenant not found"):
+        with saas.tenant_runtime("rehearsal"):
+            pytest.fail("a retired slug must never regain a tenant runtime")

@@ -725,6 +725,123 @@ struct AIActivityFeed: Codable, Hashable, Sendable {
     let hasOlderRuns: Bool
 }
 
+struct ContentCaptionStatus: APIStringValue {
+    let rawValue: String
+    init(rawValue: String) { self.rawValue = rawValue }
+
+    static let draft = Self(rawValue: "draft")
+    static let approved = Self(rawValue: "approved")
+}
+
+struct ContentCaptionSummary: Codable, Hashable, Sendable, Identifiable {
+    let id: Int64
+    let versionID: String
+    let revision: Int64
+    let clientDisplayName: String
+    let planTitle: String
+    let period: String
+    let label: String
+    let bodyPreview: String
+    let status: ContentCaptionStatus
+    let aiAssisted: Bool
+    let updatedAt: Date
+}
+
+/// The wire page returned by `/api/v1/content/captions`.
+struct ContentCaptionPage: Codable, Hashable, Sendable {
+    let items: [ContentCaptionSummary]
+    let nextCursor: String?
+    let hasMore: Bool
+    let suggestionsEnabled: Bool
+}
+
+/// The bounded, normalized feed that is safe to persist for offline presentation.
+struct ContentCaptionFeed: Codable, Hashable, Sendable {
+    let captions: [ContentCaptionSummary]
+    let hasOlderCaptions: Bool
+    let suggestionsEnabled: Bool
+}
+
+struct ContentCaptionDetail: Codable, Hashable, Sendable, Identifiable {
+    let id: Int64
+    let versionID: String
+    let revision: Int64
+    let clientDisplayName: String
+    let planID: Int64
+    let planTitle: String
+    let period: String
+    let label: String
+    let body: String
+    let note: String?
+    let status: ContentCaptionStatus
+    let aiAssisted: Bool
+    let aiDraftedAt: Date?
+    let suggestionsEnabled: Bool
+    let createdAt: Date
+    let updatedAt: Date
+}
+
+struct CaptionSuggestionRequest: Codable, Hashable, Sendable {
+    let instruction: String?
+}
+
+struct CaptionBodyUpdate: Codable, Hashable, Sendable {
+    let body: String
+    let suggestionID: UUID?
+}
+
+struct CaptionSuggestionState: APIStringValue {
+    let rawValue: String
+    init(rawValue: String) { self.rawValue = rawValue }
+
+    static let queued = Self(rawValue: "queued")
+    static let running = Self(rawValue: "running")
+    static let ready = Self(rawValue: "ready")
+    static let failed = Self(rawValue: "failed")
+    static let applied = Self(rawValue: "applied")
+    static let expired = Self(rawValue: "expired")
+}
+
+struct CaptionSuggestionFailure: APIStringValue {
+    let rawValue: String
+    init(rawValue: String) { self.rawValue = rawValue }
+
+    static let disabled = Self(rawValue: "disabled")
+    static let providerError = Self(rawValue: "provider_error")
+    static let invalidResponse = Self(rawValue: "invalid_response")
+    static let sessionEnded = Self(rawValue: "session_ended")
+    static let unknownOutcome = Self(rawValue: "unknown_outcome")
+    static let `internal` = Self(rawValue: "internal")
+}
+
+/// A short-lived server operation. `candidateText` is intentionally never put in
+/// `TenantJSONCache`; only an in-flight recovery handle may cross app launches.
+struct CaptionSuggestion: Codable, Hashable, Sendable, Identifiable {
+    let id: UUID
+    let captionID: Int64
+    let state: CaptionSuggestionState
+    let review: AIReviewRequirement
+    let candidateText: String?
+    let failureReason: CaptionSuggestionFailure?
+    let baseRevision: Int64
+    let stale: Bool
+    let createdAt: Date
+    let expiresAt: Date
+    let completedAt: Date?
+}
+
+/// A detail read paired with the strong validator required for generation and save.
+struct ContentCaptionSnapshot: Sendable {
+    let value: ContentCaptionDetail
+    let etag: String
+    let storedAt: Date
+    let source: ResourceSnapshotSource
+
+    func isStale(after interval: TimeInterval, now: Date = Date()) -> Bool {
+        now.timeIntervalSince(storedAt) > interval
+    }
+}
+
 struct CullItem: Codable, Hashable, Sendable, Identifiable {
     var id: Int64 { assetID }
 

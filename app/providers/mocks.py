@@ -74,7 +74,12 @@ class MockCaptionAdapter:
     def is_enabled(self) -> bool:
         return self.enabled
 
-    def draft(self, ctx: dict) -> ProviderResult:
+    def draft(
+        self,
+        ctx: dict,
+        *,
+        idempotency_key: str | None = None,
+    ) -> ProviderResult:
         if not self.enabled:
             return ProviderResult.disabled(self.capability, self.name)
         label = (ctx.get("label") or "draft").strip()
@@ -115,5 +120,10 @@ class FailingAdapter:
     def analyze_gallery(self, gallery_id: int, *, skip_dedup: bool = False) -> ProviderResult:
         return self._fail()
 
-    def draft(self, ctx: dict) -> ProviderResult:
+    def draft(
+        self,
+        ctx: dict,
+        *,
+        idempotency_key: str | None = None,
+    ) -> ProviderResult:
         return self._fail()

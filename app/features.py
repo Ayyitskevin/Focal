@@ -7,6 +7,8 @@ Existing per-module is_enabled/configured() are kept for now but callers
 should prefer features.* for consistency. Modules can delegate to here.
 """
 
+import urllib.parse
+
 from . import config
 
 
@@ -78,7 +80,20 @@ def stripe_webhook_enabled() -> bool:
 
 
 def odysseus_caption_enabled() -> bool:
-    return bool(config.ODYSSEUS_CAPTION_URL and config.ODYSSEUS_CAPTION_TOKEN)
+    raw = str(config.ODYSSEUS_CAPTION_URL or "").strip()
+    try:
+        parsed = urllib.parse.urlsplit(raw)
+        _ = parsed.port
+    except (TypeError, ValueError):
+        return False
+    return bool(
+        config.ODYSSEUS_CAPTION_TOKEN
+        and parsed.scheme.lower() == "https"
+        and parsed.hostname
+        and parsed.username is None
+        and parsed.password is None
+        and not parsed.fragment
+    )
 
 
 def content_provider_facade_enabled() -> bool:

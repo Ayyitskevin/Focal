@@ -31,11 +31,15 @@ def test_stripe_enabled_false_when_empty():
 @pytest.mark.unit
 def test_odysseus_caption_enabled_requires_both():
     with patch("app.features.config") as mock_cfg:
-        mock_cfg.ODYSSEUS_CAPTION_URL = "http://x"
+        mock_cfg.ODYSSEUS_CAPTION_URL = "https://captions.internal.test/draft"
         mock_cfg.ODYSSEUS_CAPTION_TOKEN = "t"
         assert features.odysseus_caption_enabled() is True
 
         mock_cfg.ODYSSEUS_CAPTION_TOKEN = ""
+        assert features.odysseus_caption_enabled() is False
+
+        mock_cfg.ODYSSEUS_CAPTION_TOKEN = "t"
+        mock_cfg.ODYSSEUS_CAPTION_URL = "http://captions.internal.test/draft"
         assert features.odysseus_caption_enabled() is False
 
 

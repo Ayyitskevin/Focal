@@ -72,7 +72,7 @@ def test_exit_reason_survives_the_tombstone_and_pings(tmp_path, monkeypatch):
 
     resp = _delete(tenant, "Loved it but my clients are all on Pixieset already")
     assert resp.status_code == 303
-    assert saas.tenant_by_slug("alpha") is None  # tombstoned: slug freed
+    assert saas.tenant_by_slug("alpha") is None  # unroutable; slug remains retired
 
     rows = saas.recent_tenant_feedback()
     assert len(rows) == 1

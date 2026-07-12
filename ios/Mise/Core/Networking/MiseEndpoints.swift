@@ -491,6 +491,75 @@ enum MiseEndpoints {
         }
     }
 
+    enum Content {
+        static func captions(
+            cursor: String? = nil,
+            limit: Int = 100,
+            etag: String? = nil
+        ) -> APIEndpoint<ContentCaptionPage> {
+            APIEndpoint(
+                method: .get,
+                path: "/api/v1/content/captions",
+                queryItems: [
+                    APIQueryItem(name: "cursor", value: cursor),
+                    APIQueryItem(name: "limit", value: String(min(max(limit, 1), 100))),
+                ],
+                etag: etag
+            )
+        }
+
+        static func detail(
+            id: Int64,
+            etag: String? = nil
+        ) -> APIEndpoint<ContentCaptionDetail> {
+            APIEndpoint(
+                method: .get,
+                path: "/api/v1/content/captions/\(id)",
+                etag: etag
+            )
+        }
+
+        static func createSuggestion(
+            captionID: Int64,
+            body: CaptionSuggestionRequest,
+            etag: String,
+            idempotencyKey: UUID
+        ) throws -> APIEndpoint<CaptionSuggestion> {
+            try .json(
+                method: .post,
+                path: "/api/v1/content/captions/\(captionID)/suggestions",
+                body: body,
+                headers: ["If-Match": etag],
+                idempotencyKey: idempotencyKey
+            )
+        }
+
+        static func suggestion(
+            captionID: Int64,
+            suggestionID: UUID
+        ) -> APIEndpoint<CaptionSuggestion> {
+            APIEndpoint(
+                method: .get,
+                path: "/api/v1/content/captions/\(captionID)/suggestions/\(suggestionID.uuidString.lowercased())"
+            )
+        }
+
+        static func update(
+            captionID: Int64,
+            body: CaptionBodyUpdate,
+            etag: String,
+            idempotencyKey: UUID
+        ) throws -> APIEndpoint<ContentCaptionDetail> {
+            try .json(
+                method: .patch,
+                path: "/api/v1/content/captions/\(captionID)",
+                body: body,
+                headers: ["If-Match": etag],
+                idempotencyKey: idempotencyKey
+            )
+        }
+    }
+
     enum AI {
         static func runs(
             cursor: String? = nil,

@@ -302,7 +302,7 @@
           {% endfor %}
         </select>
       </form>
-      {% if ai_caption_enabled %}
+      {% if ai_caption_enabled and c.status == 'draft' %}
       {% if human_body %}
       <form method="post" action="/admin/studio/recurring/{{ d.id }}/captions/{{ c.id }}/draft"
             class="inline" onsubmit="return confirm('Replace your edited caption with a fresh AI draft? Your current text is overwritten (the AI keeps no copy of it).')">

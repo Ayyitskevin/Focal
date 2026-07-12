@@ -10,6 +10,7 @@
 """
 
 import asyncio
+import json
 import sqlite3
 from pathlib import Path
 
@@ -57,9 +58,24 @@ def test_portal_pin_bucket_does_not_collide_with_inquiry_sentinels():
 # ───────────────────────────── #8 versioned off-site sync ─────────────────────────────
 
 
-def test_offsite_sync_versions_the_mirror_with_backup_dir(tmp_path, monkeypatch):
+def test_offsite_sync_versions_media_and_commits_generation_manifest_last(
+    tmp_path,
+    monkeypatch,
+):
     calls: list[list[str]] = []
     monkeypatch.setattr(hosted_backup.shutil, "which", lambda _: "/usr/bin/rclone")
+    generation = "20260703-000000-000001"
+    generation_dir = tmp_path / "backups" / generation
+    generation_dir.mkdir(parents=True)
+    (generation_dir / hosted_backup.MANIFEST_NAME).write_text(
+        json.dumps(
+            {
+                "format_version": 1,
+                "complete": True,
+                "stamp": generation,
+            }
+        )
+    )
 
     def fake_run(argv, **kw):
         calls.append(argv)
@@ -71,17 +87,104 @@ def test_offsite_sync_versions_the_mirror_with_backup_dir(tmp_path, monkeypatch)
 
     monkeypatch.setattr(hosted_backup.subprocess, "run", fake_run)
     status = hosted_backup._offsite_sync(
-        "b2:mise", tmp_path / "backups", tmp_path / "tenants", "20260703-000000"
+        "b2:mise",
+        tmp_path / "backups",
+        tmp_path / "tenants",
+        generation,
+        {"alpha", ".trash/gone"},
     )
     assert status == "synced"
     # Both trees synced, each with a timestamped --backup-dir so overwritten/deleted
     # remote files are MOVED to history, never destroyed.
-    subs = {argv[3].rsplit("/", 1)[-1]: argv for argv in calls}
-    assert set(subs) == {"backups", "tenants"}
-    for sub, argv in subs.items():
-        assert "--backup-dir" in argv
-        bd = argv[argv.index("--backup-dir") + 1]
-        assert bd == f"b2:mise/{sub}-history/20260703-000000"
+    tenant_command = next(argv for argv in calls if argv[1] == "sync")
+    assert tenant_command[3] == "b2:mise/tenants"
+    assert tenant_command[tenant_command.index("--backup-dir") + 1] == (
+        f"b2:mise/tenants-history/{generation}"
+    )
+    tenant_filters = [
+        tenant_command[index + 1]
+        for index, value in enumerate(tenant_command)
+        if value == "--filter"
+    ]
+    assert tenant_filters == [
+        "- **/mise.db*",
+        "- **/tmp/**",
+        "- **/zips/**",
+        "+ /.trash/gone/media/**",
+        "+ /.trash/gone/brand/**",
+        "+ /.trash/gone/receipts/**",
+        "+ /alpha/media/**",
+        "+ /alpha/brand/**",
+        "+ /alpha/receipts/**",
+        "- **",
+    ]
+    payload_copy = next(argv for argv in calls if argv[1] == "copy")
+    assert payload_copy[2] == str(generation_dir)
+    assert payload_copy[3] == f"b2:mise/backups/{generation}"
+    assert payload_copy[-2:] == ["--filter", f"- {hosted_backup.MANIFEST_NAME}"]
+    commit = next(argv for argv in calls if argv[1] == "copyto")
+    assert commit[-1] == f"b2:mise/backups/{generation}/{hosted_backup.MANIFEST_NAME}"
+    assert calls.index(tenant_command) < calls.index(payload_copy) < calls.index(commit)
+
+
+@pytest.mark.parametrize(
+    ("failing_command", "expected_status", "expected_commands"),
+    [
+        ("sync", "failed:tenants", ["sync"]),
+        ("copy", "failed:backups", ["sync", "copy"]),
+        (
+            "copyto",
+            "failed:manifest-commit",
+            ["sync", "copy", "copyto"],
+        ),
+    ],
+)
+def test_offsite_failure_boundaries_never_publish_manifest_early_or_touch_history(
+    tmp_path,
+    monkeypatch,
+    failing_command,
+    expected_status,
+    expected_commands,
+):
+    calls: list[list[str]] = []
+    monkeypatch.setattr(hosted_backup.shutil, "which", lambda _: "/usr/bin/rclone")
+    current = "20260703-000000-000002"
+    previous = "20260702-000000-000001"
+    generation_dir = tmp_path / "backups" / current
+    generation_dir.mkdir(parents=True)
+    (generation_dir / hosted_backup.MANIFEST_NAME).write_text(
+        json.dumps(
+            {
+                "format_version": 1,
+                "complete": True,
+                "stamp": current,
+            }
+        )
+    )
+    (tmp_path / "backups" / previous).mkdir()
+
+    def fail_at_boundary(argv, **_kwargs):
+        calls.append(argv)
+        if argv[1] == failing_command:
+            raise hosted_backup.subprocess.CalledProcessError(1, argv)
+
+    monkeypatch.setattr(hosted_backup.subprocess, "run", fail_at_boundary)
+
+    status = hosted_backup._offsite_sync(
+        "crypt:mise",
+        tmp_path / "backups",
+        tmp_path / "tenants",
+        current,
+        {"alpha"},
+    )
+
+    assert status == expected_status
+    assert [argv[1] for argv in calls] == expected_commands
+    if failing_command != "copyto":
+        assert all(argv[1] != "copyto" for argv in calls)
+    assert all(previous not in " ".join(argv) for argv in calls)
+    payload_sources = [argv[2] for argv in calls if argv[1] == "copy"]
+    assert payload_sources in ([], [str(generation_dir)])
 
 
 # ───────────────────────────── #6 atomic migration apply ─────────────────────────────
@@ -196,11 +299,17 @@ def test_failed_stripe_cancel_surfaces_for_manual_follow_up(tmp_path, monkeypatc
     # The tombstone committed, but the failed cancel is now visible + pinged.
     failures = saas.departed_needs_cancel()
     assert len(failures) == 1 and failures[0]["studio_name"] == "Alpha Studio"
-    assert failures[0]["stripe_subscription_id"] == "sub_live"
-    assert pings and "sub_live" in pings[0] and "still be charging" in pings[0]
+    assert failures[0]["subscription_id"] == "sub_live"
+    assert pings and "sub_live" in pings[0] and "reconciliation" in pings[0]
 
     # The operator cancels in Stripe by hand, then dismisses the reminder.
-    resp = asyncio.run(saas.operator_cancel_resolved(_operator_request("x"), t["id"]))
+    resp = asyncio.run(
+        saas.operator_cancel_resolved(
+            _operator_request("x"),
+            t["id"],
+            subscription_id="sub_live",
+        )
+    )
     assert resp.status_code == 303
     assert saas.departed_needs_cancel() == []
 
@@ -220,3 +329,70 @@ def test_successful_cancel_leaves_no_follow_up(tmp_path, monkeypatch):
     )
     saas.delete_tenant_studio(saas.tenant_by_id(t["id"]))
     assert saas.departed_needs_cancel() == []
+
+
+def test_process_crash_before_stripe_result_leaves_durable_cancel_outbox(
+    tmp_path,
+    monkeypatch,
+):
+    _configure_saas(tmp_path, monkeypatch)
+    tenant = saas.create_tenant(
+        "gamma",
+        "Gamma Studio",
+        "gamma@example.com",
+        "secret123",
+    )
+    with saas.control_connect() as con:
+        con.execute(
+            "UPDATE tenants SET stripe_subscription_id='sub_crash' WHERE id=?",
+            (tenant["id"],),
+        )
+    monkeypatch.setattr(config, "STRIPE_SECRET_KEY", "sk_test_x")
+
+    class SimulatedProcessDeath(BaseException):
+        pass
+
+    class _Sub:
+        @staticmethod
+        def cancel(*_args, **_kwargs):
+            raise SimulatedProcessDeath
+
+    monkeypatch.setattr(
+        saas,
+        "_stripe",
+        lambda: type("S", (), {"Subscription": _Sub}),
+    )
+
+    with pytest.raises(SimulatedProcessDeath):
+        saas.delete_tenant_studio(saas.tenant_by_id(tenant["id"]))
+
+    deleted = saas.tenant_by_id(tenant["id"])
+    assert deleted["deleted_at"] is not None
+    assert deleted["cancel_failed_at"] is not None
+    pending = saas.departed_needs_cancel()
+    assert [row["subscription_id"] for row in pending] == ["sub_crash"]
+    assert pending[0]["attempted_at"] is not None
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        saas,
+        "_stripe",
+        lambda: type(
+            "S",
+            (),
+            {
+                "Subscription": type(
+                    "Sub",
+                    (),
+                    {
+                        "cancel": staticmethod(
+                            lambda subscription_id, **_kwargs: calls.append(subscription_id)
+                        )
+                    },
+                )
+            },
+        ),
+    )
+    saas.delete_tenant_studio(deleted)
+    assert calls == []
+    assert saas.tenant_by_id(tenant["id"])["storage_parked_at"] is not None

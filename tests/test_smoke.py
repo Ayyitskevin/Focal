@@ -7852,7 +7852,7 @@ def test_caption_ai_draft(admin, monkeypatch):
     AI_TEXT = "Golden hour pasta, basil fresh off the pass. #avleats #fnbphoto"
     calls = []
 
-    def fake_draft(ctx):
+    def fake_draft(ctx, *, idempotency_key=None):
         calls.append(ctx)
         return {"caption": AI_TEXT, "model": "magistral:24b"}
 
@@ -7908,7 +7908,7 @@ def test_caption_ai_draft(admin, monkeypatch):
     assert "caption_error" in r.headers["location"]
 
     # (c) a stubbed mesh FAILURE writes nothing and leaves body/status/original intact
-    def fake_fail(ctx):
+    def fake_fail(ctx, *, idempotency_key=None):
         raise caption_ai.CaptionDraftError("Odysseus unreachable: timed out")
 
     monkeypatch.setattr(caption_ai, "draft_caption", fake_fail)
@@ -7949,7 +7949,7 @@ def test_caption_ai_draft(admin, monkeypatch):
 
 def test_caption_ai_live_wiring(admin, monkeypatch):
     """Domain G slice 6c — wire draft_caption to the LIVE Odysseus endpoint. Unlike 6b's
-    test, this stubs the NETWORK seam (urllib.request.urlopen), not the whole function,
+    test, this stubs the hardened network seam, not the whole function,
     so the real wiring is exercised: the bearer header, the configured URL, the body Mise
     builds, the JSON round-trip, and the 210s>180s timeout. Encodes WHY each guarantee
     holds: (a) the outbound request carries Authorization: Bearer <token> and hits the
@@ -7967,7 +7967,7 @@ def test_caption_ai_live_wiring(admin, monkeypatch):
     from app import caption_ai, config
     from app.admin.recurring import _period
 
-    URL = "http://mickey:7010/draft/caption"
+    URL = "https://captions.internal.test/draft/caption"
     TOKEN = "stub-bearer-do-not-log"
     monkeypatch.setattr(config, "ODYSSEUS_CAPTION_URL", URL)
     monkeypatch.setattr(config, "ODYSSEUS_CAPTION_TOKEN", TOKEN)
@@ -7978,7 +7978,7 @@ def test_caption_ai_live_wiring(admin, monkeypatch):
     monkeypatch.setattr(config, "ODYSSEUS_CAPTION_TOKEN", "")
     assert caption_ai.is_enabled() is False
     fired = []
-    monkeypatch.setattr(caption_ai.urllib.request, "urlopen", lambda *a, **k: fired.append(1))
+    monkeypatch.setattr(caption_ai, "_open_provider", lambda *a, **k: fired.append(1))
     try:
         caption_ai.draft_caption({"label": "x"})
         assert False, "expected CaptionDraftError when not configured"
@@ -8002,8 +8002,8 @@ def test_caption_ai_live_wiring(admin, monkeypatch):
         def __exit__(self, *a):
             return False
 
-        def read(self):
-            return self._b
+        def read(self, size=-1):
+            return self._b if size < 0 else self._b[:size]
 
     def fake_ok(req, timeout=None):
         captured["url"] = req.full_url
@@ -8012,7 +8012,7 @@ def test_caption_ai_live_wiring(admin, monkeypatch):
         captured["timeout"] = timeout
         return _Resp({"caption": AI_TEXT, "model": SERVED})
 
-    monkeypatch.setattr(caption_ai.urllib.request, "urlopen", fake_ok)
+    monkeypatch.setattr(caption_ai, "_open_provider", fake_ok)
 
     # (a) direct call: outbound carries the bearer, hits the configured URL, sends the
     # built body, and uses the deployed (>180s) timeout
@@ -8081,7 +8081,7 @@ def test_caption_ai_live_wiring(admin, monkeypatch):
         (pid,),
     )
     tripped = []
-    monkeypatch.setattr(caption_ai.urllib.request, "urlopen", lambda *a, **k: tripped.append(1))
+    monkeypatch.setattr(caption_ai, "_open_provider", lambda *a, **k: tripped.append(1))
     r = admin.post(
         f"/admin/studio/recurring/{pid}/captions/{hcap['id']}/draft",
         data={},
@@ -8100,7 +8100,7 @@ def test_caption_ai_live_wiring(admin, monkeypatch):
     def fake_502(req, timeout=None):
         raise urllib.error.HTTPError(URL, 502, "Bad Gateway", {}, None)
 
-    monkeypatch.setattr(caption_ai.urllib.request, "urlopen", fake_502)
+    monkeypatch.setattr(caption_ai, "_open_provider", fake_502)
     r = admin.post(
         f"/admin/studio/recurring/{pid}/captions/{cid}/draft",
         data={"replace": "1"},
@@ -8119,7 +8119,7 @@ def test_caption_ai_live_wiring(admin, monkeypatch):
         def fake_err(req, timeout=None, _c=code):
             raise urllib.error.HTTPError(URL, _c, "err", {}, None)
 
-        monkeypatch.setattr(caption_ai.urllib.request, "urlopen", fake_err)
+        monkeypatch.setattr(caption_ai, "_open_provider", fake_err)
         try:
             caption_ai.draft_caption({"label": "x"})
             assert False, f"expected CaptionDraftError on HTTP {code}"

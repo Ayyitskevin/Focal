@@ -53,6 +53,10 @@ struct AppRouteParser: Sendable {
            let id = positiveID(parts[2]) {
             return .gallery(id: id, assetID: nil)
         }
+        if parts.count == 4, parts[0] == "app", parts[1] == "content",
+           parts[2] == "captions", let id = positiveID(parts[3]) {
+            return .contentCaption(id)
+        }
         if parts.count == 5, parts[0] == "app", parts[1] == "galleries",
            parts[3] == "assets", let galleryID = positiveID(parts[2]),
            let assetID = positiveID(parts[4]) {

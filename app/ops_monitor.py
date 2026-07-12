@@ -40,7 +40,12 @@ def _check_backup() -> None:
     if config.SAAS_MODE:
         # Hosted (ADR 0057): the backup sidecar stamps a marker after each pass;
         # assert the positive on the marker instead of inferring from silence.
-        from .hosted_backup import FAILURE_MARKER_NAME, MARKER_NAME
+        from .hosted_backup import (
+            FAILURE_MARKER_NAME,
+            MARKER_NAME,
+            OFFSITE_FAILURE_MARKER_NAME,
+            OFFSITE_SUCCESS_MARKER_NAME,
+        )
 
         marker = bdir / MARKER_NAME
         if not marker.exists():
@@ -74,6 +79,30 @@ def _check_backup() -> None:
                     f"database(s): {shown}. Those studios have no fresh snapshot — "
                     "check the backup sidecar logs for the failure.",
                 )
+        offsite_marker = bdir / OFFSITE_FAILURE_MARKER_NAME
+        if offsite_marker.exists():
+            alerts.ops_alert(
+                "backup_offsite_failed",
+                "The latest hosted off-site backup is pending or failed. Local "
+                "snapshots may be healthy but will not survive host-disk loss — "
+                "check rclone credentials/connectivity and the backup sidecar logs.",
+            )
+        if config.BACKUP_RCLONE_REMOTE:
+            success = bdir / OFFSITE_SUCCESS_MARKER_NAME
+            if not config.BACKUP_RCLONE_REMOTE_ENCRYPTED or not success.exists():
+                alerts.ops_alert(
+                    "backup_offsite_missing",
+                    "Encrypted off-site backup has no successful-sync evidence. "
+                    "Check the backup-only rclone config and force a restore-tested pass.",
+                )
+            else:
+                offsite_age_h = (dt.datetime.now().timestamp() - success.stat().st_mtime) / 3600
+                if offsite_age_h > config.BACKUP_STALE_HOURS:
+                    alerts.ops_alert(
+                        "backup_offsite_stale",
+                        f"Latest successful encrypted off-site sync is "
+                        f"{int(offsite_age_h)}h old. Check the backup sidecar.",
+                    )
         return
     snaps = sorted(bdir.glob("*.db.gz")) if bdir.exists() else []
     if not snaps:

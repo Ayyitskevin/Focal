@@ -9,17 +9,19 @@ their anchor_day. last_run_period ('YYYY-MM') is the per-month claim — it caps
 period to one draft, so a double-click OR an overlapping sweep can't duplicate.
 """
 
+import asyncio
 import datetime as dt
 import difflib
 import json
 import logging
 import re
+import uuid
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from .. import audit, caption_ai, config, db, features, security
+from .. import audit, caption_ai, config, db, features, runtime_identity, security
 from ..render import templates
 from .proposals import MAX_ITEM_ROWS, parse_items
 from .studio import get_project
@@ -689,7 +691,10 @@ async def update_caption(
         raise HTTPException(status_code=400, detail="caption text required")
     with db.tx() as con:
         changed = con.execute(
-            "UPDATE retainer_captions SET label=?, body=?, note=? WHERE id=? AND plan_id=?",
+            """UPDATE retainer_captions
+                  SET label=?, body=?, note=?, revision=revision+1,
+                      updated_at=datetime('now')
+                WHERE id=? AND plan_id=?""",
             (label, body, note.strip() or None, caption_id, plan_id),
         ).rowcount
         if changed:
@@ -721,7 +726,9 @@ async def set_caption_status(plan_id: int, caption_id: int, status: str = Form(.
             (caption_id, plan_id),
         ).fetchone()
         changed = con.execute(
-            "UPDATE retainer_captions SET status=? WHERE id=? AND plan_id=?",
+            """UPDATE retainer_captions
+                  SET status=?, revision=revision+1, updated_at=datetime('now')
+                WHERE id=? AND plan_id=?""",
             (status, caption_id, plan_id),
         ).rowcount
         if changed:
@@ -783,69 +790,290 @@ async def draft_caption(plan_id: int, caption_id: int, replace: str = Form("")):
     recoverable. No-clobber: if `body` holds human words, refuse unless replace=1.
     The mesh call is expected to fail sometimes; on any failure we write nothing and
     surface the message. Odysseus owns model selection — Mise only passes context."""
-    d = get_plan(plan_id)
-    cap = db.one("SELECT * FROM retainer_captions WHERE id=? AND plan_id=?", (caption_id, plan_id))
-    if not cap:
-        raise HTTPException(status_code=404)
 
     def _back(error: str = "") -> RedirectResponse:
         url = f"/admin/studio/recurring/{plan_id}"
         url += ("?" + urlencode({"caption_error": error}) if error else "") + "#captions"
         return RedirectResponse(url, status_code=303)
 
-    if _is_human_body(cap) and not replace:
-        return _back("This caption has your edits — use Replace to overwrite with an AI draft.")
+    claim_token = str(uuid.uuid4())
+    claim_seconds = max(int(config.ODYSSEUS_TIMEOUT) * 2 + 60, 600)
+    claim_cutoff = (dt.datetime.now(dt.UTC) - dt.timedelta(seconds=claim_seconds)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+    con = db.connect()
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        database_path = db.current_db_path().resolve()
+        database_identity = runtime_identity.current(con)
+        if database_identity is None:
+            con.rollback()
+            return _back("AI drafting is not available while this studio is closing.")
+        cap = con.execute(
+            "SELECT * FROM retainer_captions WHERE id=? AND plan_id=?",
+            (caption_id, plan_id),
+        ).fetchone()
+        if not cap:
+            con.rollback()
+            raise HTTPException(status_code=404)
+        if cap["status"] != "draft":
+            con.rollback()
+            return _back("Approved captions must be reopened before AI drafting.")
+        if _is_human_body(cap) and not replace:
+            con.rollback()
+            return _back("This caption has your edits — use Replace to overwrite with an AI draft.")
+        existing_claim = str(cap["ai_claim_token"] or "")
+        if existing_claim:
+            claimed_at = str(cap["ai_claimed_at"] or "")
+            if not claimed_at or claimed_at > claim_cutoff:
+                con.rollback()
+                return _back("A caption suggestion is already being generated.")
+            # Never retry an expired claim automatically. A timeout, process crash,
+            # or task cancellation can leave the paid provider call running after
+            # Mise loses its response, and this schema does not retain an immutable
+            # request digest with which to prove a safe same-key replay. Operators
+            # must reconcile the provider before clearing this durable claim.
+            con.rollback()
+            log.warning("caption AI generation has an unknown prior outcome")
+            return _back("The prior AI generation outcome is unknown; contact support.")
+        source_revision = int(cap["revision"])
+        source_identity = str(cap["identity_token"])
+        context_row = con.execute(
+            """SELECT rp.title AS plan_title,c.name AS client_name,
+                      c.company AS client_company
+                 FROM recurring_plans rp
+                 JOIN projects p ON p.id=rp.project_id
+                 LEFT JOIN clients c ON c.id=p.client_id
+                WHERE rp.id=? AND rp.deleted_at IS NULL""",
+            (plan_id,),
+        ).fetchone()
+        if context_row is None:
+            con.rollback()
+            raise HTTPException(status_code=404)
+        ctx = {
+            "label": cap["label"],
+            "note": cap["note"] or "",
+            "client": context_row["client_company"] or context_row["client_name"] or "",
+            "period": cap["period"],
+            "plan_title": context_row["plan_title"],
+        }
+        claimed = con.execute(
+            """UPDATE retainer_captions
+                  SET ai_claim_token=?,ai_claimed_at=datetime('now')
+                WHERE id=? AND plan_id=? AND status='draft'
+                  AND revision=? AND identity_token=?
+                  AND (ai_claim_token IS NULL OR ai_claim_token=?)""",
+            (
+                claim_token,
+                caption_id,
+                plan_id,
+                source_revision,
+                source_identity,
+                claim_token,
+            ),
+        ).rowcount
+        if claimed != 1:
+            con.rollback()
+            return _back("A caption suggestion is already being generated.")
+        con.commit()
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
 
-    proj = get_project(d["project_id"])
-    client = db.one("SELECT name, company FROM clients WHERE id=?", (proj["client_id"],))
-    ctx = {
-        "label": cap["label"],
-        "note": cap["note"] or "",
-        "client": client["company"] or client["name"] if client else "",
-        "period": cap["period"],
-        "plan_title": d["title"],
-    }
+    try:
+        with runtime_identity.bound_transaction(database_path, database_identity) as con:
+            still_claimed = con.execute(
+                """SELECT 1 FROM retainer_captions
+                    WHERE id=? AND plan_id=? AND status='draft' AND revision=?
+                      AND identity_token=? AND ai_claim_token=?""",
+                (
+                    caption_id,
+                    plan_id,
+                    source_revision,
+                    source_identity,
+                    claim_token,
+                ),
+            ).fetchone()
+            if still_claimed is None:
+                con.execute(
+                    """UPDATE retainer_captions
+                          SET ai_claim_token=NULL,ai_claimed_at=NULL
+                        WHERE id=? AND plan_id=? AND identity_token=?
+                          AND ai_claim_token=?""",
+                    (caption_id, plan_id, source_identity, claim_token),
+                )
+                return _back("This caption changed before generation started.")
+    except runtime_identity.RuntimeUnavailable:
+        return _back("AI drafting stopped because this studio is closing.")
     # Strangler seam (Phase 1): when the content facade flag is ON, route through
     # app/providers (which still resolves to the legacy Odysseus adapter by default) and
     # record provenance to ai_runs. When OFF (default), this is byte-for-byte the legacy
     # caption_ai path and writes no ai_runs row. Either way the caption is a non-mutating
     # draft on failure and a human-approved suggestion on success.
-    if features.content_provider_facade_enabled():
-        from .. import ai_runs, providers
+    try:
+        provider_result = None
+        if features.content_provider_facade_enabled():
+            from .. import ai_runs, providers
 
-        pr = providers.resolve(providers.Capability.CONTENT).draft(ctx)
-        ai_runs.record(pr, subject_type="retainer_caption", subject_id=caption_id)
-        if not pr.ok:
-            log.warning("caption %s draft failed (facade): %s", caption_id, pr.error)
-            return _back(pr.error or "AI drafting is not available right now")
-        caption_text = pr.output["caption"]
-        model = pr.model or "unknown"
-    else:
+            adapter = providers.resolve(providers.Capability.CONTENT)
+            pr = await asyncio.to_thread(
+                adapter.draft,
+                ctx,
+                idempotency_key=claim_token,
+            )
+            provider_result = pr
+            if not pr.ok:
+                try:
+                    with runtime_identity.bound_transaction(
+                        database_path,
+                        database_identity,
+                    ) as con:
+                        original = con.execute(
+                            """SELECT 1 FROM retainer_captions
+                                WHERE id=? AND plan_id=? AND identity_token=?
+                                  AND ai_claim_token=?""",
+                            (caption_id, plan_id, source_identity, claim_token),
+                        ).fetchone()
+                        if original is not None:
+                            ai_runs.record(
+                                pr,
+                                subject_type="retainer_caption",
+                                subject_id=caption_id,
+                                connection=con,
+                            )
+                            # Release only a definitive pre-call outcome. Transport
+                            # and response ambiguity retain the durable paid-call
+                            # claim until a human reconciles it.
+                            if pr.status.value == "disabled" or pr.provider_attempted is False:
+                                con.execute(
+                                    """UPDATE retainer_captions
+                                          SET ai_claim_token=NULL,ai_claimed_at=NULL
+                                        WHERE id=? AND plan_id=? AND identity_token=?
+                                          AND ai_claim_token=?""",
+                                    (
+                                        caption_id,
+                                        plan_id,
+                                        source_identity,
+                                        claim_token,
+                                    ),
+                                )
+                except runtime_identity.RuntimeUnavailable:
+                    pass
+                log.warning(
+                    "caption %s draft failed (facade status=%s)",
+                    caption_id,
+                    pr.status.value,
+                )
+                return _back("AI drafting is not available right now.")
+            caption_text = pr.output["caption"]
+            model = pr.model or "unknown"
+        else:
+            try:
+                result = await asyncio.to_thread(
+                    caption_ai.draft_caption,
+                    ctx,
+                    idempotency_key=claim_token,
+                )
+            except caption_ai.CaptionDraftError as e:
+                if not e.provider_attempted:
+                    try:
+                        with runtime_identity.bound_transaction(
+                            database_path,
+                            database_identity,
+                        ) as con:
+                            con.execute(
+                                """UPDATE retainer_captions
+                                      SET ai_claim_token=NULL,ai_claimed_at=NULL
+                                    WHERE id=? AND plan_id=? AND identity_token=?
+                                      AND ai_claim_token=?""",
+                                (
+                                    caption_id,
+                                    plan_id,
+                                    source_identity,
+                                    claim_token,
+                                ),
+                            )
+                    except runtime_identity.RuntimeUnavailable:
+                        pass
+                else:
+                    log.warning("caption AI generation outcome is unknown")
+                log.warning("caption %s draft failed: %s", caption_id, type(e).__name__)
+                return _back(str(e))
+            caption_text = result["caption"]
+            model = result["model"]
+
         try:
-            result = caption_ai.draft_caption(ctx)
-        except caption_ai.CaptionDraftError as e:
-            log.warning("caption %s draft failed: %s", caption_id, e)
-            return _back(str(e))
-        caption_text = result["caption"]
-        model = result["model"]
-
-    with db.tx() as con:
-        con.execute(
-            "UPDATE retainer_captions SET body=?, ai_drafted=1, ai_model=?, "
-            "ai_drafted_at=datetime('now'), ai_draft_original=? WHERE id=? AND plan_id=?",
-            (caption_text, model, caption_text, caption_id, plan_id),
-        )
-        # Status is deliberately NOT touched — an AI draft is a suggestion, not a
-        # delivery. Crediting stays the slice-4/6a human approve -> /deliveries path.
-        audit.log(
-            con,
-            "recurring_plan",
-            plan_id,
-            "caption_ai_drafted",
-            diff={"caption_id": caption_id, "model": model},
-        )
-    log.info("retainer plan %s caption %s AI-drafted (model=%s)", plan_id, caption_id, model)
-    return _back()
+            with runtime_identity.bound_transaction(database_path, database_identity) as con:
+                original = con.execute(
+                    """SELECT 1 FROM retainer_captions
+                        WHERE id=? AND plan_id=? AND identity_token=?
+                          AND ai_claim_token=?""",
+                    (caption_id, plan_id, source_identity, claim_token),
+                ).fetchone()
+                if original is None:
+                    changed = 0
+                elif provider_result is not None:
+                    ai_runs.record(
+                        provider_result,
+                        subject_type="retainer_caption",
+                        subject_id=caption_id,
+                        connection=con,
+                    )
+                if original is not None:
+                    changed = con.execute(
+                        """UPDATE retainer_captions
+                              SET body=?, ai_drafted=1, ai_model=?,
+                                  ai_drafted_at=datetime('now'), ai_draft_original=?,
+                                  revision=revision+1, updated_at=datetime('now'),
+                                  ai_claim_token=NULL,ai_claimed_at=NULL
+                            WHERE id=? AND plan_id=? AND status='draft' AND revision=?
+                              AND identity_token=? AND ai_claim_token=?""",
+                        (
+                            caption_text,
+                            model,
+                            caption_text,
+                            caption_id,
+                            plan_id,
+                            source_revision,
+                            source_identity,
+                            claim_token,
+                        ),
+                    ).rowcount
+                    if not changed:
+                        # The provider returned and any facade ledger row committed,
+                        # so this attempt is terminal even though a concurrent human
+                        # edit won the caption CAS. Release only the same immutable row.
+                        con.execute(
+                            """UPDATE retainer_captions
+                                  SET ai_claim_token=NULL,ai_claimed_at=NULL
+                                WHERE id=? AND plan_id=? AND identity_token=?
+                                  AND ai_claim_token=?""",
+                            (caption_id, plan_id, source_identity, claim_token),
+                        )
+                # Status is deliberately NOT touched — an AI draft is a suggestion, not a
+                # delivery. Crediting stays the human approve -> /deliveries path.
+                if changed:
+                    audit.log(
+                        con,
+                        "recurring_plan",
+                        plan_id,
+                        "caption_ai_drafted",
+                        diff={"caption_id": caption_id, "model": model},
+                    )
+        except runtime_identity.RuntimeUnavailable:
+            return _back("AI drafting stopped because this studio is closing.")
+        if not changed:
+            return _back("This caption changed while the suggestion was being generated.")
+        log.info("retainer plan %s caption %s AI-drafted", plan_id, caption_id)
+        return _back()
+    except asyncio.CancelledError:
+        # The worker thread may still be inside the provider after its awaiting
+        # request is cancelled. Keep the durable claim so a later click cannot
+        # overlap or repeat an outcome-ambiguous paid call.
+        log.warning("caption AI generation cancelled with outcome unknown")
+        raise
 
 
 def generate_for_plan(plan: "db.sqlite3.Row", period: str) -> int | None:

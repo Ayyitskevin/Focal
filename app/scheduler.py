@@ -64,6 +64,24 @@ def _recurring_sweep_all() -> None:
         from . import saas
 
         try:
+            # Platform backup/disk evidence lives under DATA_DIR, not inside a
+            # tenant runtime. Check it exactly once per hosted pass.
+            ops_monitor.sweep()
+        except Exception:
+            log.exception("platform ops monitor sweep failed")
+        try:
+            saas.pending_subscription_cancel_sweep()
+        except Exception:
+            log.exception("pending subscription cancellation sweep failed")
+        try:
+            saas.pending_tenant_offboarding_sweep()
+        except Exception:
+            log.exception("pending tenant offboarding sweep failed")
+        try:
+            saas.purge_retired_tenant_data()
+        except Exception:
+            log.exception("retired tenant data purge failed")
+        try:
             # Platform-level lifecycle mail (ADR 0060) — outside tenant_runtime
             # on purpose: it must carry platform identity, not a studio's.
             saas.trial_reminder_sweep()
@@ -85,7 +103,7 @@ def _recurring_sweep_all() -> None:
         for tenant in saas.list_tenants(billable_only=True):
             try:
                 with saas.tenant_runtime(tenant):
-                    _sweep_once()
+                    _sweep_once(include_ops_monitor=False)
             except Exception:
                 log.exception("tenant scheduler sweep failed: %s", tenant["slug"])
         return
@@ -101,17 +119,37 @@ def _push_sweep_all() -> None:
                 continue
             try:
                 with saas.tenant_runtime(tenant):
-                    push_notifications.sweep(dispatch=saas.tenant_has_access(tenant))
+                    try:
+                        push_notifications.sweep(dispatch=saas.tenant_has_access(tenant))
+                    except Exception:
+                        log.exception("tenant push sweep failed: %s", tenant["slug"])
+                    try:
+                        _mobile_content_cleanup()
+                    except Exception:
+                        log.exception("tenant content cleanup failed: %s", tenant["slug"])
             except Exception:
-                log.exception("tenant push sweep failed: %s", tenant["slug"])
+                log.exception("tenant push runtime failed: %s", tenant["slug"])
         return
     try:
         push_notifications.sweep()
     except Exception:
         log.exception("push notification sweep failed")
+    try:
+        _mobile_content_cleanup()
+    except Exception:
+        log.exception("content cleanup sweep failed")
 
 
-def _sweep_once() -> None:
+def _mobile_content_cleanup() -> None:
+    # Lazy import avoids scheduler -> mobile router -> jobs import cycles. This
+    # runs on the short push cadence so generated text cannot remain at rest
+    # indefinitely when no client returns to poll it.
+    from . import mobile_content_api
+
+    mobile_content_api.sweep_expired_suggestions()
+
+
+def _sweep_once(*, include_ops_monitor: bool = True) -> None:
     try:
         recurring.run_due_plans()
     except Exception:
@@ -132,10 +170,11 @@ def _sweep_once() -> None:
         retainer_reminders.sweep()
     except Exception:
         log.exception("retainer renewal reminder sweep failed")
-    try:
-        ops_monitor.sweep()
-    except Exception:
-        log.exception("ops monitor sweep failed")
+    if include_ops_monitor:
+        try:
+            ops_monitor.sweep()
+        except Exception:
+            log.exception("ops monitor sweep failed")
     try:
         postshoot_reminders.sweep()
     except Exception:

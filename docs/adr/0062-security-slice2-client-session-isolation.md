@@ -41,8 +41,9 @@ Bind client-session cookies to the serving studio via `security.client_session_p
 
 - **Single-tenant:** ``"<kind>:<id>"`` — byte-for-byte the legacy claim, so self-hosted
   client cookies keep working with no forced re-PIN.
-- **Hosted:** ``"<kind>:<tenant_id>:<id>"``. The immutable tenant **id** (not the reusable
-  slug — ADR 0051) means a deleted-and-reclaimed slug can't resurrect a stale session.
+- **Hosted:** ``"<kind>:<tenant_id>:<id>"``. Slugs are permanently retired on deletion
+  (ADR 0051); the immutable tenant **id** also protects legacy or corrupt control state
+  that presents one slug under a different tenant identity.
 
 Both `portal.py` and `workspace.py` mint and check through the helper. A copied
 `portal:7:5` cookie no longer equals studio 8's expected `portal:8:5`.

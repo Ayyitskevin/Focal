@@ -51,6 +51,7 @@ actor OwnerRepository {
 
     let client: any APIClientProtocol
     let cache: TenantJSONCache
+    let contentSessionState = OwnerContentSessionState()
     private let onSessionEnded: @Sendable () async -> Void
     private let lifetime: ClientDeliveryLifetime
 
@@ -133,8 +134,12 @@ actor OwnerRepository {
     }
 
     func purgeCache() async {
-        try? await cache.endAccessAndRemoveAll()
+        // End authority first. Actor methods may be re-entrant at each await;
+        // once this returns, no new Content intent can obtain a lifetime ticket
+        // and insert prompt state between the clear and cache seal below.
         await lifetime.end()
+        contentSessionState.removeAll()
+        try? await cache.endAccessAndRemoveAll()
     }
 
     func cacheLifetimeTicket() async throws -> UInt64 {

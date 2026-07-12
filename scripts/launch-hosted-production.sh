@@ -24,11 +24,45 @@ compose() {
   fi
 }
 
-echo "Running hosted production preflight..."
-python scripts/hosted-preflight.py
+echo "Building the app and backup images that will pass the launch gates..."
+compose build mise backup
 
-echo "Launching Mise hosted production stack..."
-compose up --build -d
+echo "Running hosted production preflight inside the built app image..."
+compose run --rm --no-deps mise python scripts/hosted-preflight.py --static
+
+echo "Stopping public ingress and the old backup loop before replacing the app..."
+compose stop caddy backup
+
+echo "Launching the private app for runtime gates..."
+compose up -d mise
+
+echo "Waiting for Mise health and control migrations..."
+ready=0
+for _ in $(seq 1 60); do
+  if compose exec -T mise python -c \
+    "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8400/healthz', timeout=2).read()" \
+    >/dev/null 2>&1; then
+    ready=1
+    break
+  fi
+  sleep 2
+done
+if [ "$ready" -ne 1 ]; then
+  echo "Mise did not become healthy within 120 seconds; Caddy was not started." >&2
+  compose logs mise >&2
+  exit 1
+fi
+
+echo "Forcing one complete encrypted backup pass..."
+if ! compose run --rm --no-deps --entrypoint python backup scripts/hosted-backup.py; then
+  exit 1
+fi
+
+echo "Running runtime preflight inside the data-mounted app container..."
+compose exec -T mise python scripts/hosted-preflight.py
+
+echo "Runtime gates passed; starting backup service and public ingress..."
+compose up -d backup caddy
 
 echo "Hosted stack status:"
 compose ps

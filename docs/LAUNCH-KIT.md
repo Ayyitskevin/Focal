@@ -38,23 +38,32 @@ host, support, and improve it without turning the $20 plan into a tier maze.
 
 ## One-Command Hosted Deployment
 
-After `.env` contains the hosted values from `.env.example`, launch the hosted
-instance with:
+After `.env` contains the hosted values from `.env.example`, create the
+backup-only rclone `crypt` config named by `MISE_RCLONE_CONFIG_PATH`. Keep it
+outside the repo, host UID/GID 10001, mode 0400, and escrow its crypt password/salt
+separately off-host. Then launch the hosted instance with:
 
 ```bash
 MISE_CADDY_SITE_ADDRESS='mise.example.com, *.mise.example.com' bash scripts/launch-hosted-production.sh
 ```
 
-Then run the launch gate:
+The launch script is the gate: it builds the current app/backup images, runs static
+preflight in the built image, stops old Caddy/backup, starts Mise privately, waits
+for health/migrations, forces an encrypted manifest-committed backup, and runs
+runtime preflight. That gate verifies `failures=[]`, matching expected/captured
+counts, and every listed control/live/parked payload before starting backup+Caddy.
+Do not substitute direct `docker compose up` or a host-Python preflight.
+
+After launch succeeds, run the synthetic hosted wiring smoke inside the image:
 
 ```bash
-python scripts/hosted-preflight.py
-python scripts/smoke-saas-hosted.py
+docker compose run --rm --no-deps mise python scripts/smoke-saas-hosted.py
 ```
 
-The preflight should return `READY` with `0 fail`. A warning for outbound email
-is acceptable only before public launch; configure SMTP before inviting real
-customers.
+The launch runtime preflight must return `READY` with `0 fail`. A warning for
+outbound email is acceptable only before public launch; configure SMTP before
+inviting real customers. Complete the same-generation active and parked restore
+drills in runbook §10 before the first invitation.
 
 The beta invite email and security checklist live in [docs/BETA-LAUNCH.md](BETA-LAUNCH.md).
 
@@ -87,7 +96,9 @@ The beta invite email and security checklist live in [docs/BETA-LAUNCH.md](BETA-
 
 - Merge the hosted launch PR after CI passes.
 - Deploy a staging hosted instance with `MISE_SAAS_MODE=true`.
-- Run `python scripts/hosted-preflight.py` until there are no failures.
+- Configure the encrypted backup mount and use
+  `scripts/launch-hosted-production.sh` until both containerized preflight gates
+  and the forced manifest-committed backup pass.
 
 **Day 2: Stripe rehearsal**
 

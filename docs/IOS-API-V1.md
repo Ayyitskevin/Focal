@@ -11,7 +11,8 @@ decisions. Client booking creation, money commands, and native legal signing rem
 planned. Milestone 5A adds the owner-only APNs device and notification contract.
 Milestone 5B.1 adds the flag-gated native owner cull review, protected derivatives,
 and reversible keep/cut/restore command. Milestone 5B.2 adds a privacy-bounded,
-read-only owner AI activity ledger.
+read-only owner AI activity ledger. Milestone 5B.3 adds native owner caption reads,
+versioned draft editing, and default-off asynchronous immutable suggestions.
 
 ## Conventions
 
@@ -274,11 +275,14 @@ summary advertises an available action.
 | `GET /api/v1/event-types/{id}/slots` | server-computed available slots |
 | `GET /api/v1/bookings` | `Page<Booking>` |
 | `GET /api/v1/ai/runs` | `Page<AIRun>` |
+| `GET /api/v1/content/captions` | owner caption page |
+| `GET /api/v1/content/captions/{id}` | owner caption detail |
 | `GET /api/v1/galleries/{id}/cull` | implemented owner cull review page (`CullPage`) |
 
 Owner endpoints in this table require the exact `studio_owner` principal with
 `studio:read`. Native cull review is implemented in Milestone 5B.1 and the AI-run
-ledger read is implemented in Milestone 5B.2.
+ledger read is implemented in Milestone 5B.2. Native caption management is
+implemented in Milestone 5B.3.
 
 Collections default to 25 and cap at 100. Cursors carry ordering state but no
 authorization; authorization is reevaluated on every page.
@@ -346,6 +350,122 @@ problem, and a cursor from another tenant is invalid even when both databases ha
 overlapping run IDs. The ETag includes a server projection version; changing any
 normalization/redaction rule must bump it so a cached multi-page feed is rebuilt.
 See the [AI activity operations runbook](IOS-AI-ACTIVITY-OPERATIONS.md).
+
+### Native owner Content workspace (Milestone 5B.3)
+
+Caption reads require exact 'studio:read'. Mutation and suggestion creation require
+exact 'studio:write'. The request host selects the tenant; caption, plan, project,
+and client joins are always resolved inside that tenant database.
+
+| Method/path | Semantics |
+| --- | --- |
+| 'GET /api/v1/content/captions?limit=25&cursor=...' | newest-ID-first normalized page; limit 1–100 |
+| 'GET /api/v1/content/captions/{id}' | normalized canonical detail |
+| 'PATCH /api/v1/content/captions/{id}' | explicit draft-body save |
+| 'POST /api/v1/content/captions/{id}/suggestions' | accept an asynchronous immutable operation |
+| 'GET /api/v1/content/captions/{id}/suggestions/{uuid}' | poll the exact requesting session's operation |
+
+A list page has this bounded shape:
+
+~~~json
+{
+  "items": [
+    {
+      "id": 42,
+      "version_id": "0123456789abcdef0123456789abcdef",
+      "revision": 3,
+      "client_display_name": "Avery Foods",
+      "plan_title": "Monthly Social",
+      "period": "2026-07",
+      "label": "Hero",
+      "body_preview": "Fresh summer plates...",
+      "status": "draft",
+      "ai_assisted": false,
+      "updated_at": "2026-07-11T15:30:00Z"
+    }
+  ],
+  "next_cursor": null,
+  "has_more": false,
+  "suggestions_enabled": false
+}
+~~~
+
+The opaque 'version_id' prevents delete/reinsert ABA identity reuse; 'revision' is
+monotonic for every web or mobile caption change. List/detail responses use
+'Cache-Control: private, no-cache', 'Vary: Authorization', and a strong ETag.
+'If-None-Match' may return an empty 304 with the same headers. The cursor is signed
+and tenant-bound. Unknown or duplicate query parameters fail with 422.
+
+The detail adds 'plan_id', full bounded 'body', optional 'note', 'ai_drafted_at',
+'suggestions_enabled', and create/update timestamps. It never exposes the original
+AI draft, raw provider/model/error, context/prompt, job/session/idempotency values,
+delivery state, invoice/payment data, or a tenant selector.
+
+A manual save body is:
+
+~~~json
+{
+  "body": "Owner-reviewed caption text",
+  "suggestion_id": null
+}
+~~~
+
+The PATCH requires the detail's strong ETag in 'If-Match' and a canonical UUID
+'Idempotency-Key'. It accepts only a non-empty body on a caption that is still
+'draft'. A successful save increments revision, returns a new ETag, and does not
+approve, publish, deliver, invoice, or charge. Exact retries replay the response;
+payload/key reuse or a stale/weak/wildcard version returns 409 without mutation.
+
+Suggestion creation additionally requires both the default-off
+'MISE_MOBILE_CONTENT_SUGGESTIONS' switch and configured provider credentials. Its
+optional body contains only a bounded owner instruction:
+
+~~~json
+{ "instruction": "Warm, concise, and suitable for Instagram." }
+~~~
+
+The server sends the provider only the bounded label, period, and optional
+instruction. It creates the command, queued job, suggestion row, and content-free
+audit evidence in one transaction and returns 202 plus a session-bound Location.
+Daily and concurrent limits are tenant-local and use Retry-After on 429.
+
+Operation responses have one exact shape:
+
+~~~json
+{
+  "id": "a7b7edee-eae8-4e69-8eed-5e09adca80de",
+  "caption_id": 42,
+  "state": "ready",
+  "review": "human_review",
+  "candidate_text": "A short generated candidate.",
+  "failure_reason": null,
+  "base_revision": 3,
+  "stale": false,
+  "created_at": "2026-07-11T15:31:00Z",
+  "expires_at": "2026-07-12T15:31:00Z",
+  "completed_at": "2026-07-11T15:31:02Z"
+}
+~~~
+
+'candidate_text' appears only for 'ready'. 'failure_reason' appears only for
+'failed' and is one of 'disabled', 'provider_error', 'invalid_response',
+'session_ended', 'unknown_outcome', or 'internal'. Raw provider/model/error/context
+never crosses this boundary. Every operation response uses 'Cache-Control:
+no-store' and 'Vary: Authorization'.
+
+Generation never changes the caption. To save reviewed text, the app sends the
+locally editable body plus the ready suggestion UUID through PATCH with the current
+caption ETag and a separate stable idempotency key. The server requires the exact
+requesting session, same caption identity/revision, ready/unexpired operation, and
+draft status. It stores the chosen body, retains the original candidate as internal
+AI provenance, marks the transient operation applied, scrubs provider/candidate
+fields, and still leaves status as draft.
+
+Queued-to-running is the sole paid-call claim. A recovered running operation becomes
+'unknown_outcome' instead of calling the provider again. Session revocation,
+expiration, caption deletion, kill-switch changes, and final-state races scrub or
+discard transient output. See the
+[Content suggestions operations runbook](IOS-CONTENT-SUGGESTIONS-OPERATIONS.md).
 
 ### Implemented owner commands (Milestone 4A)
 

@@ -34,6 +34,11 @@ obscure source reviews.
          -scheme Mise \
          -destination 'platform=iOS Simulator,name=iPhone 16'
 
+Pull requests also generate `Mise.xcodeproj` from `project.yml` and run the
+Swift 6 test target on a GitHub-hosted macOS iPhone simulator. That CI gate does
+not replace the physical-device, accessibility, signing, archive, or TestFlight
+checks below.
+
 The core foundation intentionally uses URLSession, Security, LocalAuthentication,
 SwiftUI, and Observation with no third-party runtime dependency. Swift Charts is
 part of SwiftUI and can be added to the dashboard feature. Evaluate Kingfisher when
@@ -83,6 +88,14 @@ and avoiding it in the foundation keeps auth/session behavior auditable.
   locally. Owner logout atomically seals and purges the shared session cache so late
   responses cannot recreate tenant data. The feed cannot start, retry, approve,
   publish, or apply an AI operation.
+- Milestone 5B.3 stages a native owner Content workspace for retainer captions.
+  Caption list/detail and explicit draft editing remain useful with AI off. Optional
+  suggestions are asynchronous, immutable, session-bound, version-checked, and
+  memory-only on device; using one changes the local editor, while a separate Save
+  is the only canonical mutation and always remains a draft. Both
+  'MISE_MOBILE_CONTENT_SUGGESTIONS' and
+  'MISE_CONTENT_SUGGESTIONS_ENABLED' default off pending processor, privacy, cost,
+  current-Xcode, physical-device, and TestFlight acceptance.
 - Gallery media uses the active session's single rotating authenticator. Server
   media URLs are accepted only when their origin and exact capability path match
   the active workspace; redirects are rejected and bearer tokens never enter URLs.
@@ -90,11 +103,12 @@ and avoiding it in the foundation keeps auth/session behavior auditable.
   xcconfig files.
 
 Simulator tests validate request construction and routing, but APNs acceptance does
-not. The 5B.1–5B.2 source and tests also have not yet been validated with current
+not. The 5B.1–5B.3 source and tests also have not yet been validated with current
 Xcode, on a physical device, or through TestFlight. Before distributing a build,
 complete the [push checks](../docs/IOS-PUSH-OPERATIONS.md) and
 [native cull checks](../docs/IOS-AI-CULL-OPERATIONS.md), plus the
-[AI activity checks](../docs/IOS-AI-ACTIVITY-OPERATIONS.md).
+[AI activity checks](../docs/IOS-AI-ACTIVITY-OPERATIONS.md) and
+[Content suggestion checks](../docs/IOS-CONTENT-SUGGESTIONS-OPERATIONS.md).
 
 See the [architecture](../docs/IOS-ARCHITECTURE.md) and
 [API contract](../docs/IOS-API-V1.md) for the product and backend plan.

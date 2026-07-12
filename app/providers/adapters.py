@@ -104,19 +104,35 @@ class LegacyOdysseusCaptionAdapter:
     def is_enabled(self) -> bool:
         return caption_ai.is_enabled()
 
-    def draft(self, ctx: dict) -> ProviderResult:
+    def draft(
+        self,
+        ctx: dict,
+        *,
+        idempotency_key: str | None = None,
+    ) -> ProviderResult:
         if not self.is_enabled():
             return ProviderResult.disabled(self.capability, self.name)
         start = time.monotonic()
         try:
-            result = caption_ai.draft_caption(ctx)
+            if idempotency_key is None:
+                result = caption_ai.draft_caption(ctx)
+            else:
+                result = caption_ai.draft_caption(
+                    ctx,
+                    idempotency_key=idempotency_key,
+                )
         except caption_ai.CaptionDraftError as exc:
             return ProviderResult.failure(
                 self.capability,
                 self.name,
-                ResultStatus.PROVIDER_ERROR,
+                (
+                    ResultStatus.INVALID_RESPONSE
+                    if getattr(exc, "invalid_response", False)
+                    else ResultStatus.PROVIDER_ERROR
+                ),
                 str(exc),
                 latency_ms=_elapsed_ms(start),
+                provider_attempted=exc.provider_attempted,
             )
         except Exception as exc:
             # Map any non-typed failure to a non-OK result: the adapter must always return a
@@ -132,13 +148,26 @@ class LegacyOdysseusCaptionAdapter:
         # CaptionDraftError otherwise), but guard defensively so the adapter always
         # returns a ProviderResult and never raises for a future/mocked provider that
         # returns a malformed dict.
-        caption = result.get("caption")
-        if not caption:
+        if not isinstance(result, dict):
             return ProviderResult.failure(
                 self.capability,
                 self.name,
                 ResultStatus.INVALID_RESPONSE,
-                "caption provider returned no caption",
+                "caption provider returned an invalid result",
+                latency_ms=_elapsed_ms(start),
+            )
+        caption = result.get("caption")
+        model = result.get("model")
+        if (
+            not isinstance(caption, str)
+            or not caption.strip()
+            or (model is not None and not isinstance(model, str))
+        ):
+            return ProviderResult.failure(
+                self.capability,
+                self.name,
+                ResultStatus.INVALID_RESPONSE,
+                "caption provider returned an invalid result",
                 latency_ms=_elapsed_ms(start),
             )
         return ProviderResult(
@@ -147,7 +176,7 @@ class LegacyOdysseusCaptionAdapter:
             status=ResultStatus.OK,
             review=ReviewRequirement.HUMAN_REVIEW,
             output={"caption": caption},
-            model=result.get("model"),
+            model=model,
             latency_ms=_elapsed_ms(start),
         )
 

@@ -271,6 +271,32 @@ def _principal_from_row(row: sqlite3.Row) -> Principal:
     )
 
 
+def mobile_runtime_accepting(con: sqlite3.Connection) -> bool:
+    """Return whether this database may admit or continue mobile work.
+
+    Migration 085 adds a durable, tenant-local offboarding barrier. Older
+    databases remain compatible while old application code is being restored,
+    but once the table exists a missing/malformed singleton fails closed.
+    """
+
+    table = con.execute(
+        """SELECT 1 FROM sqlite_master
+              WHERE type='table' AND name='mobile_runtime_state'"""
+    ).fetchone()
+    if table is None:
+        return True
+    row = con.execute(
+        """SELECT database_identity,offboarding
+             FROM mobile_runtime_state WHERE singleton=1"""
+    ).fetchone()
+    return bool(
+        row is not None
+        and isinstance(row["database_identity"], str)
+        and re.fullmatch(r"[0-9a-f]{32}", row["database_identity"])
+        and row["offboarding"] == 0
+    )
+
+
 def _issue_session(
     request: Request,
     *,
@@ -302,7 +328,15 @@ def _issue_session(
         tenant_key, principal_kind, resource_id, resource_variant, credential_source
     )
 
-    with db.tx() as con:
+    # An immediate transaction serializes issuance with tenant offboarding. A
+    # deferred read followed by an insert would allow deletion to set its marker
+    # between those two statements and then mint a fresh session after the scrub.
+    con = db.connect()
+    con.isolation_level = None
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        if not mobile_runtime_accepting(con):
+            raise MobileAuthError(401, "auth.invalid_credentials", "The credentials are invalid.")
         con.execute(
             """INSERT INTO api_sessions
                (id, tenant_key, principal_kind, resource_id, resource_variant,
@@ -337,6 +371,15 @@ def _issue_session(
                 (session_id, "refresh", _token_hash(refresh_token), now_ts, refresh_expires_at),
             ),
         )
+        con.execute("COMMIT")
+    except Exception:
+        try:
+            con.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+        raise
+    finally:
+        con.close()
 
     row = db.one("SELECT *, id AS session_id FROM api_sessions WHERE id=?", (session_id,))
     assert row is not None
@@ -670,6 +713,43 @@ def _revoke_session_tx(con: sqlite3.Connection, session_id: str, now_ts: int, re
         "UPDATE api_tokens SET revoked_at=COALESCE(revoked_at, ?) WHERE session_id=?",
         (now_ts, session_id),
     )
+    # Generated caption suggestions are session-private user content. Preserve
+    # only a scrubbed tenant-local usage row for quota/audit accounting; provider
+    # context and candidate text must disappear in the revocation transaction.
+    con.execute(
+        """UPDATE mobile_caption_usage
+              SET state='finished',finished_at=COALESCE(finished_at,datetime('now'))
+            WHERE state='active' AND id IN (
+                SELECT id FROM mobile_caption_suggestions
+                 WHERE session_id=? AND status<>'running'
+            )""",
+        (session_id,),
+    )
+    con.execute(
+        """UPDATE mobile_caption_suggestions
+              SET session_id=NULL,
+                  status=CASE
+                      WHEN status IN ('queued','running','ready','failed')
+                      THEN 'failed'
+                      ELSE status
+                  END,
+                  context_json=NULL,
+                  candidate_text=NULL,
+                  provider=NULL,
+                  model=NULL,
+                  failure_code=CASE
+                      WHEN status IN ('queued','running','ready','failed')
+                      THEN 'session_ended'
+                      ELSE NULL
+                  END,
+                  completed_at=CASE
+                      WHEN status IN ('queued','running','ready','failed')
+                      THEN COALESCE(completed_at, datetime('now'))
+                      ELSE completed_at
+                  END
+            WHERE session_id=?""",
+        (session_id,),
+    )
     # Lazy import avoids a mobile_auth -> push_notifications -> mobile_auth cycle.
     # Token material is erased in the same transaction as family revocation.
     from . import push_notifications
@@ -698,6 +778,9 @@ def session_is_current(con: sqlite3.Connection, session_id: str) -> bool:
         return False
 
     now_ts = _now_ts()
+    if not mobile_runtime_accepting(con):
+        _revoke_session_tx(con, session_id, now_ts, "studio_offboarding")
+        return False
     if row["absolute_expires_at"] <= now_ts:
         _revoke_session_tx(con, session_id, now_ts, "session_expired")
         return False
@@ -728,6 +811,10 @@ def authenticate_access(
         if row is None or not hmac.compare_digest(token_hash, row["token_hash"]):
             raise _invalid_token()
         if not _binding_matches(request, row["tenant_key"]):
+            raise _invalid_token()
+        if not mobile_runtime_accepting(con):
+            _revoke_session_tx(con, row["session_id"], now_ts, "studio_offboarding")
+            con.commit()
             raise _invalid_token()
         if row["absolute_expires_at"] <= now_ts:
             _revoke_session_tx(con, row["session_id"], now_ts, "session_expired")
@@ -784,6 +871,10 @@ def rotate_refresh(request: Request, refresh_token: str) -> TokenPair:
             raise _invalid_token()
         if not _binding_matches(request, row["tenant_key"]):
             con.rollback()
+            raise _invalid_token()
+        if not mobile_runtime_accepting(con):
+            _revoke_session_tx(con, row["session_id"], now_ts, "studio_offboarding")
+            con.commit()
             raise _invalid_token()
         if row["consumed_at"] is not None:
             _revoke_session_tx(con, row["session_id"], now_ts, "refresh_reuse")

@@ -184,8 +184,10 @@ the existing server-side admin ledger through its separate authenticated boundar
 
 ## Deferred work
 
-Content-generation previews, AI commands, native Analyze actions, production
-telemetry, and automatic action from model output remain out of scope. In hosted
-mode, no native Analyze mutation may ship until provider callbacks carry explicit,
-authenticated tenant authority instead of relying on a tenant-local numeric gallery
-ID and a global callback origin.
+This AI activity screen remains read-only. Milestone 5B.3's separately gated native
+caption suggestions use their own immutable, session-bound, no-callback operation
+contract and cannot be started or applied from this ledger. Native Analyze actions,
+production telemetry, and automatic action from model output remain out of scope.
+In hosted mode, no callback-based native Analyze mutation may ship until callbacks
+carry explicit authenticated tenant authority instead of relying on a tenant-local
+numeric gallery ID and a global callback origin.

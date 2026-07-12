@@ -124,6 +124,10 @@ def test_tenant_discovery_and_openapi_are_scoped_native_contracts(mobile_client)
         "/galleries/{gallery_id}/cull/assets/{asset_id}/preview",
         "/galleries/{gallery_id}/assets/{asset_id}/cull",
         "/ai/runs",
+        "/content/captions",
+        "/content/captions/{caption_id}",
+        "/content/captions/{caption_id}/suggestions",
+        "/content/captions/{caption_id}/suggestions/{suggestion_id}",
         "/event-types",
         "/bookings",
         "/bookings/{booking_id}",
@@ -234,6 +238,110 @@ def test_tenant_discovery_and_openapi_are_scoped_native_contracts(mobile_client)
     assert set(schema["components"]["schemas"]["AIActivitySubject"]["properties"]) == {
         "kind",
     }
+    content_page = schema["paths"]["/content/captions"]["get"]
+    content_page_headers = {
+        parameter["name"]: parameter
+        for parameter in content_page["parameters"]
+        if parameter["in"] == "header"
+    }
+    assert set(content_page_headers) == {"Authorization", "If-None-Match"}
+    assert content_page_headers["Authorization"]["required"] is True
+    assert content_page_headers["If-None-Match"]["required"] is False
+    content_page_query = {
+        parameter["name"]: parameter
+        for parameter in content_page["parameters"]
+        if parameter["in"] == "query"
+    }
+    assert set(content_page_query) == {"cursor", "limit"}
+    assert {"200", "304", "401", "403", "404", "422", "429", "500"} <= set(
+        content_page["responses"]
+    )
+    for status in ("200", "304"):
+        response_headers = content_page["responses"][status]["headers"]
+        assert set(response_headers) == {"Cache-Control", "ETag", "Vary"}
+        assert response_headers["Cache-Control"]["schema"]["const"] == "private, no-cache"
+        assert response_headers["Vary"]["schema"]["const"] == "Authorization"
+
+    content_detail = schema["paths"]["/content/captions/{caption_id}"]["get"]
+    detail_headers = {
+        parameter["name"]: parameter
+        for parameter in content_detail["parameters"]
+        if parameter["in"] == "header"
+    }
+    assert set(detail_headers) == {"Authorization", "If-None-Match"}
+    assert {"200", "304", "401", "403", "404", "422", "429", "500"} <= set(
+        content_detail["responses"]
+    )
+
+    create_suggestion = schema["paths"]["/content/captions/{caption_id}/suggestions"]["post"]
+    create_headers = {
+        parameter["name"]: parameter
+        for parameter in create_suggestion["parameters"]
+        if parameter["in"] == "header"
+    }
+    assert set(create_headers) == {"Authorization", "Idempotency-Key", "If-Match"}
+    assert all(parameter["required"] for parameter in create_headers.values())
+    assert {"202", "401", "403", "404", "409", "422", "429", "500"} <= set(
+        create_suggestion["responses"]
+    )
+    accepted_headers = create_suggestion["responses"]["202"]["headers"]
+    assert set(accepted_headers) == {
+        "Cache-Control",
+        "Idempotency-Replayed",
+        "Location",
+        "Vary",
+    }
+    assert accepted_headers["Cache-Control"]["schema"]["const"] == "no-store"
+    assert accepted_headers["Vary"]["schema"]["const"] == "Authorization"
+
+    poll_suggestion = schema["paths"]["/content/captions/{caption_id}/suggestions/{suggestion_id}"][
+        "get"
+    ]
+    poll_headers = {
+        parameter["name"]: parameter
+        for parameter in poll_suggestion["parameters"]
+        if parameter["in"] == "header"
+    }
+    assert set(poll_headers) == {"Authorization"}
+    assert (
+        poll_suggestion["responses"]["200"]["headers"]["Cache-Control"]["schema"]["const"]
+        == "no-store"
+    )
+
+    update_caption = schema["paths"]["/content/captions/{caption_id}"]["patch"]
+    update_headers = {
+        parameter["name"]: parameter
+        for parameter in update_caption["parameters"]
+        if parameter["in"] == "header"
+    }
+    assert set(update_headers) == {"Authorization", "Idempotency-Key", "If-Match"}
+    assert all(parameter["required"] for parameter in update_headers.values())
+    assert {"200", "401", "403", "404", "409", "422", "429", "500"} <= set(
+        update_caption["responses"]
+    )
+    assert set(update_caption["responses"]["200"]["headers"]) == {
+        "Cache-Control",
+        "ETag",
+        "Idempotency-Replayed",
+        "Vary",
+    }
+    suggestion_properties = set(schema["components"]["schemas"]["CaptionSuggestion"]["properties"])
+    assert suggestion_properties == {
+        "id",
+        "caption_id",
+        "state",
+        "review",
+        "candidate_text",
+        "failure_reason",
+        "base_revision",
+        "stale",
+        "created_at",
+        "expires_at",
+        "completed_at",
+    }
+    assert suggestion_properties.isdisjoint(
+        {"provider", "model", "prompt", "context", "error", "idempotency_key"}
+    )
 
 
 def test_owner_login_me_device_list_refresh_replay_and_logout(mobile_client):

@@ -5,6 +5,7 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var authentication: AuthenticationCoordinator
     let notifications: NotificationCoordinator
+    let contentSuggestionsEnabled: Bool
 
     init(
         environment: AppEnvironment,
@@ -12,6 +13,7 @@ struct RootView: View {
         notifications: NotificationCoordinator
     ) {
         self.notifications = notifications
+        contentSuggestionsEnabled = environment.configuration.contentSuggestionsEnabled
         _authentication = State(initialValue: AuthenticationCoordinator(
             environment: environment,
             installationIdentity: installationIdentity,
@@ -33,6 +35,7 @@ struct RootView: View {
                     ownerMediaEnvironment: authentication.ownerMediaEnvironment,
                     clientDeliveryEnvironment: authentication.clientDeliveryEnvironment,
                     notifications: notifications,
+                    contentSuggestionsEnabled: contentSuggestionsEnabled,
                     isSigningOut: authentication.isWorking,
                     signOut: { _ = await authentication.signOut() }
                 )
@@ -132,6 +135,7 @@ private struct SignedInShell: View {
     let ownerMediaEnvironment: OwnerMediaEnvironment?
     let clientDeliveryEnvironment: ClientDeliveryEnvironment?
     let notifications: NotificationCoordinator
+    let contentSuggestionsEnabled: Bool
     let isSigningOut: Bool
     let signOut: @MainActor () async -> Void
 
@@ -156,6 +160,7 @@ private struct SignedInShell: View {
                     media: ownerMediaEnvironment.media,
                     notifications: notifications,
                     router: notifications.router,
+                    contentSuggestionsEnabled: contentSuggestionsEnabled,
                     isSigningOut: isSigningOut,
                     signOut: signOut
                 )

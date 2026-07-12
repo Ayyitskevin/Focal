@@ -5,6 +5,7 @@ enum OwnerRoute: Hashable, Sendable {
     case project(Int64)
     case gallery(id: Int64, assetID: Int64?)
     case booking(Int64)
+    case contentCaption(Int64)
 }
 
 struct OwnerNavigationRequest: Equatable, Identifiable, Sendable {

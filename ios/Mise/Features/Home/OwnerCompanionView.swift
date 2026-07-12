@@ -7,6 +7,7 @@ enum OwnerDestination: String, CaseIterable, Identifiable {
     case galleries
     case calendar
     case tasks
+    case content
     case ai
 
     var id: String { rawValue }
@@ -18,6 +19,7 @@ enum OwnerDestination: String, CaseIterable, Identifiable {
         case .galleries: "Galleries"
         case .calendar: "Calendar"
         case .tasks: "Tasks"
+        case .content: "Content"
         case .ai: "AI activity"
         }
     }
@@ -30,6 +32,7 @@ enum OwnerDestination: String, CaseIterable, Identifiable {
         case .galleries: "photo.on.rectangle"
         case .calendar: "calendar"
         case .tasks: "checklist"
+        case .content: "text.quote"
         case .ai: "sparkles"
         }
     }
@@ -45,6 +48,7 @@ struct OwnerCompanionView: View {
     @State private var galleries: OwnerResourceModel<[GallerySummary]>
     @State private var bookings: OwnerResourceModel<[Booking]>
     @State private var tasks: OwnerResourceModel<[TaskDetail]>
+    @State private var contentCaptions: OwnerResourceModel<ContentCaptionFeed>
     @State private var aiActivity: OwnerResourceModel<AIActivityFeed>
     @State private var homePath: [OwnerRoute] = []
     @State private var clientsPath: [OwnerRoute] = []
@@ -52,6 +56,7 @@ struct OwnerCompanionView: View {
     @State private var galleriesPath: [OwnerRoute] = []
     @State private var calendarPath: [OwnerRoute] = []
     @State private var tasksPath: [OwnerRoute] = []
+    @State private var contentPath: [OwnerRoute] = []
     @State private var aiPath: [OwnerRoute] = []
     @State private var showingNotificationSettings = false
 
@@ -60,6 +65,7 @@ struct OwnerCompanionView: View {
     let media: any AuthenticatedMediaLoading
     let notifications: NotificationCoordinator
     let router: AppRouter
+    let contentSuggestionsEnabled: Bool
     let isSigningOut: Bool
     let signOut: @MainActor () async -> Void
 
@@ -69,6 +75,7 @@ struct OwnerCompanionView: View {
         media: any AuthenticatedMediaLoading,
         notifications: NotificationCoordinator,
         router: AppRouter,
+        contentSuggestionsEnabled: Bool,
         isSigningOut: Bool,
         signOut: @escaping @MainActor () async -> Void
     ) {
@@ -77,6 +84,7 @@ struct OwnerCompanionView: View {
         self.media = media
         self.notifications = notifications
         self.router = router
+        self.contentSuggestionsEnabled = contentSuggestionsEnabled
         self.isSigningOut = isSigningOut
         self.signOut = signOut
         _home = State(initialValue: OwnerResourceModel(
@@ -108,6 +116,11 @@ struct OwnerCompanionView: View {
             staleAfter: 15 * 60,
             cached: { try await repository.cachedTasks() },
             remote: { try await repository.refreshTasks() }
+        ))
+        _contentCaptions = State(initialValue: OwnerResourceModel(
+            staleAfter: 15 * 60,
+            cached: { try await repository.cachedContentCaptions() },
+            remote: { try await repository.refreshContentCaptions() }
         ))
         _aiActivity = State(initialValue: OwnerResourceModel(
             staleAfter: 5 * 60,
@@ -196,6 +209,7 @@ struct OwnerCompanionView: View {
         case .galleries: $galleriesPath
         case .calendar: $calendarPath
         case .tasks: $tasksPath
+        case .content: $contentPath
         case .ai: $aiPath
         }
     }
@@ -226,6 +240,15 @@ struct OwnerCompanionView: View {
             ) {
                 await bookings.refresh()
             }
+        case let .contentCaption(id):
+            ContentCaptionEditorView(
+                repository: repository,
+                captionID: id,
+                appSuggestionsEnabled: contentSuggestionsEnabled,
+                canWrite: session.principal.allows("studio:write")
+            ) {
+                await contentCaptions.refresh()
+            }
         }
     }
 
@@ -244,6 +267,9 @@ struct OwnerCompanionView: View {
         case .booking:
             selection = .calendar
             calendarPath = [request.route]
+        case .contentCaption:
+            selection = .content
+            contentPath = [request.route]
         }
         router.consumeNavigation(request.id)
     }
@@ -272,6 +298,8 @@ struct OwnerCompanionView: View {
             )
         case .tasks:
             TasksView(model: tasks, repository: repository)
+        case .content:
+            ContentCaptionsView(model: contentCaptions)
         case .ai:
             AIActivityView(
                 model: aiActivity,
