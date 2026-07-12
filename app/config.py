@@ -436,6 +436,10 @@ RATE_LIMITS = {
     # authenticated session cannot dilute brute-force protection.
     "api": (int(os.environ.get("MISE_RL_API", "300")), RATE_LIMIT_WINDOW),
     "api_auth": (int(os.environ.get("MISE_RL_API_AUTH", "20")), RATE_LIMIT_WINDOW),
+    # Authenticated thumbnail/preview fetches: a native gallery grid bursts one
+    # request per visible cell, so this sits well above "api" without being
+    # unbounded. Original downloads use the "download" bucket instead.
+    "api_media": (int(os.environ.get("MISE_RL_API_MEDIA", "900")), RATE_LIMIT_WINDOW),
     # Hosted signup provisions a whole tenant instance (DB file + media root), so it
     # gets its own tight hourly bucket (ADR 0050) — 5/hour/IP, not the generous
     # per-minute public bucket.

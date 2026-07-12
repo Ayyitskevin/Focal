@@ -3,8 +3,11 @@
 This document is the contract targeted by the native app. Milestone 1 implements
 tenant discovery, every authentication/capability route below, session management,
 and the scoped OpenAPI document. Milestone 2 adds the owner dashboard, client and
-project collections, gallery manifests, event types, and booking agenda. The
-remaining reads and commands stay in the planned Milestones 3–4 contract.
+project collections, gallery manifests, event types, and booking agenda.
+Milestone 3 (ADR 0067) adds the shared-client reads (`/client/home`,
+`/client/galleries`, `/client/bookings`, project document collections), the
+gallery-guest favorite toggle, and bearer-authenticated media routes. The
+remaining commands stay in the planned Milestone 4 contract.
 
 ## Conventions
 
@@ -152,8 +155,25 @@ client-wide session.
 | `GET /api/v1/galleries/{id}/cull` | paged cull deck/results |
 
 The Milestone 2 endpoints are available only to the exact `studio_owner`
-principal with `studio:read`. Client/project detail, document, slot, AI-run, and
+principal with `studio:read`. Client/project detail, slot, AI-run, and
 cull-result reads remain reserved contract surface until their delivery slices.
+
+### Milestone 3 — shared-client reads (implemented)
+
+| Method/path | Principals | Response |
+| --- | --- | --- |
+| `GET /api/v1/client/home` | any guest | capability-shaped `ClientHomeSummary` with server-computed `next_steps` |
+| `GET /api/v1/client/galleries` | gallery/workspace/portal guest | `Page<GallerySummary>` scoped to that capability's galleries |
+| `GET /api/v1/client/galleries/{id}` | gallery/workspace/portal guest | `GalleryDetail` manifest (404 outside scope) |
+| `GET /api/v1/client/bookings` | workspace/portal guest | `Page<Booking>` for that capability's `client_id` only |
+| `GET /api/v1/projects/{id}/proposals` | owner, or that exact workspace guest | `Page<Proposal>`; drafts never serialize |
+| `GET /api/v1/projects/{id}/contracts` | owner, or that exact workspace guest | `Page<Contract>` |
+| `GET /api/v1/projects/{id}/invoices` | owner, or that exact workspace guest | `Page<Invoice>` with payments and derived balance |
+
+Document DTOs carry a `public_url` (`/p /c /i`) because accept/decline,
+signing, and checkout remain canonical web flows until their own milestones.
+A gallery exchange cannot read documents; a workspace exchange cannot open a
+sibling project; a document exchange cannot widen into galleries or bookings.
 
 Collections default to 25 and cap at 100. Cursors carry ordering state but no
 authorization; authorization is reevaluated on every page.
@@ -162,8 +182,8 @@ authorization; authorization is reevaluated on every page.
 
 | Method/path | Semantics |
 | --- | --- |
-| `PUT /api/v1/galleries/{g}/assets/{a}/favorite` | idempotently select |
-| `DELETE /api/v1/galleries/{g}/assets/{a}/favorite` | idempotently unselect |
+| `PUT /api/v1/galleries/{g}/assets/{a}/favorite` | idempotently select (implemented, Milestone 3) |
+| `DELETE /api/v1/galleries/{g}/assets/{a}/favorite` | idempotently unselect (implemented, Milestone 3) |
 | `POST /api/v1/galleries/{g}/assets/{a}/comments` | add video comment/reply |
 | `POST /api/v1/proposals/{id}/accept` | server-authoritative transition |
 | `POST /api/v1/proposals/{id}/decline` | server-authoritative transition |
@@ -253,9 +273,23 @@ must enforce bearer scope, gallery publication/expiry, asset parentage/readiness
 and the cull delivery gate. Support Range requests for video and conditional/private
 caching. Do not put bearer credentials in signed URL query parameters.
 
-Milestone 2 deliberately emits `null` for every media link. Authenticated thumbnail,
-preview, video, and download routes arrive with the client-delivery slice rather
-than exposing the existing browser/file boundary to the native app.
+Milestone 3 implements the authenticated media routes and fills every manifest
+link with an absolute URL on the request origin:
+
+    GET /api/v1/media/galleries/{g}/assets/{a}/{thumbnail|preview|poster|download}
+
+Authorization is re-derived per request: the owner (`studio:read`) and the
+gallery's own guest see every variant; that guest needs the
+`gallery:{g}:download` scope for originals; workspace/portal guests whose
+capability covers the gallery get variants but never `download`. Published,
+expiry, readiness, and cull delivery gates apply before any path resolution.
+`FileResponse` provides Range support for video. Favoriting (gallery guest
+only) is keyed to the session's minted server-side visitor and enforces the
+per-section proofing cap with a `gallery.proofing_limit` 409 problem.
+
+Media requests use a dedicated generous `api_media` rate bucket (a native
+grid legitimately bursts one request per visible cell); `/download` variants
+share the web `download` bucket.
 
 ## Offline/cache metadata
 

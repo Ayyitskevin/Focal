@@ -33,17 +33,20 @@ struct OwnerCompanionView: View {
 
     let session: CurrentSession
     let repository: OwnerRepository
+    let mediaLoader: AuthenticatedMediaLoader
     let isSigningOut: Bool
     let signOut: @MainActor () async -> Void
 
     init(
         session: CurrentSession,
         repository: OwnerRepository,
+        mediaLoader: AuthenticatedMediaLoader,
         isSigningOut: Bool,
         signOut: @escaping @MainActor () async -> Void
     ) {
         self.session = session
         self.repository = repository
+        self.mediaLoader = mediaLoader
         self.isSigningOut = isSigningOut
         self.signOut = signOut
         _home = State(initialValue: OwnerResourceModel(
@@ -137,7 +140,7 @@ struct OwnerCompanionView: View {
         case .projects:
             ProjectsView(model: projects)
         case .galleries:
-            GalleriesView(model: galleries, repository: repository)
+            GalleriesView(model: galleries, repository: repository, mediaLoader: mediaLoader)
         case .calendar:
             CalendarAgendaView(
                 model: bookings,

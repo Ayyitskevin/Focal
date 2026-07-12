@@ -8,8 +8,9 @@ selected by the parent SaaS middleware.
 
 Gallery manifests are safe metadata manifests, not file-serving shortcuts.  They
 select no PIN or ``assets.stored`` value, include only ready assets permitted by
-the shared cull delivery gate, and leave media links empty until authenticated
-bearer-aware media routes exist.
+the shared cull delivery gate, and point media links at the bearer-authenticated
+``/api/v1/media`` routes (:mod:`app.mobile_media`), which re-derive scope and
+delivery gates on every byte request.
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from . import config, db, delivery_gate, mobile_auth
+from . import config, db, delivery_gate, mobile_auth, mobile_media
 from .admin import studio as admin_studio
 
 _HEX_COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -391,6 +392,7 @@ def _gallery_query(
     *,
     after: tuple[str, int] | None = None,
     gallery_id: int | None = None,
+    gallery_ids: Sequence[int] | None = None,
     row_limit: int | None = None,
 ):
     gate = delivery_gate.clause("a")
@@ -399,6 +401,13 @@ def _gallery_query(
     if gallery_id is not None:
         where.append("g.id=?")
         params.append(gallery_id)
+    if gallery_ids is not None:
+        if not gallery_ids:
+            where.append("0")
+        else:
+            placeholders = ",".join("?" * len(gallery_ids))
+            where.append(f"g.id IN ({placeholders})")
+            params.extend(int(gid) for gid in gallery_ids)
     if after is not None:
         where.append("(g.created_at < ? OR (g.created_at = ? AND g.id < ?))")
         params.extend((after[0], after[0], after[1]))
@@ -497,7 +506,7 @@ def _gallery_sections(gallery_id: int) -> list[GallerySection]:
     ]
 
 
-def _gallery_assets(gallery_id: int) -> list[GalleryAsset]:
+def _gallery_assets(gallery_id: int, request: Request) -> list[GalleryAsset]:
     gate = delivery_gate.clause("a")
     rows = db.all_(
         f"""SELECT a.id, a.gallery_id, a.section_id, a.kind, a.status,
@@ -511,18 +520,20 @@ def _gallery_assets(gallery_id: int) -> list[GalleryAsset]:
               ORDER BY a.section_id IS NULL, a.section_id, a.position, a.id""",
         (gallery_id,),
     )
-    links = MediaLinks()
     assets: list[GalleryAsset] = []
     for row in rows:
         favorite_count = max(0, int(row["favorite_count"]))
+        asset_id = int(row["id"])
+        kind = "video" if row["kind"] == "video" else "photo"
+        links = MediaLinks(**mobile_media.build_media_links(request, gallery_id, asset_id, kind))
         assets.append(
             GalleryAsset(
-                id=int(row["id"]),
+                id=asset_id,
                 gallery_id=int(row["gallery_id"]),
                 section_id=int(row["section_id"]) if row["section_id"] is not None else None,
-                kind="video" if row["kind"] == "video" else "photo",
+                kind=kind,
                 status="ready",
-                filename=_safe_filename(row["filename"], int(row["id"])),
+                filename=_safe_filename(row["filename"], asset_id),
                 width=int(row["width"]) if row["width"] and int(row["width"]) > 0 else None,
                 height=(int(row["height"]) if row["height"] and int(row["height"]) > 0 else None),
                 duration_seconds=(
@@ -639,7 +650,7 @@ def gallery_detail(
     if not rows:
         raise HTTPException(status_code=404, detail="Gallery not found.")
     row = rows[0]
-    assets = _gallery_assets(gallery_id)
+    assets = _gallery_assets(gallery_id, request)
     asset_ids = {asset.id for asset in assets}
     hero_asset_ids = _hero_ids(row["argus_hero_asset_ids"], asset_ids)
     detail = GalleryDetail(
@@ -715,6 +726,30 @@ def list_event_types(
     return _collection_response(request, response, page, resource="event-types")
 
 
+def _booking_from_row(row) -> Booking:
+    return Booking(
+        id=int(row["id"]),
+        event_type_id=int(row["event_type_id"]),
+        event_name=str(row["event_name"]).strip()[:500] or "Booking",
+        name=str(row["name"]).strip()[:500] or "Client",
+        email=str(row["email"]).strip()[:320],
+        phone=_optional_text(row["phone"], maximum=100),
+        notes=_optional_text(row["notes"], maximum=10_000),
+        start_at=_sqlite_utc(row["start_utc"]),
+        end_at=_sqlite_utc(row["end_utc"]),
+        time_zone=_optional_text(row["tz"], maximum=255) or config.TIMEZONE,
+        status="confirmed" if row["status"] == "confirmed" else "cancelled",
+        client_id=int(row["client_id"]) if row["client_id"] is not None else None,
+        project_id=int(row["project_id"]) if row["project_id"] is not None else None,
+        rescheduled_from_id=(
+            int(row["reschedule_of"]) if row["reschedule_of"] is not None else None
+        ),
+        cancel_reason=_optional_text(row["cancel_reason"], maximum=2000),
+        cancelled_at=_sqlite_utc(row["cancelled_at"]),
+        created_at=_sqlite_utc(row["created_at"]),
+    )
+
+
 @router.get("/bookings", response_model=APIPage[Booking], tags=["scheduling"])
 def list_bookings(
     request: Request,
@@ -742,30 +777,7 @@ def list_bookings(
     )
     has_more = len(rows) > limit
     page_rows = rows[:limit]
-    items = [
-        Booking(
-            id=int(row["id"]),
-            event_type_id=int(row["event_type_id"]),
-            event_name=str(row["event_name"]).strip()[:500] or "Booking",
-            name=str(row["name"]).strip()[:500] or "Client",
-            email=str(row["email"]).strip()[:320],
-            phone=_optional_text(row["phone"], maximum=100),
-            notes=_optional_text(row["notes"], maximum=10_000),
-            start_at=_sqlite_utc(row["start_utc"]),
-            end_at=_sqlite_utc(row["end_utc"]),
-            time_zone=_optional_text(row["tz"], maximum=255) or config.TIMEZONE,
-            status="confirmed",
-            client_id=int(row["client_id"]) if row["client_id"] is not None else None,
-            project_id=int(row["project_id"]) if row["project_id"] is not None else None,
-            rescheduled_from_id=(
-                int(row["reschedule_of"]) if row["reschedule_of"] is not None else None
-            ),
-            cancel_reason=_optional_text(row["cancel_reason"], maximum=2000),
-            cancelled_at=_sqlite_utc(row["cancelled_at"]),
-            created_at=_sqlite_utc(row["created_at"]),
-        )
-        for row in page_rows
-    ]
+    items = [_booking_from_row(row) for row in page_rows]
     next_cursor = None
     if has_more and page_rows:
         last = page_rows[-1]

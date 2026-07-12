@@ -42,11 +42,16 @@ struct AppEnvironment: Sendable {
             session: networkSession,
             authorizer: session
         )
+        let mediaLoader = AuthenticatedMediaLoader(
+            session: networkSession,
+            authorizer: session
+        )
 
         return WorkspaceEnvironment(
             origin: origin,
             apiClient: apiClient,
-            session: session
+            session: session,
+            mediaLoader: mediaLoader
         )
     }
 
@@ -72,4 +77,6 @@ struct WorkspaceEnvironment: Sendable {
     let origin: URL
     let apiClient: APIClient
     let session: SessionAuthenticator
+    /// Bearer-authenticated loader for `/api/v1/media/...` gallery bytes.
+    let mediaLoader: AuthenticatedMediaLoader
 }

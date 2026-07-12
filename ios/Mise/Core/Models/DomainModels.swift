@@ -282,6 +282,8 @@ struct Proposal: Codable, Hashable, Sendable, Identifiable {
     let viewedAt: Date?
     let acceptedAt: Date?
     let createdAt: Date
+    /// Canonical `/p/{slug}` page; accept/decline stay web flows in Milestone 3.
+    let publicURL: URL?
 }
 
 struct Contract: Codable, Hashable, Sendable, Identifiable {
@@ -299,6 +301,8 @@ struct Contract: Codable, Hashable, Sendable, Identifiable {
     let signedAt: Date?
     let countersignedAt: Date?
     let createdAt: Date
+    /// Canonical `/c/{slug}` page; legal signing stays a web flow in Milestone 3.
+    let publicURL: URL?
 }
 
 struct InvoiceSummary: Codable, Hashable, Sendable, Identifiable {
@@ -332,6 +336,8 @@ struct Invoice: Codable, Hashable, Sendable, Identifiable {
     let viewedAt: Date?
     let paidAt: Date?
     let createdAt: Date
+    /// Canonical `/i/{slug}` page; Stripe checkout stays a web flow in Milestone 3.
+    let publicURL: URL?
 }
 
 struct Payment: Codable, Hashable, Sendable, Identifiable {
