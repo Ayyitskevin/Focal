@@ -29,20 +29,56 @@ self-applied. Sources: `docs/MISE-REVIEW.md` (review), `docs/IOS-UPGRADE.md`
   env var, strangler rule), and the §11.4 review surface it keeps.
 - **Risk:** red-light adjacent (contracts, deploy) → draft PR, human merge.
 
-### O2. Commercial-spine mobile API design (IOS-UPGRADE step 3)
+### O2. Commercial-spine mobile API design (IOS-UPGRADE step 3) — DONE
 - **What:** Design the read-only `/api/v1` surface for AR chase assist,
   closeout-readiness, company next-action ranking, and the Studio Activity
-  commercial queue. Judgment: which admin panels map to which DTOs, what's
-  summarized vs paginated, where "mark chased"-style assists fall (M4
-  mutation rules: idempotency key, server-authoritative transitions).
-- **Done:** contract section added to `docs/IOS-API-V1.md` (DTO shapes,
-  routes, principals — owner-only) + task breakdown appended here for the
-  Sonnet lane.
-- **Verify:** contract review against the actual admin queries it mirrors
-  (`app/admin/` financials/studio modules); no new authority invented; no
-  auto-send/auto-charge anywhere.
-- **Risk:** normal (design doc). Implementation later inherits red-light
-  where it touches AR/invoice data paths.
+  commercial queue.
+- **Delivered:** the "Owner commercial spine (planned — read-only)" section
+  in `docs/IOS-API-V1.md` — 5 owner-only read endpoints, DTOs mirroring the
+  exact admin derivations (`_ctx_commercial_actions`, `_company_next_actions`,
+  `_ar_chase_context`/`_company_overdue_rows`/`_ar_chase_history`,
+  `_project_closeout` in `app/admin/studio.py`), the `href → structured
+  target` translation, cents→`Money`, and the "company = root client
+  (`parent_id IS NULL`)" model. AR-chase *send* explicitly deferred to M4.
+  Implementation split into S7/S8/S9 below.
+- **Verified:** every field traced to a real admin dict key + `file:line`;
+  no new authority invented; the one mutation (AR-chase send) is excluded.
+- **Risk:** normal (design doc, merged).
+
+### S7. Extract commercial-spine query functions (prerequisite for S8)
+- **What:** The six computations O2 depends on are `_`-prefixed privates in
+  `app/admin/studio.py` (`_ctx_commercial_actions`, `_company_next_actions`,
+  `_ar_chase_context`, `_company_overdue_rows`, `_ar_chase_history`,
+  `_project_closeout`). Lift them into an importable module (e.g.
+  `app/commercial.py`) with no behavior change, so both the HTML admin routes
+  and the new DTO router call one implementation (IOS-API-V1 backend note 6).
+- **Done:** functions importable from the new module; `app/admin/studio.py`
+  imports them; admin pages render identically.
+- **Verify:** full unit + smoke suite green with zero admin-template test
+  edits (the studio/company/activity page tests pin the rendered output).
+- **Risk:** normal (refactor of live admin code — behavior-preserving; reviewed PR).
+
+### S8. Implement the commercial-spine DTO router (backend)
+- **What:** New `app/mobile_commercial_api.py` (owner-only, `studio:read`),
+  mounting the 5 endpoints from the IOS-API-V1 section, reusing the S7
+  functions, with the `OwnerAPIModel`/`Money` DTO conventions and the
+  `href → target` mapping owned server-side. Read-only; no AR-chase send.
+- **Done:** endpoints live in the scoped OpenAPI; DTOs match the doc.
+- **Verify:** contract tests — owner sees data, every non-owner principal gets
+  403, unknown/non-root company id 404, no admin `href` string ever
+  serialized, money as integer `minor_units`, cursor pages re-authorize.
+- **Risk:** **red-light** (reads AR/invoice data + adds contract surface) →
+  reviewed draft PR, human merge.
+
+### S9. iOS commercial-spine screens
+- **What:** `CommercialRepository` + owner screens for the action queue,
+  company next-actions, AR-chase assist (read/preview), and project closeout,
+  wired to the S8 endpoints and the typed `target` router. Web fallback for
+  the AR-chase send until its M4 command exists.
+- **Done:** screens render against the endpoints; targets navigate correctly.
+- **Verify:** XCTest fixtures for DTO decode + target routing; green under the
+  iOS CI gate (S1).
+- **Risk:** normal (read-only client of an existing contract).
 
 ### O3. iOS distribution decision (IOS-UPGRADE step 6 — blocked on Kevin)
 - **What:** Resolve the open product question: single-tenant
@@ -134,5 +170,14 @@ self-applied. Sources: `docs/MISE-REVIEW.md` (review), `docs/IOS-UPGRADE.md`
 
 ## Suggested order
 
-S2 → S1 → O1 → S3 → S4 → S5 → O2 → S6 → O4 → O3 (O3 whenever Kevin
-answers). Nothing here is started tonight; this queue is the deliverable.
+Original: S2 → S1 → O1 → S3 → S4 → S5 → O2 → S6 → O4 → O3.
+
+**Done (merged):** S2, S1 (incl. fixing the compile errors it surfaced — the
+iOS app had never been built), O1 (ADR 0068). **Done (design):** O2 — which
+spawned S7 → S8 → S9.
+
+**Remaining order:** S3 → S7 → S8 → S9 → S4 → S5 → S6 → O4 → O3.
+S7 precedes S8 (extract before reuse); S6 (M4a mutations) and the AR-chase
+send command are red-light and wait on their reviewed PRs. O3 (iOS
+distribution) and the Dionysus fate (from O1) are the two decisions still
+open for Kevin.

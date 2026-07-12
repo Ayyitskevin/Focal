@@ -199,6 +199,169 @@ Contract signing, checkout, booking, rescheduling, and AI commands require an
 `Idempotency-Key`. The server retains transition rules, amount math, hash checks,
 Stripe reconciliation, audit logging, and workflow dispatch.
 
+## Owner commercial spine (planned — read-only)
+
+Native mirror of the operator's F&B commercial surfaces (ADRs 0039–0046): the
+company next-action ranking, the studio commercial action queue, AR chase
+assist + cadence, and project closeout readiness. Every route is **owner-only
+(`studio_owner` + `studio:read`) and purely read**. These endpoints reuse the
+exact admin derivations — `_ctx_commercial_actions`, `_company_next_actions`,
+`_ar_chase_context`/`_company_overdue_rows`/`_ar_chase_history`, and
+`_project_closeout` in `app/admin/studio.py` — behind DTOs, per backend note 6
+(share the query function, do not re-derive or HTTP-call the HTML route). No new
+authority is introduced and no value is auto-sent, charged, or mutated.
+
+**A "company" is not a table.** It is a **root client** — a `clients` row with
+`parent_id IS NULL` — standing for the whole descendant group
+(`clients.descendant_ids`). `{company_id}` in these routes is that root client's
+id; a non-root or unknown id is `404`. Display name is `company or name`. The
+existing `GET /api/v1/clients` still lists every client, flat; `/companies`
+lists only the roots.
+
+| Method/path | Response |
+| --- | --- |
+| `GET /api/v1/companies` | `Page<CompanySummary>` (root clients) |
+| `GET /api/v1/commercial/actions` | `Page<CommercialAction>` (queue: top action per company) |
+| `GET /api/v1/companies/{id}/next-actions` | `CompanyNextActions` (ranked ≤6 for one company) |
+| `GET /api/v1/companies/{id}/ar-chase` | `ArChaseAssist` (optional `?invoice_id=` narrows to one) |
+| `GET /api/v1/projects/{id}/closeout` | `ProjectCloseout` |
+
+### Structured targets, not admin links
+
+Each admin action/checklist row carries an `href` into an HTML admin page (often
+a page anchor like `#shot-list`). The native contract never exposes those.
+Instead every actionable row carries a typed `target` the app resolves through
+its own authorization-aware router:
+
+    "target": { "kind": "ar_chase", "company_id": 9, "project_id": null,
+                "invoice_id": 4120, "section": null, "url": null }
+
+`kind` ∈ `company | ar_chase | project | invoice | gallery | workspace | external`.
+`section` (for `project`) hints the sub-panel ∈ `shots | deliverables | invoices |
+license | ar | details`. `url` is set only for `external`/public destinations
+(e.g. a live workspace `/w/{slug}`), never an admin path. The server owns the
+one authoritative `href → target` mapping.
+
+### `CommercialAction` / `NextAction`
+
+`priority` is the admin `rank` (lower = more urgent); `severity` maps the admin
+`tone` (`warn → attention`, `gap → missing`). `detail` is the admin `label`.
+
+    {
+      "company_id": 9,
+      "company_name": "Blue Plate Group",
+      "priority": 10,
+      "severity": "attention",
+      "title": "Chase past-due invoice",
+      "detail": "3 past due · $4,200 owed",
+      "meta": "money",
+      "target": { "kind": "ar_chase", "company_id": 9, "invoice_id": null,
+                  "project_id": null, "section": null, "url": null }
+    }
+
+`GET /api/v1/commercial/actions` returns one row per company (the top-ranked
+action), ordered `(priority, company_name, title)` — the queue caps at 8 like
+`_ctx_commercial_actions`. `CompanyNextActions` returns the full ranked strip
+(≤6) for a single company, dropping the `company_*` fields:
+
+    {
+      "company_id": 9,
+      "company_name": "Blue Plate Group",
+      "actions": [ { "priority": 10, "severity": "attention",
+                     "title": "Chase past-due invoice", "detail": "3 past due · $4,200 owed",
+                     "meta": "money", "target": { "kind": "ar_chase", "company_id": 9, ... } } ]
+    }
+
+### `ArChaseAssist`
+
+Mirrors `_ar_chase_context`. Money is `Money{minor_units,currency_code}` from the
+`*_cents` fields. Invoices carry a `public_url` (`/i/{slug}`), never the raw
+slug. The `draft` is a **read-only preview** of the chase email — the actual
+send is the one mutation on the admin side and is **not** in this read slice
+(see below).
+
+    {
+      "company_id": 9,
+      "company_name": "Blue Plate Group",
+      "owed": { "minor_units": 420000, "currency_code": "USD" },
+      "overdue_invoices": [
+        {
+          "invoice_id": 4120, "title": "November coverage", "status": "sent",
+          "due_date": "2026-06-15",
+          "total": { "minor_units": 250000, "currency_code": "USD" },
+          "paid":  { "minor_units": 50000,  "currency_code": "USD" },
+          "owed":  { "minor_units": 200000, "currency_code": "USD" },
+          "project_id": 31, "project_title": "Q4 Menu Refresh",
+          "client_id": 14, "client_name": "Blue Plate — Downtown",
+          "public_url": "https://studio.example.com/i/inv-2026-118"
+        }
+      ],
+      "cadence": {
+        "status": "recent",
+        "followup_due": false,
+        "days_since": 2,
+        "last_sent_at": "2026-07-10T14:02:00Z",
+        "last_sent_to": "ap@blueplate.example",
+        "next_due_on": "2026-07-17",
+        "summary": "last chased 2d ago",
+        "detail": "You emailed a balance reminder 2 days ago."
+      },
+      "draft": {
+        "to": "ap@blueplate.example",
+        "subject": "Follow-up on open invoice balance - Blue Plate Group",
+        "body": "Hi Blue Plate Group, ..."
+      }
+    }
+
+`cadence.status` ∈ `never | recent | due` (from `_ar_chase_history`);
+`last_sent_at` is the `emails_log` timestamp in RFC 3339; `next_due_on` is the
+date-only follow-up target (`MISE_AR_CHASE_FOLLOWUP_DAYS`, default 7).
+
+### `ProjectCloseout`
+
+Mirrors `_project_closeout`. `severity` maps `tone` (`ok → ok`, `warn →
+attention`, `gap → missing`); `ready` is `attention == 0 and missing == 0`.
+
+    {
+      "project_id": 31,
+      "ready": false,
+      "ok_count": 4, "attention_count": 2, "missing_count": 1, "total": 7,
+      "items": [
+        {
+          "key": "deliverables", "title": "Deliverables",
+          "severity": "attention", "badge": "Needs attention",
+          "detail": "5/8 delivered",
+          "target": { "kind": "project", "project_id": 31, "section": "deliverables",
+                      "company_id": null, "invoice_id": null, "url": null }
+        }
+      ]
+    }
+
+`key` ∈ `shots | deliverables | license | invoice | ar | gallery | workspace`.
+A `gap` workspace row has `target: null` (nothing to open yet); an `ok`
+workspace row targets the live `/w/{slug}` as `kind: "external"`.
+
+### Out of scope for this read slice (deferred to Milestone 4)
+
+The AR-chase **send** (`POST /admin/studio/companies/{id}/ar-chase/email`) is the
+only mutation across all four surfaces. It sends the email and writes exactly one
+`emails_log` audit row (`doc_kind='other'`, `doc_id=company_id`) — it never
+touches invoices, payments, licenses, or any status. It is **not** part of this
+read slice. When implemented natively it is an M4 command
+(`POST /api/v1/companies/{id}/ar-chase/send`) requiring an `Idempotency-Key`,
+preserving the same single-audit-row, no-financial-mutation contract, and it
+stays a deliberate human action — consistent with the money/rights boundary and
+§11.4. Until then the app previews the draft and hands off to the web to send.
+
+### Cache + pagination
+
+`/companies` and `/commercial/actions` are cursor collections (default 25, cap
+100), authorization re-evaluated per page. The per-company and per-project detail
+resources carry `ETag`/`Last-Modified` with `Cache-Control: private, no-cache`;
+these are derived, fast-changing views, so treat a cached copy as a stale snapshot
+with an age, never authoritative (offline policy already says the same for
+dashboard/CRM summaries).
+
 ## Gallery manifest
 
 The detail response deliberately nests list-card fields under `summary` and all
