@@ -15,10 +15,8 @@ delivery gates on every byte request.
 
 from __future__ import annotations
 
-import base64
 import datetime as dt
 import hashlib
-import hmac
 import json
 import math
 import re
@@ -30,11 +28,15 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, 
 
 from . import config, db, delivery_gate, mobile_auth, mobile_media
 from .admin import studio as admin_studio
+from .mobile_api_helpers import MAX_CURSOR_LENGTH as _MAX_CURSOR_LENGTH
+from .mobile_api_helpers import decode_keyset_cursor as _decode_cursor
+from .mobile_api_helpers import encode_keyset_cursor as _encode_cursor
+from .mobile_api_helpers import etag_matches as _etag_matches
+from .mobile_api_helpers import private_headers as _private_headers
+from .mobile_api_helpers import set_private_headers as _set_private_headers
 
 _HEX_COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 _SAFE_JOB_ID = re.compile(r"^[A-Za-z0-9._:-]{1,255}$")
-_PRIVATE_REVALIDATE = "private, no-cache"
-_MAX_CURSOR_LENGTH = 1024
 
 
 class MobileReadModel(BaseModel):
@@ -310,68 +312,6 @@ def _hero_ids(value: object, allowed_asset_ids: set[int]) -> list[int]:
     return result
 
 
-def _cursor_problem() -> mobile_auth.MobileAuthError:
-    return mobile_auth.MobileAuthError(
-        422,
-        "pagination.invalid_cursor",
-        "The pagination cursor is invalid.",
-    )
-
-
-def _encode_cursor(kind: str, values: Sequence[str | int]) -> str:
-    payload = json.dumps(
-        {"v": 1, "kind": kind, "values": list(values)},
-        separators=(",", ":"),
-        ensure_ascii=True,
-    ).encode()
-    if not config.SECRET_KEY:
-        raise RuntimeError("MISE_SECRET_KEY is not set")
-    signature = hmac.new(
-        config.SECRET_KEY.encode(),
-        b"mise-mobile-pagination\0" + payload,
-        hashlib.sha256,
-    ).digest()
-    return base64.urlsafe_b64encode(payload + signature).rstrip(b"=").decode("ascii")
-
-
-def _decode_cursor(cursor: str | None, kind: str, types: Sequence[type]) -> list[str | int] | None:
-    if cursor is None:
-        return None
-    if not cursor or len(cursor) > _MAX_CURSOR_LENGTH:
-        raise _cursor_problem()
-    try:
-        padded = cursor + "=" * (-len(cursor) % 4)
-        raw = base64.b64decode(padded, altchars=b"-_", validate=True)
-        if len(raw) <= hashlib.sha256().digest_size or not config.SECRET_KEY:
-            raise ValueError("invalid signed cursor")
-        payload_bytes = raw[: -hashlib.sha256().digest_size]
-        supplied_signature = raw[-hashlib.sha256().digest_size :]
-        expected_signature = hmac.new(
-            config.SECRET_KEY.encode(),
-            b"mise-mobile-pagination\0" + payload_bytes,
-            hashlib.sha256,
-        ).digest()
-        if not hmac.compare_digest(supplied_signature, expected_signature):
-            raise ValueError("invalid cursor signature")
-        payload = json.loads(payload_bytes)
-    except (ValueError, TypeError, json.JSONDecodeError) as exc:
-        raise _cursor_problem() from exc
-    if not isinstance(payload, dict) or set(payload) != {"v", "kind", "values"}:
-        raise _cursor_problem()
-    values = payload["values"]
-    if payload["v"] != 1 or payload["kind"] != kind or not isinstance(values, list):
-        raise _cursor_problem()
-    if len(values) != len(types):
-        raise _cursor_problem()
-    for value, expected in zip(values, types, strict=True):
-        if expected is int:
-            if isinstance(value, bool) or not isinstance(value, int):
-                raise _cursor_problem()
-        elif not isinstance(value, expected):
-            raise _cursor_problem()
-    return values
-
-
 def _studio_today() -> dt.date:
     return admin_studio._today()
 
@@ -576,32 +516,6 @@ def _vision(row, hero_asset_ids: list[int]) -> GalleryVisionSummary | None:
         # Provider errors can contain local paths or upstream response fragments.
         error="Analysis failed." if has_error else None,
     )
-
-
-def _private_headers(etag: str | None = None) -> dict[str, str]:
-    headers = {"Cache-Control": _PRIVATE_REVALIDATE, "Vary": "Authorization"}
-    if etag is not None:
-        headers["ETag"] = etag
-    return headers
-
-
-def _set_private_headers(response: Response, etag: str | None = None) -> None:
-    for key, value in _private_headers(etag).items():
-        response.headers[key] = value
-
-
-def _etag_matches(header: str | None, etag: str) -> bool:
-    if not header:
-        return False
-    for candidate in header.split(","):
-        value = candidate.strip()
-        if value == "*":
-            return True
-        if value.startswith("W/"):
-            value = value[2:].strip()
-        if value == etag:
-            return True
-    return False
 
 
 def _collection_response[PageT: MobileReadModel](

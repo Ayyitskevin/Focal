@@ -22,9 +22,12 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from . import config, db, mobile_auth
+from . import db, mobile_auth
 from .admin import common as admin_common
 from .admin import studio as admin_studio
+from .mobile_api_helpers import cursor_problem as _cursor_problem
+from .mobile_api_helpers import etag_matches as _etag_matches
+from .mobile_api_helpers import private_headers, require_secret_key
 
 _DEFAULT_PAGE_SIZE = 25
 _MAX_PAGE_SIZE = 100
@@ -243,24 +246,14 @@ router = APIRouter(
 )
 
 
-def _cursor_secret() -> bytes:
-    if not config.SECRET_KEY:
-        raise RuntimeError("MISE_SECRET_KEY is not set")
-    return config.SECRET_KEY.encode("utf-8")
-
-
+# The owner routes use a distinct single-integer cursor wire format (colon-ascii
+# payload, 16-byte truncated signature) — intentionally NOT the keyset codec the
+# gallery/client routes use. Preserved as-is; only the shared secret guard,
+# problem, ETag matcher, and private headers come from mobile_api_helpers.
 def _encode_cursor(resource: str, last_id: int) -> str:
     payload = f"v1:{resource}:{last_id}".encode("ascii")
-    signature = hmac.new(_cursor_secret(), payload, hashlib.sha256).digest()[:16]
+    signature = hmac.new(require_secret_key(), payload, hashlib.sha256).digest()[:16]
     return base64.urlsafe_b64encode(payload + signature).rstrip(b"=").decode("ascii")
-
-
-def _cursor_problem() -> mobile_auth.MobileAuthError:
-    return mobile_auth.MobileAuthError(
-        422,
-        "pagination.invalid_cursor",
-        "The pagination cursor is invalid.",
-    )
 
 
 def _decode_cursor(resource: str, cursor: str | None) -> int | None:
@@ -272,7 +265,7 @@ def _decode_cursor(resource: str, cursor: str | None) -> int | None:
         padded = cursor + "=" * (-len(cursor) % 4)
         decoded = base64.b64decode(padded, altchars=b"-_", validate=True)
         payload, signature = decoded[:-16], decoded[-16:]
-        expected = hmac.new(_cursor_secret(), payload, hashlib.sha256).digest()[:16]
+        expected = hmac.new(require_secret_key(), payload, hashlib.sha256).digest()[:16]
         version, encoded_resource, raw_id = payload.decode("ascii").split(":", 2)
         last_id = int(raw_id)
     except (UnicodeDecodeError, ValueError, TypeError):
@@ -289,26 +282,6 @@ def _decode_cursor(resource: str, cursor: str | None) -> int | None:
     return last_id
 
 
-def _cache_headers(etag: str) -> dict[str, str]:
-    return {
-        "Cache-Control": "private, no-cache",
-        "ETag": etag,
-        "Vary": "Authorization",
-    }
-
-
-def _etag_matches(header: str | None, etag: str) -> bool:
-    if not header:
-        return False
-
-    def weak_value(value: str) -> str:
-        value = value.strip()
-        return value[2:] if value.startswith("W/") else value
-
-    expected = weak_value(etag)
-    return any(part.strip() == "*" or weak_value(part) == expected for part in header.split(","))
-
-
 def _conditional(
     request: Request,
     response: Response,
@@ -321,7 +294,7 @@ def _conditional(
     # Weak is intentional for dashboard: generated_at is excluded so an unchanged
     # semantic snapshot can revalidate even though the observation time advances.
     etag = f'W/"{digest}"'
-    headers = _cache_headers(etag)
+    headers = private_headers(etag)
     if _etag_matches(request.headers.get("if-none-match"), etag):
         return Response(status_code=304, headers=headers)
     for key, value in headers.items():
