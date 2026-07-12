@@ -584,64 +584,71 @@ def _company_next_actions(
     return actions[:6]
 
 
+def _ranked_company_actions(client_id: int, today: dt.date) -> list[dict]:
+    """Assemble one company's derived state and return its ranked next-action list (≤6).
+
+    This is the per-company body the Activity queue rolls up and the company command view shows.
+    Read-only: it only aggregates existing project/invoice/licence/cadence/retainer state.
+    """
+    from .admin import recurring, studio
+
+    group_ids = studio._group_ids(client_id)
+    ph = ",".join("?" * len(group_ids))
+    overdue_rows = _company_overdue_rows(group_ids, today)
+    billing_readiness = studio._company_billing_readiness(client_id, group_ids, overdue_rows)
+    active_projects = db.all_(
+        f"""SELECT p.*, c.name AS client_name
+            FROM projects p JOIN clients c ON c.id=p.client_id
+            WHERE p.client_id IN ({ph}) AND p.status NOT IN ('project_closed','archived')
+            ORDER BY p.shoot_date IS NULL, p.shoot_date, p.created_at DESC""",
+        group_ids,
+    )
+    period = recurring._period()
+    plan_rows = db.all_(
+        f"""SELECT rp.*, c.name AS client_name
+            FROM recurring_plans rp
+            JOIN projects p ON p.id=rp.project_id
+            JOIN clients c ON c.id=p.client_id
+            WHERE p.client_id IN ({ph}) AND rp.active=1 AND rp.deleted_at IS NULL
+            ORDER BY c.name, rp.title""",
+        group_ids,
+    )
+    retainers = []
+    for rp in plan_rows:
+        ov = recurring.compute_overage(rp, period)
+        retainers.append(
+            {
+                "id": rp["id"],
+                "title": rp["title"],
+                "client_name": rp["client_name"],
+                "behind": [line["label"] for line in ov["lines"] if line["done"] < line["target"]],
+            }
+        )
+    cadence = common.shoot_cadence(client_id, today_date=today, include_children=True)
+    return _company_next_actions(
+        client_id,
+        group_ids,
+        cadence,
+        overdue_rows,
+        active_projects,
+        retainers,
+        _ar_chase_history(client_id, today),
+        billing_readiness,
+    )
+
+
 def _ctx_commercial_actions(today: dt.date) -> list[dict]:
     """Studio-wide commercial action queue.
 
     Rolls up the top derived company action per root client into the Activity page. This reuses the
     company-view ranking and remains read-only: no tasks, sends, charges, publishes, or closes.
     """
-    from .admin import recurring, studio
-
-    period = recurring._period()
     actions: list[dict] = []
     roots = db.all_(
         "SELECT id, name, company FROM clients WHERE parent_id IS NULL ORDER BY company, name"
     )
     for c in roots:
-        group_ids = studio._group_ids(c["id"])
-        ph = ",".join("?" * len(group_ids))
-        overdue_rows = _company_overdue_rows(group_ids, today)
-        billing_readiness = studio._company_billing_readiness(c["id"], group_ids, overdue_rows)
-        active_projects = db.all_(
-            f"""SELECT p.*, c.name AS client_name
-                FROM projects p JOIN clients c ON c.id=p.client_id
-                WHERE p.client_id IN ({ph}) AND p.status NOT IN ('project_closed','archived')
-                ORDER BY p.shoot_date IS NULL, p.shoot_date, p.created_at DESC""",
-            group_ids,
-        )
-        plan_rows = db.all_(
-            f"""SELECT rp.*, c.name AS client_name
-                FROM recurring_plans rp
-                JOIN projects p ON p.id=rp.project_id
-                JOIN clients c ON c.id=p.client_id
-                WHERE p.client_id IN ({ph}) AND rp.active=1 AND rp.deleted_at IS NULL
-                ORDER BY c.name, rp.title""",
-            group_ids,
-        )
-        retainers = []
-        for rp in plan_rows:
-            ov = recurring.compute_overage(rp, period)
-            retainers.append(
-                {
-                    "id": rp["id"],
-                    "title": rp["title"],
-                    "client_name": rp["client_name"],
-                    "behind": [
-                        line["label"] for line in ov["lines"] if line["done"] < line["target"]
-                    ],
-                }
-            )
-        cadence = common.shoot_cadence(c["id"], today_date=today, include_children=True)
-        ranked = _company_next_actions(
-            c["id"],
-            group_ids,
-            cadence,
-            overdue_rows,
-            active_projects,
-            retainers,
-            _ar_chase_history(c["id"], today),
-            billing_readiness,
-        )
+        ranked = _ranked_company_actions(c["id"], today)
         if not ranked:
             continue
         first = dict(ranked[0])
