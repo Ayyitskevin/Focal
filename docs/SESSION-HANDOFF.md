@@ -11,7 +11,11 @@ Kevin is mid-reskin on his machine; treat uncommitted changes as live work.
 - [x] Deliverable 1: docs/MISE-REVIEW.md (checkpoint 2)
 - [x] iOS app audit sub-step of Deliverable 2 (checkpoint 3)
 - [x] Deliverable 2: docs/IOS-UPGRADE.md (checkpoint 4)
-- [ ] Deliverable 3: docs/HANDOFF-QUEUE.md (checkpoint 5)
+- [x] Deliverable 3: docs/HANDOFF-QUEUE.md (checkpoint 5)
+
+**All deliverables complete.** PR #145 (checkpoints 1–2) was merged by
+Kevin mid-session; checkpoints 3–5 continue on this branch in a follow-up
+draft PR.
 
 ## Key findings so far
 
@@ -53,14 +57,10 @@ mickeybot — stale post-075, worth pruning.
 
 ## Next concrete step
 
-Deliverable 3 (docs/HANDOFF-QUEUE.md): turn MISE-REVIEW.md's lane ratings +
-IOS-UPGRADE.md's 7 steps into an ordered queue split Opus (judgment-heavy:
-AI-sidecar consolidation plan, commercial-spine API design, distribution
-decision) / Sonnet (mechanical: iOS CI job, CLAUDE.md doc fixes,
-.env.example pruning, cursor/ETag helper consolidation, rename). Every task
-needs done criteria + real verification + risk tag; money/auth/migrations/
-contracts/deploy = red-light → reviewed draft PR. Then final handoff update
-+ PR body update. Draft PR is #145.
+Mission complete — nothing left tonight. Next session: pick up
+docs/HANDOFF-QUEUE.md in its suggested order (S2 doc fixes first, then S1
+iOS CI job); O1 (sidecar consolidation ADR) is the first Opus item. Do not
+start S6/O4 without a reviewed draft PR (red-light).
 
 ### iOS audit facts (established; verified in the M3 session today)
 
@@ -85,9 +85,10 @@ contracts/deploy = red-light → reviewed draft PR. Then final handoff update
 
 ## Git state
 
-- Branch: `claude/mise-review-ios-plan` (from origin/main @ b641388)
-- Pushed: yes
-- Draft PR: #145 (docs-only; keep pushing to it; never self-merge)
+- Branch: `claude/mise-review-ios-plan`, rebased onto origin/main @
+  10d201c after Kevin merged PR #145 (checkpoints 1–2) mid-session
+- Pushed: yes (checkpoints 3–5 in the follow-up draft PR — see PR list)
+- Merged already: MISE-REVIEW.md + the topology finding (via #145)
 
 ## Open questions for Kevin
 
