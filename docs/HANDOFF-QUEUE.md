@@ -90,17 +90,27 @@ self-applied. Sources: `docs/MISE-REVIEW.md` (review), `docs/IOS-UPGRADE.md`
   requirements; no code assumption collapsed before the decision.
 - **Risk:** normal (product decision); blocks nothing else in this queue.
 
-### O4. Sidecar credential hygiene review (security flag from review §6)
+### O4. Sidecar credential hygiene review (security flag from review §6) — DONE
 - **What:** Investigate the three flags: static long-lived sidecar bearer
   tokens with no rotation story; plain-`http://` challenger endpoints
   carrying client-media derivatives; post-075 stale homelab config in
   `.env.example`. Decide rotation policy and transport requirements —
   partially subsumed by O1 (consolidation removes most sidecar auth).
-- **Done:** findings + remediation plan handed to a security review;
-  anything auth-touching ships as red-light PRs.
-- **Verify:** each flag either remediated, scheduled, or explicitly
-  accepted with rationale.
-- **Risk:** **red-light** (auth) → reviewed draft PR only.
+- **Delivered (ADR 0069, draft PR):** disposition per flag — flag 3
+  **remediated** (S2 removed `MISE_ALBUM_CHALLENGER_URL`; grep clean); flag 1
+  **scheduled** — interim rotation policy + `docs/SECURITY.md` procedure over
+  the ADR 0065 cadence (inbound gates already constant-time + fail-disarmed),
+  mechanism deferred to O1; flag 2 **partially remediated** — a non-auth
+  startup cleartext-transport WARNING (`config.insecure_sidecar_endpoints()` +
+  `app/main.py` lifespan, unit-tested), hard scheme-enforcement deferred as a
+  sign-off-gated red-light PR (can't hard-fail the live Argus default). Rule:
+  https on non-loopback; http only to loopback.
+- **Verify:** each flag remediated / scheduled / accepted with rationale —
+  see ADR 0069 disposition table; unit suite + ruff green; no live path,
+  auth check, or transport altered by the shipped code.
+- **Risk:** **red-light** (auth) → reviewed draft PR only. The two auth-touching
+  follow-ups (hard scheme enforcement; rotation mechanism) are named and left
+  for their own reviewed PRs.
 
 ## Sonnet lane — mechanical, fully specified
 
@@ -173,11 +183,13 @@ self-applied. Sources: `docs/MISE-REVIEW.md` (review), `docs/IOS-UPGRADE.md`
 Original: S2 → S1 → O1 → S3 → S4 → S5 → O2 → S6 → O4 → O3.
 
 **Done (merged):** S2, S1 (incl. fixing the compile errors it surfaced — the
-iOS app had never been built), O1 (ADR 0068). **Done (design):** O2 — which
-spawned S7 → S8 → S9.
+iOS app had never been built), O1 (ADR 0068), S3, S7, S8, S9, S4, S5. **Done
+(design):** O2 — which spawned S7 → S8 → S9. **Done (draft PR, awaiting merge):**
+O4 (ADR 0069 — credential-hygiene disposition + non-auth cleartext warning).
 
-**Remaining order:** S3 → S7 → S8 → S9 → S4 → S5 → S6 → O4 → O3.
-S7 precedes S8 (extract before reuse); S6 (M4a mutations) and the AR-chase
-send command are red-light and wait on their reviewed PRs. O3 (iOS
-distribution) and the Dionysus fate (from O1) are the two decisions still
-open for Kevin.
+**Remaining:** S6 → O3.
+S6 (M4a mutations) and the AR-chase send command are red-light and wait on
+their reviewed PRs. O4's two auth-touching follow-ups (hard scheme
+enforcement; a rotation mechanism) are likewise red-light and named in ADR
+0069. O3 (iOS distribution) and the Dionysus fate (from O1) are the two
+decisions still open for Kevin.
