@@ -32,9 +32,17 @@ on the tenant's own Stripe key, fail-closed (ADR 0053).
 | Per-tenant Stripe secret + webhook secret | control DB | Tenant re-pastes in `/admin/account` | Previous webhook secret stays verifiable for in-flight sessions (ADR 0054 rotation grace) — rotate freely. |
 | `MISE_TELEGRAM_TOKEN` | env | Revoke via BotFather, update env, restart | Alerts pause; nothing user-facing. |
 | `MISE_SAAS_INVITE_CODE` | env | Change/unset, restart | Gates new signups only. |
+| Sidecar bearer tokens (`MISE_ARGUS_TOKEN`, `MISE_ODYSSEUS_CAPTION_TOKEN`, `MISE_PLATEKIT_API_TOKEN`, `MISE_SHOTS_TOKEN`, `MISE_VISION_CHALLENGER_TOKEN`) | env, each shared with one peer | Provision the new token on the **inbound** peer first (its gate keeps accepting the old until you drop it), swap the outbound peer, restart both; where no overlap window exists, accept a brief coordinated-restart gap. Rotate on suspected exposure; else on the standard interval. | Only that one sidecar's calls; inbound gates fail **disarmed** (503, feature dormant) if misconfigured, never open (ADR 0069). |
 
 Never commit any of these; `.env` is gitignored and `.env.example` carries placeholders
 only. Tests must never require real secrets.
+
+**Sidecar transport (ADR 0069).** An armed sidecar on a non-loopback host must use
+`https://`; cleartext `http://` is acceptable only to a loopback host. At startup Mise logs
+one `WARNING` per armed endpoint that is `http://` to a non-loopback host (naming the env var
+and, for the vision challenger, its client-media exposure) — heed it and move that endpoint to
+TLS. The consolidation in ADR 0068 removes these tokens and hops entirely as each capability
+becomes in-process or a direct hosted-vendor (TLS) API call.
 
 ## Sessions: how access actually dies
 

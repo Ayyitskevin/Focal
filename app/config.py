@@ -3,6 +3,7 @@
 import os
 from contextvars import ContextVar
 from pathlib import Path
+from urllib.parse import urlparse
 
 _ENV_FILE = os.environ.get("MISE_ENV_FILE", "/opt/mise/.env")
 
@@ -339,6 +340,53 @@ PLATEKIT_API_TOKEN = os.environ.get(
 PLATEKIT_TIMEOUT = int(
     os.environ.get("MISE_PLATEKIT_TIMEOUT", os.environ.get("MISE_DIONYSUS_TIMEOUT", "10"))
 )
+
+
+def _is_loopback_host(host: str | None) -> bool:
+    """True for hosts that never leave the box (so plain http is fine there).
+
+    Deliberately a literal check, not a DNS/IP resolution — startup must not block
+    on name lookups, and the goal is only to spare an operator running a sidecar on
+    localhost a spurious cleartext warning. A LAN/tailnet host (e.g. ``mickeybot``)
+    is intentionally NOT loopback: that's the case the warning is for.
+    """
+    if not host:
+        return False
+    host = host.strip("[]").lower()  # strip IPv6 brackets from urlparse hostname
+    return host in ("localhost", "::1") or host == "127.0.0.1" or host.startswith("127.")
+
+
+def insecure_sidecar_endpoints() -> list[tuple[str, str]]:
+    """Armed outbound sidecar endpoints reachable over cleartext ``http://`` to a
+    non-loopback host — where a bearer token and, for the vision challenger, client-
+    media derivatives would transit unencrypted (MISE-REVIEW §6.2 / ADR 0069).
+
+    Pure and side-effect-free: returns ``(label, url)`` for each such endpoint, or an
+    empty list when nothing is armed or every armed endpoint is https/loopback. The
+    caller decides what to do with it (today: a startup warning in ``app.main``). This
+    reports posture only — it changes no transport and blocks nothing, so it can never
+    disarm a capability the operator has deliberately configured.
+    """
+    # Only endpoints Mise actually POSTs to; each is "armed" once its URL is set.
+    # (Inbound bearer surfaces — /api/galleries, /api/shots — are gated by the caller's
+    # own TLS, not ours, so they're out of scope here.)
+    candidates = (
+        ("MISE_ARGUS_URL", ARGUS_URL),
+        ("MISE_ODYSSEUS_CAPTION_URL", ODYSSEUS_CAPTION_URL),
+        ("MISE_PLATEKIT_API_BASE", PLATEKIT_API_BASE),
+        ("MISE_VISION_CHALLENGER_URL", VISION_CHALLENGER_URL),
+        ("MISE_REOPEN_NOTIFY_URL", REOPEN_NOTIFY_URL),
+        ("MISE_PRODUCTS_RENDER_URL", PRODUCTS_RENDER_URL),
+    )
+    insecure: list[tuple[str, str]] = []
+    for label, url in candidates:
+        if not url:
+            continue
+        parsed = urlparse(url)
+        if parsed.scheme == "http" and not _is_loopback_host(parsed.hostname):
+            insecure.append((label, url))
+    return insecure
+
 
 WEB_MAX_PX = int(os.environ.get("MISE_WEB_MAX_PX", "2048"))
 THUMB_MAX_PX = int(os.environ.get("MISE_THUMB_MAX_PX", "480"))

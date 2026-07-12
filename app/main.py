@@ -7,6 +7,7 @@ Mise — self-hosted F&B photography delivery · FastAPI + HTMX · port 8400
 import logging
 import secrets
 from contextlib import asynccontextmanager
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.exception_handlers import http_exception_handler
@@ -101,6 +102,18 @@ async def lifespan(app: FastAPI):
     jobs.start()
     scheduler.start()
     log.info("Mise up on :%s · data=%s", config.PORT, config.DATA_DIR)
+    # Cleartext-transport heads-up (MISE-REVIEW §6.2 / ADR 0069): an armed sidecar
+    # over plain http:// to a non-loopback host sends its bearer token — and, for the
+    # vision challenger, client-media derivatives — unencrypted. Warn, never block:
+    # this is posture visibility, not an auth/transport change.
+    for label, url in config.insecure_sidecar_endpoints():
+        log.warning(
+            "sidecar %s is armed over cleartext http:// (%s) — this exposes its bearer "
+            "token%s unencrypted; use https or a loopback/tunnelled endpoint (ADR 0069)",
+            label,
+            urlsplit(url)._replace(query="", fragment="").geturl(),
+            " and client-media derivatives" if label == "MISE_VISION_CHALLENGER_URL" else "",
+        )
     yield
     scheduler.stop()
     jobs.stop()
