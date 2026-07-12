@@ -9,8 +9,8 @@ Kevin is mid-reskin on his machine; treat uncommitted changes as live work.
 
 - [x] AI-capability topology confirmed from adapter code (checkpoint 1)
 - [x] Deliverable 1: docs/MISE-REVIEW.md (checkpoint 2)
-- [ ] iOS app audit sub-step of Deliverable 2 (checkpoint 3)
-- [ ] Deliverable 2: docs/IOS-UPGRADE.md (checkpoint 4)
+- [x] iOS app audit sub-step of Deliverable 2 (checkpoint 3)
+- [x] Deliverable 2: docs/IOS-UPGRADE.md (checkpoint 4)
 - [ ] Deliverable 3: docs/HANDOFF-QUEUE.md (checkpoint 5)
 
 ## Key findings so far
@@ -53,12 +53,14 @@ mickeybot — stale post-075, worth pruning.
 
 ## Next concrete step
 
-Deliverable 2 (docs/IOS-UPGRADE.md). The iOS audit facts are already
-established (see below) — write the audit section from them, then the
-ordered upgrade plan. Anchor on docs/IOS-ARCHITECTURE.md §10 (M4 safe
-mutations, M5 operations) + the commercial-spine gap named in
-docs/MISE-REVIEW.md §5, and flag the single-tenant vs hosted-SaaS product
-question without answering it.
+Deliverable 3 (docs/HANDOFF-QUEUE.md): turn MISE-REVIEW.md's lane ratings +
+IOS-UPGRADE.md's 7 steps into an ordered queue split Opus (judgment-heavy:
+AI-sidecar consolidation plan, commercial-spine API design, distribution
+decision) / Sonnet (mechanical: iOS CI job, CLAUDE.md doc fixes,
+.env.example pruning, cursor/ETag helper consolidation, rename). Every task
+needs done criteria + real verification + risk tag; money/auth/migrations/
+contracts/deploy = red-light → reviewed draft PR. Then final handoff update
++ PR body update. Draft PR is #145.
 
 ### iOS audit facts (established; verified in the M3 session today)
 
@@ -85,11 +87,16 @@ question without answering it.
 
 - Branch: `claude/mise-review-ios-plan` (from origin/main @ b641388)
 - Pushed: yes
-- Draft PR: none yet (open when first real deliverable content lands)
+- Draft PR: #145 (docs-only; keep pushing to it; never self-merge)
 
 ## Open questions for Kevin
 
-- (none yet)
+- Does the iOS app serve kleephotography single-tenant use only, or does
+  it need eventual hosted multi-tenant awareness? (IOS-UPGRADE.md step 6
+  is blocked on this; nothing else is.)
+- Sidecar consolidation: confirm the target is "inside the app's
+  deployable unit, hosted model APIs as vendors OK" — assumed from the
+  architecture directive; the Opus queue item is scoped that way.
 
 ## Resume message
 
