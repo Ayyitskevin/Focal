@@ -190,7 +190,7 @@ authorization; authorization is reevaluated on every page.
 | `POST /api/v1/contracts/{id}/sign` | hash/version checked signature evidence |
 | `POST /api/v1/invoices/{id}/checkout` | return server-created hosted checkout URL |
 | `POST /api/v1/bookings` | atomically revalidate slot and create booking |
-| `POST /api/v1/bookings/{id}/cancel` | cancel within policy |
+| `POST /api/v1/bookings/{id}/cancel` | owner: idempotently cancel a confirmed booking; audited; fires the client cancel notice (implemented, M4a) |
 | `POST /api/v1/bookings/{id}/reschedule` | atomically create replacement/cancel old |
 | `PATCH /api/v1/galleries/{g}/assets/{a}/cull` | owner keep/cut/restore command |
 | `POST /api/v1/captions/{id}/draft` | explicit AI draft; never auto-approve |

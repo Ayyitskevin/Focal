@@ -26,7 +26,16 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from . import config, db, delivery_gate, mobile_auth, mobile_media
+from . import (
+    audit,
+    booking_notify,
+    config,
+    db,
+    delivery_gate,
+    mobile_auth,
+    mobile_media,
+    scheduling,
+)
 from .admin import studio as admin_studio
 from .mobile_api_helpers import MAX_CURSOR_LENGTH as _MAX_CURSOR_LENGTH
 from .mobile_api_helpers import decode_keyset_cursor as _decode_cursor
@@ -698,3 +707,55 @@ def list_bookings(
         next_cursor = _encode_cursor("bookings", (str(last["start_utc"]), int(last["id"])))
     page = APIPage[Booking](items=items, next_cursor=next_cursor, has_more=has_more)
     return _collection_response(request, response, page, resource="bookings")
+
+
+# One booking row, shaped for _booking_from_row (same columns as the list read).
+_BOOKING_BY_ID = """SELECT b.id, b.event_type_id, e.name AS event_name, b.name,
+                           b.email, b.phone, b.notes, b.start_utc, b.end_utc, b.tz,
+                           b.status, b.client_id, b.project_id, b.reschedule_of,
+                           b.cancel_reason, b.cancelled_at, b.created_at
+                      FROM bookings b JOIN event_types e ON e.id=b.event_type_id
+                      WHERE b.id=?"""
+
+
+def _require_studio_write(principal: mobile_auth.Principal) -> None:
+    """A mutation needs studio:write; the router already proved studio:read + owner."""
+    if "studio:write" not in principal.scopes:
+        raise mobile_auth.MobileAuthError(
+            403,
+            "auth.insufficient_scope",
+            "This action requires studio write access.",
+        )
+
+
+@router.post("/bookings/{booking_id}/cancel", response_model=Booking, tags=["scheduling"])
+def cancel_booking(
+    booking_id: Annotated[int, Path(ge=1)],
+    principal: Annotated[mobile_auth.Principal, Depends(require_studio_owner)],
+    response: Response,
+) -> Booking:
+    """Owner-authoritative booking cancel (M4a). Reuses the canonical
+    ``scheduling.cancel`` (its ``WHERE status='confirmed'`` guard makes this
+    idempotent — a repeat call is a no-op returning the already-cancelled state,
+    with no second email/calendar-drop and no second audit row). Only a real
+    ``confirmed → cancelled`` transition writes an audit row and fires the client
+    cancellation notice; the web ``/admin`` cancel writes no audit row."""
+    _require_studio_write(principal)
+    existing = db.one("SELECT token, status FROM bookings WHERE id=?", (booking_id,))
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Booking not found.")
+    if existing["status"] == "confirmed" and scheduling.cancel(
+        existing["token"], "Cancelled from the studio app"
+    ):
+        with db.tx() as con:
+            audit.log(
+                con,
+                "booking",
+                booking_id,
+                "cancel",
+                diff={"status": ["confirmed", "cancelled"]},
+                actor="owner",
+            )
+        booking_notify.cancelled(booking_id, by_admin=True)
+    _set_private_headers(response)
+    return _booking_from_row(db.one(_BOOKING_BY_ID, (booking_id,)))
