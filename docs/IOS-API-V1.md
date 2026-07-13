@@ -184,6 +184,8 @@ authorization; authorization is reevaluated on every page.
 | --- | --- |
 | `PUT /api/v1/galleries/{g}/assets/{a}/favorite` | idempotently select (implemented, Milestone 3) |
 | `DELETE /api/v1/galleries/{g}/assets/{a}/favorite` | idempotently unselect (implemented, Milestone 3) |
+| `PUT /api/v1/tasks/{id}/completion` | owner: idempotently check a task off; audited (implemented, M4a) |
+| `DELETE /api/v1/tasks/{id}/completion` | owner: idempotently reopen a task; audited (implemented, M4a) |
 | `POST /api/v1/galleries/{g}/assets/{a}/comments` | add video comment/reply |
 | `POST /api/v1/proposals/{id}/accept` | server-authoritative transition |
 | `POST /api/v1/proposals/{id}/decline` | server-authoritative transition |
@@ -198,6 +200,14 @@ authorization; authorization is reevaluated on every page.
 Contract signing, checkout, booking, rescheduling, and AI commands require an
 `Idempotency-Key`. The server retains transition rules, amount math, hash checks,
 Stripe reconciliation, audit logging, and workflow dispatch.
+
+Task check-off (M4a) needs no `Idempotency-Key`: like the favorite toggle it models
+completion as an idempotent sub-resource (`PUT` = ensure done, `DELETE` = ensure
+open), so a repeat call is a safe no-op returning current state. It requires an owner
+bearer carrying `studio:write` and writes one `audit_log` row per real transition
+(`task`/`complete`|`reopen`, actor `owner`) — the web `/admin/tasks/{id}/toggle` path
+writes none. Booking cancel/reschedule (which is *not* naturally idempotent — each
+reschedule creates a new row) land next and bring the `Idempotency-Key` replay store.
 
 ## Owner commercial spine (implemented — read-only)
 

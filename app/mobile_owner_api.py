@@ -19,10 +19,10 @@ import hmac
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from . import db, mobile_auth
+from . import audit, db, mobile_auth
 from .admin import common as admin_common
 from .admin import studio as admin_studio
 from .mobile_api_helpers import cursor_problem as _cursor_problem
@@ -76,6 +76,24 @@ class TaskSummary(OwnerAPIModel):
     project_id: int | None = Field(default=None, gt=0, le=_INT64_MAX)
     project_title: str | None = Field(default=None, min_length=1, max_length=2000)
     is_overdue: bool
+
+
+class TaskCompletion(OwnerAPIModel):
+    """Result of a task check-off / reopen. ``completed_at`` is the server clock at
+    the moment it was checked off (null once reopened)."""
+
+    id: int = Field(gt=0, le=_INT64_MAX)
+    done: bool
+    completed_at: dt.datetime | None = None
+
+    @field_validator("completed_at")
+    @classmethod
+    def completed_at_is_utc(cls, value: dt.datetime | None) -> dt.datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("completed_at must be timezone-aware")
+        return value.astimezone(dt.UTC)
 
 
 class UpcomingProject(OwnerAPIModel):
@@ -596,3 +614,69 @@ def projects(
         has_more=has_more,
     )
     return _conditional(request, response, payload)
+
+
+# ── Mutations ────────────────────────────────────────────────────────────────
+# The first owner *write* in the native API (M4a). The router-level dependency
+# already proves an owner bearer with studio:read; a mutation additionally
+# requires studio:write, so a hypothetical read-only owner token cannot check a
+# task off. These two routes model completion as an idempotent sub-resource
+# (PUT = ensure done, DELETE = ensure open), mirroring the gallery favorite
+# toggle — a repeat call is a safe no-op returning current state, so no
+# Idempotency-Key is needed (the state transition is itself idempotent). Unlike
+# the web /admin/tasks/{id}/toggle, each real transition writes an audit_log row.
+
+
+def _require_studio_write(principal: mobile_auth.Principal) -> None:
+    if "studio:write" not in principal.scopes:
+        raise mobile_auth.MobileAuthError(
+            403,
+            "auth.insufficient_scope",
+            "This action requires studio write access.",
+        )
+
+
+def _task_completion(row: object) -> TaskCompletion:
+    done_at = row["done_at"]
+    return TaskCompletion(
+        id=int(row["id"]),
+        done=bool(row["done"]),
+        completed_at=_utc_timestamp(done_at) if done_at else None,
+    )
+
+
+def _set_task_completion(task_id: int, *, done: bool) -> TaskCompletion:
+    """Move a task to the requested completion state and return it. Idempotent:
+    a task already in the target state is left untouched (no audit row). The read,
+    the conditional write, and the audit row share one transaction."""
+    with db.tx() as con:
+        row = con.execute("SELECT id, done, done_at FROM tasks WHERE id=?", (task_id,)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        currently_done = bool(row["done"])
+        if done and not currently_done:
+            con.execute("UPDATE tasks SET done=1, done_at=datetime('now') WHERE id=?", (task_id,))
+            audit.log(con, "task", task_id, "complete", diff={"done": [0, 1]}, actor="owner")
+        elif not done and currently_done:
+            con.execute("UPDATE tasks SET done=0, done_at=NULL WHERE id=?", (task_id,))
+            audit.log(con, "task", task_id, "reopen", diff={"done": [1, 0]}, actor="owner")
+        fresh = con.execute("SELECT id, done, done_at FROM tasks WHERE id=?", (task_id,)).fetchone()
+    return _task_completion(fresh)
+
+
+@router.put("/tasks/{task_id}/completion", response_model=TaskCompletion)
+def complete_task(
+    task_id: Annotated[int, Path(ge=1, le=_INT64_MAX)],
+    principal: Annotated[mobile_auth.Principal, Depends(require_studio_owner)],
+) -> TaskCompletion:
+    _require_studio_write(principal)
+    return _set_task_completion(task_id, done=True)
+
+
+@router.delete("/tasks/{task_id}/completion", response_model=TaskCompletion)
+def reopen_task(
+    task_id: Annotated[int, Path(ge=1, le=_INT64_MAX)],
+    principal: Annotated[mobile_auth.Principal, Depends(require_studio_owner)],
+) -> TaskCompletion:
+    _require_studio_write(principal)
+    return _set_task_completion(task_id, done=False)

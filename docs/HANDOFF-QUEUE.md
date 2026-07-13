@@ -177,6 +177,24 @@ self-applied. Sources: `docs/MISE-REVIEW.md` (review), `docs/IOS-UPGRADE.md`
   cross-principal denial; iOS tests under S1 CI.
 - **Risk:** **red-light** (booking/money-adjacent state, audit trail) →
   reviewed draft PR, human merge.
+- **Decomposition (mapped from the real server flows):** one command per PR,
+  risk ascending. The `Idempotency-Key` header/replay store does **not** exist
+  yet (the M3 favorite toggle got idempotency free from PUT/DELETE); it is only
+  strictly needed by reschedule, so it lands with S6c.
+  - **S6a — owner task check-off — DONE (draft PR):** first owner *write*.
+    `PUT`/`DELETE /api/v1/tasks/{id}/completion` (naturally idempotent, no key),
+    requires `studio:write`, one `audit_log` row per real transition
+    (`task`/`complete`|`reopen`, actor `owner`). Backend + 7 contract tests
+    (idempotent replay, reopen, 404, guest-refused, read-only-owner-refused).
+    Mirrors `admin/activity.py::task_toggle` semantics; the web path writes no
+    audit row, the native one does. iOS wiring deferred to S6d.
+  - **S6b — booking cancel:** `POST /api/v1/bookings/{id}/cancel`. Naturally
+    idempotent via the `WHERE status='confirmed'` guard (`scheduling.cancel`);
+    fires `booking_notify.cancelled`. Principal + policy TBD (owner vs client).
+  - **S6c — booking reschedule + Idempotency-Key store:** create-new + cancel-old
+    (`book(..., exclude_id=)`, 409 on `SlotTaken`); NOT naturally idempotent, so
+    this slice builds the header parse + replay table (migration → red-light).
+  - **S6d — iOS wiring** for the above (owner tasks screen; client/owner bookings).
 
 ## Suggested order
 
