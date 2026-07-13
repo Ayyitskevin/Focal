@@ -1,6 +1,6 @@
 # Mise for iOS — architecture and delivery plan
 
-Status: Milestones 1–3 implemented; safe mutations next
+Status: Milestones 1–3 implemented; Milestone 4a backend mutations in progress
 Design source: the "Mise Mobile" design handoff (owner + client, iPhone/iPad,
 light/dark) is the visual reference for screens, copy tone, and tokens
 Minimum OS: iOS 17 / iPadOS 17
@@ -300,7 +300,10 @@ of reusing the current bearer token.
 
 ### Milestone 4 — safe mutations
 
-- CRM/project edits, tasks, booking/cancel/reschedule, proposal decisions
+- owner task completion and booking cancellation implemented; atomic booking
+  reschedule implemented in S6c, with merge/activation held on the S6e
+  client-calendar workflow and iOS wiring still queued
+- CRM/project edits and proposal decisions remain planned
 - idempotency, optimistic queues where safe, audit coverage
 - native e-sign only after legal/security review
 

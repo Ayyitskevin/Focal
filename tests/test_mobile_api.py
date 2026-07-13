@@ -106,6 +106,7 @@ def test_tenant_discovery_and_openapi_are_scoped_native_contracts(mobile_client)
         "/event-types",
         "/bookings",
         "/bookings/{booking_id}/cancel",
+        "/bookings/{booking_id}/reschedule",
         "/client/home",
         "/client/galleries",
         "/client/galleries/{gallery_id}",
@@ -121,6 +122,31 @@ def test_tenant_discovery_and_openapi_are_scoped_native_contracts(mobile_client)
         "/media/galleries/{gallery_id}/assets/{asset_id}/{variant}",
     }
     assert all("admin" not in path for path in schema["paths"])
+
+    reschedule = schema["paths"]["/bookings/{booking_id}/reschedule"]["post"]
+    idempotency_header = next(
+        parameter
+        for parameter in reschedule["parameters"]
+        if parameter["in"] == "header" and parameter["name"] == "Idempotency-Key"
+    )
+    assert idempotency_header["required"] is True
+    assert idempotency_header["schema"]["format"] == "uuid"
+    assert reschedule["requestBody"]["required"] is True
+    assert reschedule["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/BookingRescheduleRequest"
+    }
+    request_schema = schema["components"]["schemas"]["BookingRescheduleRequest"]
+    assert set(request_schema["required"]) == {"start_at", "time_zone"}
+    assert request_schema["additionalProperties"] is False
+    assert reschedule["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/BookingRescheduleResult"
+    }
+    assert {"401", "403", "404", "409", "422", "429"} <= set(reschedule["responses"])
+    for status in ("401", "403", "404", "409", "422", "429"):
+        assert set(reschedule["responses"][status]["content"]) == {"application/problem+json"}
+        assert reschedule["responses"][status]["content"]["application/problem+json"]["schema"] == {
+            "$ref": "#/components/schemas/APIProblem"
+        }
 
 
 def test_owner_login_me_device_list_refresh_replay_and_logout(mobile_client):

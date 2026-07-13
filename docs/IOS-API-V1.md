@@ -7,7 +7,8 @@ project collections, gallery manifests, event types, and booking agenda.
 Milestone 3 (ADR 0067) adds the shared-client reads (`/client/home`,
 `/client/galleries`, `/client/bookings`, project document collections), the
 gallery-guest favorite toggle, and bearer-authenticated media routes. The
-remaining commands stay in the planned Milestone 4 contract.
+Milestone 4a adds owner task completion, booking cancellation, and the
+session-bound booking-reschedule command below. Other commands remain planned.
 
 ## Conventions
 
@@ -193,7 +194,7 @@ authorization; authorization is reevaluated on every page.
 | `POST /api/v1/invoices/{id}/checkout` | return server-created hosted checkout URL |
 | `POST /api/v1/bookings` | atomically revalidate slot and create booking |
 | `POST /api/v1/bookings/{id}/cancel` | owner: idempotently cancel a confirmed booking; audited; fires the client cancel notice (implemented, M4a) |
-| `POST /api/v1/bookings/{id}/reschedule` | atomically create replacement/cancel old |
+| `POST /api/v1/bookings/{id}/reschedule` | owner: atomically create replacement/cancel old; audited; session-bound replay (backend implemented; activation held on S6e) |
 | `PATCH /api/v1/galleries/{g}/assets/{a}/cull` | owner keep/cut/restore command |
 | `POST /api/v1/captions/{id}/draft` | explicit AI draft; never auto-approve |
 
@@ -206,8 +207,57 @@ completion as an idempotent sub-resource (`PUT` = ensure done, `DELETE` = ensure
 open), so a repeat call is a safe no-op returning current state. It requires an owner
 bearer carrying `studio:write` and writes one `audit_log` row per real transition
 (`task`/`complete`|`reopen`, actor `owner`) — the web `/admin/tasks/{id}/toggle` path
-writes none. Booking cancel/reschedule (which is *not* naturally idempotent — each
-reschedule creates a new row) land next and bring the `Idempotency-Key` replay store.
+writes none. Booking cancellation is naturally idempotent. Rescheduling is not — each
+successful command creates a new row — so it uses the replay contract below.
+
+### Owner booking reschedule
+
+`POST /api/v1/bookings/{booking_id}/reschedule` requires an exact
+`studio_owner` bearer with `studio:write` plus a UUID `Idempotency-Key` header.
+
+    {
+      "start_at": "2026-07-16T11:00:00Z",
+      "time_zone": "America/New_York"
+    }
+
+`start_at` is an aware RFC 3339 whole-second instant; equivalent offsets and a
+zero fractional component canonicalize to UTC. `time_zone` is a valid IANA name
+used for the replacement booking's client-facing display context. The destination
+still comes from business-local availability and is revalidated server-side.
+
+    {
+      "status": "rescheduled",
+      "original_booking_id": 41,
+      "replacement_booking_id": 42,
+      "start_at": "2026-07-16T11:00:00Z",
+      "end_at": "2026-07-16T12:00:00Z"
+    }
+
+After a SQLite `BEGIN IMMEDIATE` writer lock, the command rechecks the mobile
+session, source state, event type, availability, notice/window policy, overlaps,
+and daily cap. Replacement creation, source cancellation, linkage/intake carryover,
+two audit rows, and the exact minimal replay response commit together. No bearer,
+raw idempotency key, booking manage token, or client contact field is copied into
+the receipt or audit payload.
+
+Replay scope is deliberately `(session_id, hash(Idempotency-Key))`. A refreshed
+access token in the same device session gets the exact stored response; the same
+key with a different canonical request returns `409 idempotency.key_conflict`.
+A logout/new login is a new replay namespace. Receipts become unusable at the
+session's absolute expiry and the recurring scheduler physically prunes them.
+This session scope is approved for booking reschedule only; payment/signature
+commands need their own durable-identity decision before reusing it.
+
+State conflicts return stable `409` codes: `booking.not_reschedulable`,
+`booking.unchanged`, `booking.event_unavailable`, or `booking.slot_unavailable`.
+Unknown bookings are `404`; malformed body/header input is `422`.
+
+The first execution invokes the existing `booking_notify.confirm(replacement)`
+workflow only after commit; replays do not invoke it again. Those email, Notion,
+inquiry, and Google Calendar effects remain best-effort and are **not** covered by
+the database transaction or replay guarantee. Crash-durable, per-effect dispatch
+and explicit old-invite cancellation are queued separately as S6e; clients must not
+interpret a `200` as proof that every external provider completed.
 
 ## Owner commercial spine (implemented — read-only)
 

@@ -3,6 +3,12 @@
 Companion to `docs/MISE-REVIEW.md`. Audit first (verified against `ios/` at
 `origin/main` @ `b641388`), then the ordered plan.
 
+Delivery update (2026-07-13): the macOS iOS gate, shared helpers, owner commercial
+spine, resource rename, and document deep links have landed. Milestone 4a backend
+task completion and booking cancellation are merged; atomic booking reschedule is
+the current reviewed red-light slice, held on its client-calendar workflow before
+native activation. The audit below is preserved as the 2026-07-12 starting snapshot.
+
 ## Audit — what the app actually is
 
 - **UI stack:** SwiftUI throughout (no UIKit view controllers), iOS 17

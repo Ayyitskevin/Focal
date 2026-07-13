@@ -24,6 +24,7 @@ from . import (
     config,
     contract_reminders,
     gallery_reminders,
+    mobile_idempotency,
     ops_monitor,
     postshoot_reminders,
     retainer_reminders,
@@ -60,6 +61,7 @@ def _loop(stop_event: threading.Event) -> None:
                 saas.weekly_digest_sweep()
             except Exception:
                 log.exception("weekly digest sweep failed")
+            _prune_hosted_mobile_idempotency()
             for tenant in saas.list_tenants(billable_only=True):
                 try:
                     with saas.tenant_runtime(tenant):
@@ -67,7 +69,36 @@ def _loop(stop_event: threading.Event) -> None:
                 except Exception:
                     log.exception("tenant scheduler sweep failed: %s", tenant["slug"])
             continue
+        _prune_mobile_idempotency()
         _sweep_once()
+
+
+def _prune_mobile_idempotency() -> None:
+    try:
+        pruned = mobile_idempotency.prune_expired()
+        if pruned:
+            log.info("pruned %s expired mobile idempotency receipt(s)", pruned)
+    except Exception:
+        log.exception("mobile idempotency receipt cleanup failed")
+
+
+def _prune_hosted_mobile_idempotency() -> None:
+    """Prune every retained tenant DB without running billable-only mail sweeps.
+
+    Deleted tenant rows are tombstones whose data has moved to ``.trash``; entering
+    their runtime would accidentally recreate an empty live-looking directory.
+    Likewise, cleanup never provisions a missing tenant DB merely to delete rows.
+    """
+    from . import saas
+
+    for tenant in saas.list_tenants():
+        if tenant.get("deleted_at") or not saas.tenant_db_path(tenant["slug"]).exists():
+            continue
+        try:
+            with saas.tenant_runtime(tenant):
+                _prune_mobile_idempotency()
+        except Exception:
+            log.exception("tenant mobile idempotency cleanup failed: %s", tenant["slug"])
 
 
 def _sweep_once() -> None:

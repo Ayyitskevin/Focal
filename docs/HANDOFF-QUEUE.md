@@ -178,36 +178,47 @@ self-applied. Sources: `docs/MISE-REVIEW.md` (review), `docs/IOS-UPGRADE.md`
 - **Risk:** **red-light** (booking/money-adjacent state, audit trail) →
   reviewed draft PR, human merge.
 - **Decomposition (mapped from the real server flows):** one command per PR,
-  risk ascending. The `Idempotency-Key` header/replay store does **not** exist
-  yet (the M3 favorite toggle got idempotency free from PUT/DELETE); it is only
-  strictly needed by reschedule, so it lands with S6c.
-  - **S6a — owner task check-off — DONE (draft PR):** first owner *write*.
+  risk ascending. S6c adds the first `Idempotency-Key` replay store; the M3
+  favorite toggle and S6a/S6b got idempotency from their natural PUT/DELETE or
+  guarded-transition semantics.
+  - **S6a — owner task check-off — DONE (merged):** first owner *write*.
     `PUT`/`DELETE /api/v1/tasks/{id}/completion` (naturally idempotent, no key),
     requires `studio:write`, one `audit_log` row per real transition
     (`task`/`complete`|`reopen`, actor `owner`). Backend + 7 contract tests
     (idempotent replay, reopen, 404, guest-refused, read-only-owner-refused).
     Mirrors `admin/activity.py::task_toggle` semantics; the web path writes no
     audit row, the native one does. iOS wiring deferred to S6d.
-  - **S6b — booking cancel:** `POST /api/v1/bookings/{id}/cancel`. Naturally
-    idempotent via the `WHERE status='confirmed'` guard (`scheduling.cancel`);
-    fires `booking_notify.cancelled`. Principal + policy TBD (owner vs client).
-  - **S6c — booking reschedule + Idempotency-Key store:** create-new + cancel-old
-    (`book(..., exclude_id=)`, 409 on `SlotTaken`); NOT naturally idempotent, so
-    this slice builds the header parse + replay table (migration → red-light).
-  - **S6d — iOS wiring** for the above (owner tasks screen; client/owner bookings).
+  - **S6b — booking cancel — DONE (merged):** owner-only
+    `POST /api/v1/bookings/{id}/cancel`, naturally idempotent via the guarded
+    confirmed→cancelled transition; audited and fires `booking_notify.cancelled`.
+  - **S6c — booking reschedule + Idempotency-Key store — IMPLEMENTED (backend;
+    merge/activation held on S6e):** owner-only atomic create-new + cancel-old with server-side
+    slot/policy revalidation, linkage/intake carryover, two audit rows, a
+    session-bound hashed UUID replay receipt, expiry cleanup, and exact-response
+    replay. Migration 082 keeps this red-light. External notification/workflow
+    effects intentionally retain the existing best-effort behavior and are not
+    claimed as transactionally durable.
+  - **S6d — iOS wiring** for owner tasks and booking cancellation. Reschedule
+    activation is held until S6e defines and proves the client-calendar workflow.
+  - **S6e — durable booking workflow dispatch:** decide old CANCEL + replacement
+    REQUEST semantics, then add a transactional outbox/per-effect idempotency so a
+    crash after the booking commit cannot permanently skip email/inquiry/Notion/
+    Google Calendar work or duplicate already-completed effects. Red-light: this
+    sends client-facing messages and changes external workflow guarantees.
 
 ## Suggested order
 
 Original: S2 → S1 → O1 → S3 → S4 → S5 → O2 → S6 → O4 → O3.
 
 **Done (merged):** S2, S1 (incl. fixing the compile errors it surfaced — the
-iOS app had never been built), O1 (ADR 0068), S3, S7, S8, S9, S4, S5. **Done
-(design):** O2 — which spawned S7 → S8 → S9. **Done (draft PR, awaiting merge):**
-O4 (ADR 0069 — credential-hygiene disposition + non-auth cleartext warning).
+iOS app had never been built), O1 (ADR 0068), S3, S7, S8, S9, S4, S5, O4
+(ADR 0069), S6a, S6b. **Done (design):** O2 — which spawned S7 → S8 → S9.
+**Implemented (backend; red-light draft, merge held on S6e):** S6c.
 
-**Remaining:** S6 → O3.
-S6 (M4a mutations) and the AR-chase send command are red-light and wait on
-their reviewed PRs. O4's two auth-touching follow-ups (hard scheme
-enforcement; a rotation mechanism) are likewise red-light and named in ADR
+**Remaining:** S6d (task/cancel) → S6e → S6d (reschedule) → O3.
+S6d can wire task/cancel now, but reschedule stays unexposed until S6e. S6e and
+the AR-chase send command are red-light and wait on reviewed PRs. O4's two
+auth-touching follow-ups (hard scheme enforcement; a rotation mechanism) are
+likewise red-light and named in ADR
 0069. O3 (iOS distribution) and the Dionysus fate (from O1) are the two
 decisions still open for Kevin.

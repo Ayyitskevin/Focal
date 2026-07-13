@@ -19,6 +19,7 @@ the day's open slots inside the transaction and rejects anything not in that set
 
 import datetime as dt
 import logging
+from collections import Counter
 from zoneinfo import ZoneInfo
 
 from . import config, db, gcal, security
@@ -138,16 +139,43 @@ def _busy_conflict(
     return any(bs < end_utc and be > start_utc for bs, be in busy)
 
 
-def _day_count(con, et, day: dt.date) -> int:
-    """Confirmed bookings for this event on this LOCAL day (cap accounting)."""
+def _local_slot_instants(day: dt.date, minute: int, tz: ZoneInfo) -> list[dt.datetime]:
+    """Return the real UTC instants represented by one local wall-clock time.
+
+    A spring-forward gap has no result. An ordinary time has one result. A
+    fall-back fold has two results, in chronological order. Round-tripping each
+    fold through UTC is the reliable ZoneInfo test; attaching a timezone directly
+    otherwise invents nonexistent spring times and collapses fall ambiguity.
+    """
+    wall_time = dt.datetime.combine(day, dt.time()) + dt.timedelta(minutes=minute)
+    instants: list[dt.datetime] = []
+    for fold in (0, 1):
+        local = wall_time.replace(tzinfo=tz, fold=fold)
+        instant = local.astimezone(_UTC)
+        round_trip = instant.astimezone(tz)
+        if round_trip.replace(tzinfo=None) != wall_time or round_trip.fold != fold:
+            continue
+        if instant not in instants:
+            instants.append(instant)
+    return instants
+
+
+def _day_count(con, et, day: dt.date, exclude_id: int | None = None) -> int:
+    """Confirmed bookings for this event on this LOCAL day (cap accounting).
+
+    A reschedule evaluates the destination as if its source booking has already
+    been released. The exclusion therefore applies to both overlap and daily-cap
+    checks; every other availability rule still applies unchanged.
+    """
     tz = _biz_tz()
     start = dt.datetime.combine(day, dt.time(), tz).astimezone(_UTC)
-    end = start + dt.timedelta(days=1)
+    end = dt.datetime.combine(day + dt.timedelta(days=1), dt.time(), tz).astimezone(_UTC)
     row = con.execute(
         """SELECT COUNT(*) AS n FROM bookings
            WHERE status='confirmed' AND event_type_id=?
-             AND start_utc >= ? AND start_utc < ?""",
-        (et["id"], _fmt_utc(start), _fmt_utc(end)),
+             AND start_utc >= ? AND start_utc < ?
+             AND (? IS NULL OR id != ?)""",
+        (et["id"], _fmt_utc(start), _fmt_utc(end), exclude_id, exclude_id),
     ).fetchone()
     return row["n"]
 
@@ -158,6 +186,8 @@ def _slots_utc(
     day: dt.date,
     ref_utc: dt.datetime,
     busy: list[tuple[dt.datetime, dt.datetime]] | None = None,
+    *,
+    exclude_id: int | None = None,
 ) -> list[dt.datetime]:
     """Open slot start instants (UTC) for `day`, after all policy filters.
 
@@ -167,7 +197,7 @@ def _slots_utc(
     today_local = ref_utc.astimezone(_biz_tz()).date()
     if day < today_local or (day - today_local).days > et["booking_window_days"]:
         return []
-    if et["max_per_day"] and _day_count(con, et, day) >= et["max_per_day"]:
+    if et["max_per_day"] and _day_count(con, et, day, exclude_id) >= et["max_per_day"]:
         return []
 
     tz = _biz_tz()
@@ -175,22 +205,19 @@ def _slots_utc(
     step = et["slot_step_min"] or et["duration_min"]
     notice_cutoff = ref_utc + dt.timedelta(hours=et["min_notice_hours"])
     window_cutoff = ref_utc + dt.timedelta(days=et["booking_window_days"])
-    midnight = dt.datetime.combine(day, dt.time(), tz)
-
     out: list[dt.datetime] = []
     for win_start, win_end in _windows_for_day(con, et, day):
         m = win_start
         while m + et["duration_min"] <= win_end:
-            start_local = midnight + dt.timedelta(minutes=m)
-            start_utc = start_local.astimezone(_UTC)
-            end_utc = start_utc + dur
-            if (
-                start_utc >= notice_cutoff
-                and start_utc <= window_cutoff
-                and not _busy_conflict(start_utc, end_utc, busy)
-                and not _overlaps(con, et, start_utc, end_utc, None)
-            ):
-                out.append(start_utc)
+            for start_utc in _local_slot_instants(day, m, tz):
+                end_utc = start_utc + dur
+                if (
+                    start_utc >= notice_cutoff
+                    and start_utc <= window_cutoff
+                    and not _busy_conflict(start_utc, end_utc, busy)
+                    and not _overlaps(con, et, start_utc, end_utc, exclude_id)
+                ):
+                    out.append(start_utc)
             m += step
     return out
 
@@ -204,16 +231,25 @@ def slots_for_day(et, day: dt.date, visitor_tz: str = "") -> list[dict]:
     disp = _display_tz(visitor_tz)
     tz = _biz_tz()
     day_start = dt.datetime.combine(day, dt.time(), tz).astimezone(_UTC)
-    busy = gcal.free_busy(day_start, day_start + dt.timedelta(days=1))
+    day_end = dt.datetime.combine(day + dt.timedelta(days=1), dt.time(), tz).astimezone(_UTC)
+    busy = gcal.free_busy(day_start, day_end)
     con = db.connect()
     try:
         starts = _slots_utc(con, et, day, now_utc(), busy)
     finally:
         con.close()
-    out = []
+    rendered = []
     for s in starts:
         local = s.astimezone(disp)
-        out.append({"utc": _fmt_utc(s), "label": local.strftime("%-I:%M %p").lstrip("0")})
+        rendered.append((s, local, local.strftime("%-I:%M %p").lstrip("0")))
+    label_counts = Counter(label for _, _, label in rendered)
+    duplicate_labels = {label for label, count in label_counts.items() if count > 1}
+    out = []
+    for instant, local, label in rendered:
+        if label in duplicate_labels:
+            offset = local.strftime("%z")
+            label = f"{label} (UTC{offset[:3]}:{offset[3:]})"
+        out.append({"utc": _fmt_utc(instant), "label": label})
     return out
 
 
@@ -239,6 +275,62 @@ def days_with_slots(et, start_day: dt.date, n_days: int) -> set[str]:
         con.close()
 
 
+def book_in_transaction(
+    con,
+    et,
+    start_utc_str: str,
+    name: str,
+    email: str,
+    phone: str,
+    notes: str,
+    visitor_tz: str,
+    exclude_id: int | None = None,
+) -> tuple[int, str]:
+    """Claim a slot inside the caller's open immediate transaction.
+
+    Raises SlotTaken if the submitted instant is not currently an open slot
+    (gone to a race, blocked, out of notice/window, or never valid). A reschedule
+    may exclude its source booking from overlap and daily-cap accounting, but it
+    never bypasses notice, booking-window, availability, or date-override policy.
+
+    The caller owns commit/rollback. Keeping this primitive transaction-aware lets
+    a reschedule commit its replacement, source cancellation, audit row, and API
+    replay receipt as one indivisible unit while the ordinary book path uses the
+    exact same slot validator.
+    """
+    try:
+        start_utc = _parse_utc(start_utc_str)
+    except ValueError:
+        raise SlotTaken("malformed time")
+    end_utc = start_utc + dt.timedelta(minutes=et["duration_min"])
+    day_local = start_utc.astimezone(_biz_tz()).date()
+    ref = now_utc()
+    open_starts = {
+        _fmt_utc(slot) for slot in _slots_utc(con, et, day_local, ref, exclude_id=exclude_id)
+    }
+    if start_utc_str not in open_starts:
+        raise SlotTaken("slot no longer available")
+    token = security.new_slug(20)
+    cur = con.execute(
+        """INSERT INTO bookings (token, event_type_id, name, email, phone,
+                                 notes, start_utc, end_utc, tz, reschedule_of)
+           VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (
+            token,
+            et["id"],
+            name,
+            email,
+            phone,
+            notes,
+            start_utc_str,
+            _fmt_utc(end_utc),
+            visitor_tz,
+            exclude_id,
+        ),
+    )
+    return cur.lastrowid, token
+
+
 def book(
     et,
     start_utc_str: str,
@@ -251,53 +343,26 @@ def book(
 ) -> tuple[int, str]:
     """Atomically claim a slot. Returns (booking_id, manage_token).
 
-    Raises SlotTaken if the submitted instant is not currently an open slot
-    (gone to a race, blocked, out of notice/window, or never valid). The
-    open-set is re-derived inside a BEGIN IMMEDIATE transaction, so the decision
-    and the insert are a single serialized unit."""
-    try:
-        start_utc = _parse_utc(start_utc_str)
-    except ValueError:
-        raise SlotTaken("malformed time")
-    end_utc = start_utc + dt.timedelta(minutes=et["duration_min"])
-    day_local = start_utc.astimezone(_biz_tz()).date()
-    token = security.new_slug(20)
-
+    The open set is re-derived after the write lock is acquired, so a competing
+    writer blocks and then observes the first writer's booking.
+    """
     con = db.connect()
-    con.isolation_level = None  # take manual control of the transaction
+    con.isolation_level = None
     try:
         con.execute("BEGIN IMMEDIATE")
-        ref = now_utc()
-        open_starts = {_fmt_utc(s) for s in _slots_utc(con, et, day_local, ref)}
-        # exclude_id (reschedule) frees its own old slot for the overlap test
-        if exclude_id is not None and start_utc_str not in open_starts:
-            if not _overlaps(con, et, start_utc, end_utc, exclude_id):
-                open_starts.add(start_utc_str)
-        if start_utc_str not in open_starts:
-            con.execute("ROLLBACK")
-            raise SlotTaken("slot no longer available")
-        cur = con.execute(
-            """INSERT INTO bookings (token, event_type_id, name, email, phone,
-                                     notes, start_utc, end_utc, tz, reschedule_of)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
-            (
-                token,
-                et["id"],
-                name,
-                email,
-                phone,
-                notes,
-                start_utc_str,
-                _fmt_utc(end_utc),
-                visitor_tz,
-                exclude_id,
-            ),
+        result = book_in_transaction(
+            con,
+            et,
+            start_utc_str,
+            name,
+            email,
+            phone,
+            notes,
+            visitor_tz,
+            exclude_id,
         )
-        bid = cur.lastrowid
         con.execute("COMMIT")
-        return bid, token
-    except SlotTaken:
-        raise
+        return result
     except Exception:
         try:
             con.execute("ROLLBACK")
