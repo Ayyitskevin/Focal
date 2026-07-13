@@ -1,4 +1,4 @@
-"""Read-only owner gallery and calendar resources for the native API.
+"""Owner gallery/calendar resources and bounded booking commands for the native API.
 
 This router is intentionally independent of :mod:`app.mobile_api` so the mounted
 API can include it without an import cycle.  Every route requires both the
@@ -18,12 +18,15 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import logging
 import math
 import re
 from collections.abc import Sequence
 from typing import Annotated, Literal
+from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, Response
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from . import (
@@ -33,6 +36,7 @@ from . import (
     db,
     delivery_gate,
     mobile_auth,
+    mobile_idempotency,
     mobile_media,
     scheduling,
 )
@@ -43,13 +47,39 @@ from .mobile_api_helpers import encode_keyset_cursor as _encode_cursor
 from .mobile_api_helpers import etag_matches as _etag_matches
 from .mobile_api_helpers import private_headers as _private_headers
 from .mobile_api_helpers import set_private_headers as _set_private_headers
+from .mobile_api_schemas import APIProblem
 
 _HEX_COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 _SAFE_JOB_ID = re.compile(r"^[A-Za-z0-9._:-]{1,255}$")
+_BOOKING_RESCHEDULE_COMMAND = "booking.reschedule.v1"
+_IDEMPOTENCY_KEY_DOMAIN = b"mise-mobile-idempotency-key-v1\0"
+_IDEMPOTENCY_REQUEST_DOMAIN = b"mise-mobile-idempotency-request-v1\0"
+log = logging.getLogger("mise.mobile_booking")
+
+
+def _problem_contract(description: str) -> dict:
+    return {
+        "description": description,
+        "content": {
+            "application/problem+json": {
+                "schema": {"$ref": f"#/components/schemas/{APIProblem.__name__}"}
+            }
+        },
+    }
+
+
+_BOOKING_COMMAND_PROBLEM_RESPONSES = {
+    401: _problem_contract("Authentication failed"),
+    403: _problem_contract("Insufficient scope"),
+    404: _problem_contract("Booking not found"),
+    409: _problem_contract("Booking or idempotency conflict"),
+    422: _problem_contract("Request validation failed"),
+    429: _problem_contract("Rate limited"),
+}
 
 
 class MobileReadModel(BaseModel):
-    """Strict, immutable Pydantic 2 wire model for owner read APIs."""
+    """Strict, immutable Pydantic 2 wire model for native API resources."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
@@ -212,6 +242,68 @@ class Booking(MobileReadModel):
     def valid_time_range(self) -> Booking:
         if self.end_at <= self.start_at:
             raise ValueError("booking must end after it starts")
+        return self
+
+
+class BookingRescheduleRequest(MobileReadModel):
+    start_at: dt.datetime
+    time_zone: str = Field(min_length=1, max_length=255)
+
+    @field_validator("start_at", mode="before")
+    @classmethod
+    def parse_start_at(cls, value: object) -> object:
+        # FastAPI supplies an already-decoded Python dict, so the strict model
+        # will not apply Pydantic's JSON-only datetime coercion. Parse the one
+        # RFC 3339 boundary field explicitly, then keep all internal validation
+        # and models strict.
+        if not isinstance(value, str):
+            return value
+        raw = value.strip()
+        if "T" not in raw:
+            raise ValueError("start_at must be an RFC 3339 timestamp")
+        candidate = f"{raw[:-1]}+00:00" if raw.endswith("Z") else raw
+        try:
+            return dt.datetime.fromisoformat(candidate)
+        except ValueError as exc:
+            raise ValueError("start_at must be an RFC 3339 timestamp") from exc
+
+    @field_validator("start_at")
+    @classmethod
+    def start_at_is_utc_whole_second(cls, value: dt.datetime) -> dt.datetime:
+        normalized = _aware_utc(value)
+        if normalized.microsecond:
+            raise ValueError("start_at must use whole-second precision")
+        return normalized
+
+    @field_validator("time_zone")
+    @classmethod
+    def time_zone_is_iana(cls, value: str) -> str:
+        cleaned = value.strip()
+        try:
+            ZoneInfo(cleaned)
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            raise ValueError("time_zone must be an IANA time zone") from exc
+        return cleaned
+
+
+class BookingRescheduleResult(MobileReadModel):
+    status: Literal["rescheduled"] = "rescheduled"
+    original_booking_id: int = Field(ge=1)
+    replacement_booking_id: int = Field(ge=1)
+    start_at: dt.datetime
+    end_at: dt.datetime
+
+    @field_validator("start_at", "end_at")
+    @classmethod
+    def result_timestamp_is_utc(cls, value: dt.datetime) -> dt.datetime:
+        return _aware_utc(value)
+
+    @model_validator(mode="after")
+    def valid_transition(self) -> BookingRescheduleResult:
+        if self.original_booking_id == self.replacement_booking_id:
+            raise ValueError("replacement booking must be distinct")
+        if self.end_at <= self.start_at:
+            raise ValueError("replacement booking must end after it starts")
         return self
 
 
@@ -717,6 +809,12 @@ _BOOKING_BY_ID = """SELECT b.id, b.event_type_id, e.name AS event_name, b.name,
                       FROM bookings b JOIN event_types e ON e.id=b.event_type_id
                       WHERE b.id=?"""
 
+_RESCHEDULE_SOURCE_BY_ID = """SELECT id, event_type_id, name, email, phone, notes,
+                                     start_utc, tz, status, client_id, project_id,
+                                     venue_address, dish_count, parking_notes,
+                                     style_refs, onsite_contact
+                                FROM bookings WHERE id=?"""
+
 
 def _require_studio_write(principal: mobile_auth.Principal) -> None:
     """A mutation needs studio:write; the router already proved studio:read + owner."""
@@ -726,6 +824,241 @@ def _require_studio_write(principal: mobile_auth.Principal) -> None:
             "auth.insufficient_scope",
             "This action requires studio write access.",
         )
+
+
+def _booking_reschedule_key_hash(key: str) -> str:
+    return hashlib.sha256(_IDEMPOTENCY_KEY_DOMAIN + key.encode("ascii")).hexdigest()
+
+
+def _booking_reschedule_request_hash(
+    booking_id: int,
+    *,
+    start_utc: str,
+    time_zone: str,
+) -> str:
+    canonical = json.dumps(
+        {
+            "booking_id": booking_id,
+            "command": _BOOKING_RESCHEDULE_COMMAND,
+            "start_at": start_utc,
+            "time_zone": time_zone,
+            "v": 1,
+        },
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("ascii")
+    return hashlib.sha256(_IDEMPOTENCY_REQUEST_DOMAIN + canonical).hexdigest()
+
+
+def _rollback_quietly(con) -> None:
+    try:
+        con.execute("ROLLBACK")
+    except Exception:
+        pass
+
+
+def _reschedule_booking(
+    booking_id: int,
+    *,
+    principal: mobile_auth.Principal,
+    idempotency_key: str,
+    body: BookingRescheduleRequest,
+) -> tuple[BookingRescheduleResult, bool]:
+    start_utc = body.start_at.strftime("%Y-%m-%d %H:%M:%S")
+    key_hash = _booking_reschedule_key_hash(idempotency_key)
+    request_hash = _booking_reschedule_request_hash(
+        booking_id,
+        start_utc=start_utc,
+        time_zone=body.time_zone,
+    )
+    con = db.connect()
+    con.isolation_level = None
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        # Read the clock only after the potentially-blocking writer lock. A
+        # session that expires while waiting must not authorize the command.
+        now_ts = mobile_idempotency.now_ts()
+
+        # Authentication happened before this transaction. Recheck the stable
+        # session row after acquiring the writer lock so a concurrent revocation
+        # cannot race a consequential command into the database.
+        session = con.execute(
+            """SELECT tenant_key, principal_kind, absolute_expires_at, revoked_at
+                 FROM api_sessions WHERE id=?""",
+            (principal.session_id,),
+        ).fetchone()
+        if (
+            session is None
+            or session["tenant_key"] != principal.tenant_key
+            or session["principal_kind"] != mobile_auth.STUDIO_OWNER
+            or session["revoked_at"] is not None
+            or int(session["absolute_expires_at"]) <= now_ts
+        ):
+            raise mobile_auth.MobileAuthError(
+                401,
+                "auth.invalid_token",
+                "The token is invalid or expired.",
+            )
+
+        mobile_idempotency.prune_expired_in_transaction(con, cutoff=now_ts)
+        replay = con.execute(
+            """SELECT command_kind, request_hash, response_status, response_json
+                 FROM api_idempotency_replays
+                WHERE session_id=? AND key_hash=?""",
+            (principal.session_id, key_hash),
+        ).fetchone()
+        if replay is not None:
+            if (
+                replay["command_kind"] != _BOOKING_RESCHEDULE_COMMAND
+                or replay["request_hash"] != request_hash
+            ):
+                raise mobile_auth.MobileAuthError(
+                    409,
+                    "idempotency.key_conflict",
+                    "This idempotency key was already used for another request.",
+                )
+            if int(replay["response_status"]) != 200:
+                raise RuntimeError("unsupported booking reschedule replay status")
+            result = BookingRescheduleResult.model_validate_json(replay["response_json"])
+            con.execute("COMMIT")
+            return result, False
+
+        source = con.execute(_RESCHEDULE_SOURCE_BY_ID, (booking_id,)).fetchone()
+        if source is None:
+            raise HTTPException(status_code=404, detail="Booking not found.")
+        if source["status"] != "confirmed":
+            raise mobile_auth.MobileAuthError(
+                409,
+                "booking.not_reschedulable",
+                "Only a confirmed booking can be rescheduled.",
+            )
+        if source["start_utc"] == start_utc:
+            raise mobile_auth.MobileAuthError(
+                409,
+                "booking.unchanged",
+                "Choose a different time for the replacement booking.",
+            )
+
+        event_type = con.execute(
+            "SELECT * FROM event_types WHERE id=? AND active=1",
+            (source["event_type_id"],),
+        ).fetchone()
+        if event_type is None:
+            raise mobile_auth.MobileAuthError(
+                409,
+                "booking.event_unavailable",
+                "This booking type is no longer available for rescheduling.",
+            )
+
+        replacement_id, _ = scheduling.book_in_transaction(
+            con,
+            event_type,
+            start_utc,
+            source["name"],
+            source["email"],
+            source["phone"],
+            source["notes"],
+            body.time_zone,
+            booking_id,
+        )
+        con.execute(
+            """UPDATE bookings
+                  SET client_id=?, project_id=?, venue_address=?, dish_count=?,
+                      parking_notes=?, style_refs=?, onsite_contact=?
+                WHERE id=?""",
+            (
+                source["client_id"],
+                source["project_id"],
+                source["venue_address"],
+                source["dish_count"],
+                source["parking_notes"],
+                source["style_refs"],
+                source["onsite_contact"],
+                replacement_id,
+            ),
+        )
+        cancelled = con.execute(
+            """UPDATE bookings
+                  SET status='cancelled',
+                      cancel_reason='Rescheduled from the studio app',
+                      cancelled_at=datetime('now')
+                WHERE id=? AND status='confirmed'""",
+            (booking_id,),
+        )
+        if cancelled.rowcount != 1:
+            raise RuntimeError("booking reschedule lost source transition")
+
+        audit.log(
+            con,
+            "booking",
+            booking_id,
+            "reschedule",
+            diff={
+                "replacement_booking_id": replacement_id,
+                "session_id": principal.session_id,
+                "start_utc": [source["start_utc"], start_utc],
+                "status": ["confirmed", "cancelled"],
+            },
+            actor="owner",
+        )
+        audit.log(
+            con,
+            "booking",
+            replacement_id,
+            "reschedule_create",
+            diff={
+                "session_id": principal.session_id,
+                "source_booking_id": booking_id,
+                "start_utc": start_utc,
+                "status": [None, "confirmed"],
+            },
+            actor="owner",
+        )
+
+        replacement = con.execute(
+            "SELECT id, start_utc, end_utc FROM bookings WHERE id=?",
+            (replacement_id,),
+        ).fetchone()
+        if replacement is None:
+            raise RuntimeError("booking reschedule replacement vanished")
+        result = BookingRescheduleResult(
+            original_booking_id=booking_id,
+            replacement_booking_id=int(replacement["id"]),
+            start_at=_sqlite_utc(replacement["start_utc"]),
+            end_at=_sqlite_utc(replacement["end_utc"]),
+        )
+        response_json = result.model_dump_json()
+        con.execute(
+            """INSERT INTO api_idempotency_replays
+               (session_id, key_hash, command_kind, request_hash,
+                response_status, response_json, created_at, expires_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (
+                principal.session_id,
+                key_hash,
+                _BOOKING_RESCHEDULE_COMMAND,
+                request_hash,
+                200,
+                response_json,
+                now_ts,
+                int(session["absolute_expires_at"]),
+            ),
+        )
+        con.execute("COMMIT")
+        return result, True
+    except scheduling.SlotTaken as exc:
+        _rollback_quietly(con)
+        raise mobile_auth.MobileAuthError(
+            409,
+            "booking.slot_unavailable",
+            "That time is no longer available.",
+        ) from exc
+    except Exception:
+        _rollback_quietly(con)
+        raise
+    finally:
+        con.close()
 
 
 @router.post("/bookings/{booking_id}/cancel", response_model=Booking, tags=["scheduling"])
@@ -759,3 +1092,44 @@ def cancel_booking(
         booking_notify.cancelled(booking_id, by_admin=True)
     _set_private_headers(response)
     return _booking_from_row(db.one(_BOOKING_BY_ID, (booking_id,)))
+
+
+@router.post(
+    "/bookings/{booking_id}/reschedule",
+    response_model=BookingRescheduleResult,
+    responses=_BOOKING_COMMAND_PROBLEM_RESPONSES,
+    tags=["scheduling"],
+)
+def reschedule_booking(
+    booking_id: Annotated[int, Path(ge=1)],
+    body: BookingRescheduleRequest,
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
+    principal: Annotated[mobile_auth.Principal, Depends(require_studio_owner)],
+    response: Response,
+) -> BookingRescheduleResult:
+    """Atomically replace one confirmed owner booking at a server-valid slot.
+
+    The replay receipt, replacement, source cancellation, and audit rows share one
+    immediate transaction. External confirmation effects run only after commit and
+    only for the first execution; they remain the existing best-effort workflow.
+    """
+    _require_studio_write(principal)
+    result, created = _reschedule_booking(
+        booking_id,
+        principal=principal,
+        idempotency_key=str(idempotency_key),
+        body=body,
+    )
+    if created:
+        try:
+            booking_notify.confirm(result.replacement_booking_id)
+        except Exception as exc:
+            log.error(
+                "booking reschedule post-commit effects failed: source=%s replacement=%s type=%s",
+                result.original_booking_id,
+                result.replacement_booking_id,
+                type(exc).__name__,
+            )
+    _set_private_headers(response)
+    response.headers["Cache-Control"] = "no-store"
+    return result
