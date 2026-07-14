@@ -17,12 +17,13 @@ from fastapi.testclient import TestClient
 
 from app import (
     audit,
-    booking_notify,
+    booking_workflow,
     config,
     db,
     mobile_auth,
     mobile_idempotency,
     ratelimit,
+    scheduler,
     scheduling,
 )
 from app.main import app
@@ -42,6 +43,9 @@ def owner(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "ADMIN_PASSWORD", "owner-password")
     monkeypatch.setattr(config, "BASE_URL", "https://studio.test")
     monkeypatch.setattr(config, "TIMEZONE", "UTC")
+    monkeypatch.setattr(config, "BOOKING_WORKFLOW_ENABLED", True)
+    monkeypatch.setattr(config, "GMAIL_USER", "studio@example.test")
+    monkeypatch.setattr(config, "GMAIL_APP_PASSWORD", "test-app-password")
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "mise.db")
     monkeypatch.setattr(scheduling, "now_utc", lambda: _NOW)
     ratelimit._hits.clear()
@@ -60,20 +64,28 @@ def owner(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def confirmation_spy(monkeypatch):
-    calls: list[int] = []
+def workflow_dispatch_spy(monkeypatch):
+    calls: list[str] = []
 
-    def confirm(booking_id: int) -> None:
-        # Effects must run only after all database evidence is visible to a new
-        # connection, never while the command transaction is half-written.
-        assert db.one("SELECT status FROM bookings WHERE id=?", (booking_id,))["status"] == (
-            "confirmed"
-        )
+    def wake() -> None:
+        # The worker is only woken after every durable row is committed and visible
+        # from a fresh connection, never while the command is half-written.
         assert db.one("SELECT COUNT(*) AS n FROM api_idempotency_replays")["n"] == 1
-        assert db.one("SELECT COUNT(*) AS n FROM audit_log WHERE entity_type='booking'")["n"] == 2
-        calls.append(booking_id)
+        audit_count = db.one("SELECT COUNT(*) AS n FROM audit_log WHERE entity_type='booking'")["n"]
+        retry_count = db.one("SELECT COUNT(*) AS n FROM audit_log WHERE action='workflow_retry'")[
+            "n"
+        ]
+        assert audit_count == 2 + retry_count
+        workflow_id = db.one(
+            """SELECT workflow_id FROM booking_workflow_effects
+               ORDER BY id DESC LIMIT 1"""
+        )["workflow_id"]
+        summary = booking_workflow.summary(workflow_id)
+        assert summary is not None
+        assert len(summary["effects"]) == len(booking_workflow.EFFECT_KINDS)
+        calls.append(workflow_id)
 
-    monkeypatch.setattr(booking_notify, "confirm", confirm)
+    monkeypatch.setattr(scheduler, "wake_booking_workflows", wake)
     return calls
 
 
@@ -201,10 +213,38 @@ def _booking_audits() -> list:
 
 def test_reschedule_commits_transition_replay_and_carryover(
     owner,
-    confirmation_spy,
+    workflow_dispatch_spy,
 ):
+    assert owner["login"]["available_commands"] == ["booking.reschedule"]
     event_id = _seed_event()
     booking_id, client_id, project_id = _seed_booking(event_id)
+    inquiry_id = db.run(
+        """INSERT INTO inquiries
+           (name,email,message,kind,shoot_date,service,emailed)
+           VALUES (?,?,?,?,?,?,1)""",
+        (
+            "Rossi Trattoria",
+            "ops@rossi.test",
+            "Booked Studio session for the original date.",
+            "booking",
+            _SOURCE_START[:10],
+            "Studio session",
+        ),
+    )
+    db.run(
+        """UPDATE bookings
+              SET inquiry_id=?, google_event_id=?, notion_page_id=?,
+                  notion_session_id=?, calendar_uid=?
+            WHERE id=?""",
+        (
+            inquiry_id,
+            "gcal-original",
+            "notion-booking",
+            "notion-session",
+            "source-calendar-uid@example.test",
+            booking_id,
+        ),
+    )
     key = uuid4()
 
     response = _reschedule(owner, booking_id, key=key)
@@ -215,6 +255,8 @@ def test_reschedule_commits_transition_replay_and_carryover(
     body = response.json()
     assert body == {
         "status": "rescheduled",
+        "workflow_id": body["workflow_id"],
+        "delivery_status": "pending",
         "original_booking_id": booking_id,
         "replacement_booking_id": body["replacement_booking_id"],
         "start_at": _TARGET_RFC3339,
@@ -222,13 +264,15 @@ def test_reschedule_commits_transition_replay_and_carryover(
     }
     replacement_id = body["replacement_booking_id"]
 
-    source = db.one(
-        "SELECT status,cancel_reason,cancelled_at FROM bookings WHERE id=?",
-        (booking_id,),
-    )
+    source = db.one("SELECT * FROM bookings WHERE id=?", (booking_id,))
     assert source["status"] == "cancelled"
     assert source["cancel_reason"] == "Rescheduled from the studio app"
     assert source["cancelled_at"] is not None
+    assert source["inquiry_id"] is None
+    assert source["google_event_id"] is None
+    assert source["notion_page_id"] is None
+    assert source["notion_session_id"] == "notion-session"
+    assert source["calendar_uid"] == "source-calendar-uid@example.test"
 
     replacement = db.one("SELECT * FROM bookings WHERE id=?", (replacement_id,))
     assert replacement["status"] == "confirmed"
@@ -246,6 +290,20 @@ def test_reschedule_commits_transition_replay_and_carryover(
     assert replacement["reminded_48h"] == 0
     assert replacement["reminded_24h"] == 0
     assert replacement["armed_postshoot"] == 0
+    assert replacement["inquiry_id"] == inquiry_id
+    assert replacement["google_event_id"] == "gcal-original"
+    assert replacement["notion_page_id"] == "notion-booking"
+    assert replacement["notion_session_id"] == "notion-session"
+    assert replacement["calendar_uid"]
+    assert replacement["calendar_uid"] != source["calendar_uid"]
+    inquiry = db.one("SELECT * FROM inquiries WHERE id=?", (inquiry_id,))
+    assert inquiry["shoot_date"] == _TARGET_START[:10]
+    assert inquiry["service"] == "Studio session"
+    assert _TARGET_START[:10] in inquiry["message"]
+    assert (
+        db.one("SELECT shoot_date FROM projects WHERE id=?", (project_id,))["shoot_date"]
+        == _TARGET_START[:10]
+    )
 
     audits = _booking_audits()
     assert [(row["entity_id"], row["action"], row["actor"]) for row in audits] == [
@@ -260,6 +318,17 @@ def test_reschedule_commits_transition_replay_and_carryover(
     assert replacement_diff["source_booking_id"] == booking_id
     assert replacement_diff["status"] == [None, "confirmed"]
     assert replacement_diff["session_id"] == source_diff["session_id"]
+    assert source_diff["workflow_id"] == body["workflow_id"]
+    assert replacement_diff["workflow_id"] == body["workflow_id"]
+
+    workflow = booking_workflow.summary(body["workflow_id"])
+    assert workflow is not None
+    assert workflow["status"] == "pending"
+    assert workflow["source_booking_id"] == booking_id
+    assert workflow["replacement_booking_id"] == replacement_id
+    assert [effect["kind"] for effect in workflow["effects"]] == list(
+        kind for kind, _sequence in booking_workflow.EFFECT_KINDS
+    )
 
     columns = {row["name"] for row in db.all_("PRAGMA table_info(api_idempotency_replays)")}
     assert "key_hash" in columns
@@ -280,10 +349,10 @@ def test_reschedule_commits_transition_replay_and_carryover(
         "Spring menu launch.",
     ):
         assert sensitive not in stored_evidence
-    assert confirmation_spy == [replacement_id]
+    assert workflow_dispatch_spy == [body["workflow_id"]]
 
 
-def test_expired_receipts_are_physically_pruned(owner, confirmation_spy):
+def test_expired_receipts_are_physically_pruned(owner, workflow_dispatch_spy):
     event_id = _seed_event()
     booking_id, _, _ = _seed_booking(event_id)
     assert _reschedule(owner, booking_id, key=uuid4()).status_code == 200
@@ -294,9 +363,192 @@ def test_expired_receipts_are_physically_pruned(owner, confirmation_spy):
     assert db.one("SELECT COUNT(*) AS n FROM api_idempotency_replays")["n"] == 0
 
 
+def test_workflow_status_and_manual_retry_are_bounded_and_preserve_done_effects(
+    owner,
+    workflow_dispatch_spy,
+):
+    event_id = _seed_event()
+    booking_id, _, _ = _seed_booking(event_id)
+    created = _reschedule(owner, booking_id, key=uuid4())
+    assert created.status_code == 200
+    workflow_id = created.json()["workflow_id"]
+    replacement_id = created.json()["replacement_booking_id"]
+
+    pending = owner["client"].get(
+        f"/api/v1/booking-workflows/{workflow_id}",
+        headers=owner["headers"],
+    )
+    assert pending.status_code == 200
+    assert pending.headers["cache-control"] == "no-store"
+    assert pending.json()["status"] == "pending"
+    assert len(pending.json()["effects"]) == 6
+
+    now = int(dt.datetime.now(dt.UTC).timestamp())
+    db.run(
+        """UPDATE booking_workflow_effects
+              SET status='succeeded', next_attempt_at=NULL, completed_at=?,
+                  provider_ref='accepted', updated_at=?
+            WHERE workflow_id=? AND effect_kind='studio_reschedule_notice'""",
+        (now, now, workflow_id),
+    )
+    db.run(
+        """UPDATE booking_workflow_effects
+              SET status='blocked', attempts=8, next_attempt_at=NULL,
+                  completed_at=?, error_class='TimeoutError',
+                  error_code='exception', updated_at=?
+            WHERE workflow_id=? AND effect_kind='client_cancel_ics'""",
+        (now, now, workflow_id),
+    )
+
+    blocked = owner["client"].get(
+        f"/api/v1/booking-workflows/{workflow_id}",
+        headers=owner["headers"],
+    )
+    assert blocked.status_code == 200
+    assert blocked.json()["status"] == "blocked"
+    succeeded_before = next(
+        effect
+        for effect in blocked.json()["effects"]
+        if effect["kind"] == "studio_reschedule_notice"
+    )
+    assert succeeded_before["status"] == "succeeded"
+    assert succeeded_before["completed_at"].endswith("Z")
+
+    retried = owner["client"].post(
+        f"/api/v1/booking-workflows/{workflow_id}/retry",
+        headers=owner["headers"],
+    )
+
+    assert retried.status_code == 200
+    assert retried.json()["status"] == "retry"
+    effects = {effect["kind"]: effect for effect in retried.json()["effects"]}
+    assert effects["client_cancel_ics"]["status"] == "retry"
+    assert effects["client_cancel_ics"]["attempts"] == 0
+    assert effects["client_cancel_ics"]["next_attempt_at"].endswith("Z")
+    assert effects["studio_reschedule_notice"] == succeeded_before
+    assert workflow_dispatch_spy == [workflow_id, workflow_id]
+    retry_audit = db.one(
+        """SELECT entity_type, entity_id, action, actor, diff_json
+             FROM audit_log WHERE action='workflow_retry'"""
+    )
+    assert (
+        retry_audit["entity_type"],
+        retry_audit["entity_id"],
+        retry_audit["action"],
+        retry_audit["actor"],
+    ) == ("booking", replacement_id, "workflow_retry", "owner")
+    assert json.loads(retry_audit["diff_json"]) == {
+        "effect_count": 1,
+        "session_id": owner["login"]["session_id"],
+        "workflow_id": workflow_id,
+    }
+    encoded = retried.text
+    for private_value in (
+        "ops@rossi.test",
+        "555-0142",
+        "Spring menu launch.",
+        "bk-",
+    ):
+        assert private_value not in encoded
+
+    no_blocked_effect = owner["client"].post(
+        f"/api/v1/booking-workflows/{workflow_id}/retry",
+        headers=owner["headers"],
+    )
+    assert no_blocked_effect.status_code == 409
+    assert no_blocked_effect.json()["code"] == "booking.workflow_not_retryable"
+    assert db.one("SELECT COUNT(*) AS n FROM audit_log WHERE action='workflow_retry'")["n"] == 1
+    assert workflow_dispatch_spy == [workflow_id, workflow_id]
+
+    missing = owner["client"].get(
+        f"/api/v1/booking-workflows/{uuid4()}",
+        headers=owner["headers"],
+    )
+    assert missing.status_code == 404
+    assert missing.json()["code"] == "booking.workflow_not_found"
+    missing_retry = owner["client"].post(
+        f"/api/v1/booking-workflows/{uuid4()}/retry",
+        headers=owner["headers"],
+    )
+    assert missing_retry.status_code == 404
+    assert missing_retry.json()["code"] == "booking.workflow_not_found"
+    assert db.one("SELECT COUNT(*) AS n FROM audit_log WHERE action='workflow_retry'")["n"] == 1
+    assert workflow_dispatch_spy == [workflow_id, workflow_id]
+
+
+def test_manual_retry_rechecks_revocation_after_waiting_for_writer_lock(
+    owner,
+    workflow_dispatch_spy,
+    monkeypatch,
+):
+    event_id = _seed_event()
+    booking_id, _, _ = _seed_booking(event_id)
+    created = _reschedule(owner, booking_id, key=uuid4())
+    assert created.status_code == 200
+    workflow_id = created.json()["workflow_id"]
+    now = mobile_idempotency.now_ts()
+    db.run(
+        """UPDATE booking_workflow_effects
+              SET status='blocked', attempts=8, next_attempt_at=NULL,
+                  completed_at=?, error_class='TimeoutError',
+                  error_code='exception', updated_at=?
+            WHERE workflow_id=? AND effect_kind='client_cancel_ics'""",
+        (now, now, workflow_id),
+    )
+    workflow_dispatch_spy.clear()
+
+    authenticated = threading.Event()
+    real_authenticate = mobile_auth.authenticate_request
+
+    def authenticate_then_signal(*args, **kwargs):
+        principal = real_authenticate(*args, **kwargs)
+        authenticated.set()
+        return principal
+
+    monkeypatch.setattr(mobile_auth, "authenticate_request", authenticate_then_signal)
+    session = db.one("SELECT * FROM api_sessions ORDER BY created_at DESC LIMIT 1")
+    blocker = db.connect()
+    blocker.isolation_level = None
+    blocker.execute("BEGIN IMMEDIATE")
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pending = pool.submit(
+                owner["client"].post,
+                f"/api/v1/booking-workflows/{workflow_id}/retry",
+                headers=owner["headers"],
+            )
+            assert authenticated.wait(timeout=5)
+            blocker.execute(
+                "UPDATE api_sessions SET revoked_at=? WHERE id=?",
+                (mobile_idempotency.now_ts(), session["id"]),
+            )
+            blocker.execute("COMMIT")
+            response = pending.result(timeout=10)
+    finally:
+        blocker.rollback()
+        blocker.close()
+
+    assert response.status_code == 401
+    assert response.json()["code"] == "auth.invalid_token"
+    blocked = db.one(
+        """SELECT status, attempts, error_class, error_code
+             FROM booking_workflow_effects
+            WHERE workflow_id=? AND effect_kind='client_cancel_ics'""",
+        (workflow_id,),
+    )
+    assert dict(blocked) == {
+        "status": "blocked",
+        "attempts": 8,
+        "error_class": "TimeoutError",
+        "error_code": "exception",
+    }
+    assert db.one("SELECT COUNT(*) AS n FROM audit_log WHERE action='workflow_retry'")["n"] == 0
+    assert workflow_dispatch_spy == []
+
+
 def test_equivalent_timestamp_replays_exact_response_across_access_refresh(
     owner,
-    confirmation_spy,
+    workflow_dispatch_spy,
 ):
     event_id = _seed_event()
     booking_id, _, _ = _seed_booking(event_id)
@@ -330,12 +582,12 @@ def test_equivalent_timestamp_replays_exact_response_across_access_refresh(
         db.one("SELECT COUNT(*) AS n FROM bookings WHERE reschedule_of=?", (booking_id,))["n"] == 1
     )
     assert len(_booking_audits()) == 2
-    assert len(confirmation_spy) == 1
+    assert len(workflow_dispatch_spy) == 1
 
 
 def test_same_key_with_different_request_conflicts_before_source_state(
     owner,
-    confirmation_spy,
+    workflow_dispatch_spy,
 ):
     event_id = _seed_event()
     booking_id, _, _ = _seed_booking(event_id)
@@ -351,11 +603,30 @@ def test_same_key_with_different_request_conflicts_before_source_state(
 
     assert conflict.status_code == 409
     assert conflict.json()["code"] == "idempotency.key_conflict"
-    assert len(confirmation_spy) == 1
+    assert len(workflow_dispatch_spy) == 1
     assert db.one("SELECT COUNT(*) AS n FROM api_idempotency_replays")["n"] == 1
 
 
-def test_new_key_cannot_reschedule_a_stale_source(owner, confirmation_spy):
+def test_exact_replay_survives_later_capability_disable(
+    owner,
+    workflow_dispatch_spy,
+    monkeypatch,
+):
+    event_id = _seed_event()
+    booking_id, _, _ = _seed_booking(event_id)
+    key = uuid4()
+    first = _reschedule(owner, booking_id, key=key)
+    assert first.status_code == 200
+
+    monkeypatch.setattr(booking_workflow, "available", lambda: False)
+    replay = _reschedule(owner, booking_id, key=key)
+
+    assert replay.status_code == 200
+    assert replay.content == first.content
+    assert workflow_dispatch_spy == [first.json()["workflow_id"]]
+
+
+def test_new_key_cannot_reschedule_a_stale_source(owner, workflow_dispatch_spy):
     event_id = _seed_event()
     booking_id, _, _ = _seed_booking(event_id)
     assert _reschedule(owner, booking_id, key=uuid4()).status_code == 200
@@ -369,12 +640,16 @@ def test_new_key_cannot_reschedule_a_stale_source(owner, confirmation_spy):
 
     assert stale.status_code == 409
     assert stale.json()["code"] == "booking.not_reschedulable"
-    assert len(confirmation_spy) == 1
+    assert len(workflow_dispatch_spy) == 1
 
 
 @pytest.mark.parametrize("key", [None, "not-a-uuid", "00000000-0000-0000-0000"])
 def test_idempotency_key_is_required_uuid(owner, monkeypatch, key):
-    monkeypatch.setattr(booking_notify, "confirm", lambda *_: pytest.fail("must not notify"))
+    monkeypatch.setattr(
+        scheduler,
+        "wake_booking_workflows",
+        lambda: pytest.fail("must not wake"),
+    )
     event_id = _seed_event()
     booking_id, _, _ = _seed_booking(event_id)
 
@@ -407,7 +682,11 @@ def test_request_requires_aware_whole_second_and_iana_zone(
     start_at,
     time_zone,
 ):
-    monkeypatch.setattr(booking_notify, "confirm", lambda *_: pytest.fail("must not notify"))
+    monkeypatch.setattr(
+        scheduler,
+        "wake_booking_workflows",
+        lambda: pytest.fail("must not wake"),
+    )
     event_id = _seed_event()
     booking_id, _, _ = _seed_booking(event_id)
 
@@ -429,7 +708,11 @@ def test_request_requires_aware_whole_second_and_iana_zone(
 
 
 def test_unknown_same_time_cancelled_and_inactive_sources_fail_closed(owner, monkeypatch):
-    monkeypatch.setattr(booking_notify, "confirm", lambda *_: pytest.fail("must not notify"))
+    monkeypatch.setattr(
+        scheduler,
+        "wake_booking_workflows",
+        lambda: pytest.fail("must not wake"),
+    )
     event_id = _seed_event()
     same_time_id, _, _ = _seed_booking(event_id)
     cancelled_id, _, _ = _seed_booking(
@@ -461,7 +744,11 @@ def test_unknown_same_time_cancelled_and_inactive_sources_fail_closed(owner, mon
 
 
 def test_reschedule_cannot_bypass_availability_policy(owner, monkeypatch):
-    monkeypatch.setattr(booking_notify, "confirm", lambda *_: pytest.fail("must not notify"))
+    monkeypatch.setattr(
+        scheduler,
+        "wake_booking_workflows",
+        lambda: pytest.fail("must not wake"),
+    )
     event_id = _seed_event(start_min=9 * 60, end_min=17 * 60)
     booking_id, _, _ = _seed_booking(event_id)
 
@@ -486,7 +773,7 @@ def test_reschedule_cannot_bypass_availability_policy(owner, monkeypatch):
 
 def test_same_day_reschedule_excludes_source_from_daily_cap(
     owner,
-    confirmation_spy,
+    workflow_dispatch_spy,
 ):
     event_id = _seed_event(max_per_day=1, start_min=9 * 60, end_min=17 * 60)
     booking_id, _, _ = _seed_booking(event_id)
@@ -501,7 +788,7 @@ def test_same_day_reschedule_excludes_source_from_daily_cap(
 
     assert response.status_code == 200
     assert response.json()["start_at"] == "2026-07-15T11:00:00Z"
-    assert len(confirmation_spy) == 1
+    assert len(workflow_dispatch_spy) == 1
 
 
 def test_dst_slots_skip_spring_gap_and_preserve_fall_fold(owner, monkeypatch):
@@ -586,7 +873,11 @@ def test_dst_fold_slots_have_distinct_rendered_labels(owner, monkeypatch):
 
 
 def test_competing_booking_keeps_source_confirmed(owner, monkeypatch):
-    monkeypatch.setattr(booking_notify, "confirm", lambda *_: pytest.fail("must not notify"))
+    monkeypatch.setattr(
+        scheduler,
+        "wake_booking_workflows",
+        lambda: pytest.fail("must not wake"),
+    )
     event_id = _seed_event()
     source_id, _, _ = _seed_booking(event_id)
     _seed_booking(event_id, start=_TARGET_START)
@@ -618,7 +909,11 @@ def test_failure_after_first_audit_rolls_back_every_command_write(
         return real_log(*args, **kwargs)
 
     monkeypatch.setattr(audit, "log", fail_second_audit)
-    monkeypatch.setattr(booking_notify, "confirm", lambda *_: pytest.fail("must not notify"))
+    monkeypatch.setattr(
+        scheduler,
+        "wake_booking_workflows",
+        lambda: pytest.fail("must not wake"),
+    )
 
     response = _reschedule(owner, booking_id, key=uuid4())
 
@@ -633,18 +928,73 @@ def test_failure_after_first_audit_rolls_back_every_command_write(
     assert db.one("SELECT COUNT(*) AS n FROM api_idempotency_replays")["n"] == 0
 
 
-def test_post_commit_effect_failure_does_not_corrupt_replay(owner, monkeypatch):
+def test_workflow_enqueue_failure_rolls_back_booking_and_replay(owner, monkeypatch):
+    event_id = _seed_event()
+    booking_id, _, _ = _seed_booking(event_id)
+    monkeypatch.setattr(
+        booking_workflow,
+        "enqueue_reschedule",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("outbox unavailable")),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "wake_booking_workflows",
+        lambda: pytest.fail("must not wake"),
+    )
+
+    response = _reschedule(owner, booking_id, key=uuid4())
+
+    assert response.status_code == 500
+    assert db.one("SELECT status FROM bookings WHERE id=?", (booking_id,))["status"] == (
+        "confirmed"
+    )
+    assert (
+        db.one("SELECT COUNT(*) AS n FROM bookings WHERE reschedule_of=?", (booking_id,))["n"] == 0
+    )
+    assert _booking_audits() == []
+    assert db.one("SELECT COUNT(*) AS n FROM api_idempotency_replays")["n"] == 0
+
+
+def test_disabled_workflow_is_not_advertised_and_fails_before_writes(owner, monkeypatch):
+    event_id = _seed_event()
+    booking_id, _, _ = _seed_booking(event_id)
+    monkeypatch.setattr(booking_workflow, "available", lambda: False)
+    monkeypatch.setattr(
+        scheduler,
+        "wake_booking_workflows",
+        lambda: pytest.fail("must not wake"),
+    )
+
+    me = owner["client"].get("/api/v1/me", headers=owner["headers"])
+    response = _reschedule(owner, booking_id, key=uuid4())
+
+    assert me.status_code == 200
+    assert me.json()["available_commands"] == []
+    assert response.status_code == 503
+    assert response.json()["code"] == "booking.reschedule_unavailable"
+    assert int(response.headers["retry-after"]) >= 1
+    assert db.one("SELECT status FROM bookings WHERE id=?", (booking_id,))["status"] == (
+        "confirmed"
+    )
+    assert (
+        db.one("SELECT COUNT(*) AS n FROM bookings WHERE reschedule_of=?", (booking_id,))["n"] == 0
+    )
+    assert _booking_audits() == []
+    assert db.one("SELECT COUNT(*) AS n FROM api_idempotency_replays")["n"] == 0
+
+
+def test_post_commit_wake_failure_does_not_corrupt_replay(owner, monkeypatch):
     event_id = _seed_event()
     booking_id, _, _ = _seed_booking(event_id)
     key = uuid4()
     calls = 0
 
-    def fail_effect(_booking_id: int) -> None:
+    def fail_wake() -> None:
         nonlocal calls
         calls += 1
         raise RuntimeError("provider unavailable")
 
-    monkeypatch.setattr(booking_notify, "confirm", fail_effect)
+    monkeypatch.setattr(scheduler, "wake_booking_workflows", fail_wake)
     first = _reschedule(owner, booking_id, key=key)
     replay = _reschedule(owner, booking_id, key=key)
 
@@ -656,7 +1006,11 @@ def test_post_commit_effect_failure_does_not_corrupt_replay(owner, monkeypatch):
 
 
 def test_missing_bearer_guest_and_read_only_owner_cannot_reschedule(owner, monkeypatch):
-    monkeypatch.setattr(booking_notify, "confirm", lambda *_: pytest.fail("must not notify"))
+    monkeypatch.setattr(
+        scheduler,
+        "wake_booking_workflows",
+        lambda: pytest.fail("must not wake"),
+    )
     event_id = _seed_event()
     booking_id, _, _ = _seed_booking(event_id)
     key = uuid4()
@@ -721,7 +1075,11 @@ def test_missing_bearer_guest_and_read_only_owner_cannot_reschedule(owner, monke
 
 
 def test_session_expiry_is_rechecked_inside_command_transaction(owner, monkeypatch):
-    monkeypatch.setattr(booking_notify, "confirm", lambda *_: pytest.fail("must not notify"))
+    monkeypatch.setattr(
+        scheduler,
+        "wake_booking_workflows",
+        lambda: pytest.fail("must not wake"),
+    )
     event_id = _seed_event()
     booking_id, _, _ = _seed_booking(event_id)
     session = db.one("SELECT * FROM api_sessions ORDER BY created_at DESC LIMIT 1")
@@ -757,7 +1115,7 @@ def test_session_expiry_is_rechecked_inside_command_transaction(owner, monkeypat
 
 def test_near_expiry_receipt_uses_post_lock_authorization_time(
     owner,
-    confirmation_spy,
+    workflow_dispatch_spy,
     monkeypatch,
 ):
     event_id = _seed_event()
@@ -772,12 +1130,12 @@ def test_near_expiry_receipt_uses_post_lock_authorization_time(
     receipt = db.one("SELECT created_at, expires_at FROM api_idempotency_replays")
     assert receipt["created_at"] == authorized_at
     assert receipt["expires_at"] == authorized_at + 1
-    assert len(confirmation_spy) == 1
+    assert len(workflow_dispatch_spy) == 1
 
 
 def test_concurrent_identical_retries_create_one_replacement(
     owner,
-    confirmation_spy,
+    workflow_dispatch_spy,
 ):
     event_id = _seed_event()
     booking_id, _, _ = _seed_booking(event_id)
@@ -798,12 +1156,12 @@ def test_concurrent_identical_retries_create_one_replacement(
         db.one("SELECT COUNT(*) AS n FROM bookings WHERE reschedule_of=?", (booking_id,))["n"] == 1
     )
     assert len(_booking_audits()) == 2
-    assert len(confirmation_spy) == 1
+    assert len(workflow_dispatch_spy) == 1
 
 
 def test_concurrent_distinct_keys_cannot_reschedule_source_twice(
     owner,
-    confirmation_spy,
+    workflow_dispatch_spy,
 ):
     event_id = _seed_event()
     booking_id, _, _ = _seed_booking(event_id)
@@ -825,10 +1183,10 @@ def test_concurrent_distinct_keys_cannot_reschedule_source_twice(
     )
     assert db.one("SELECT COUNT(*) AS n FROM api_idempotency_replays")["n"] == 1
     assert len(_booking_audits()) == 2
-    assert len(confirmation_spy) == 1
+    assert len(workflow_dispatch_spy) == 1
 
 
-def test_concurrent_sources_cannot_claim_one_destination(owner, confirmation_spy):
+def test_concurrent_sources_cannot_claim_one_destination(owner, workflow_dispatch_spy):
     event_id = _seed_event()
     source_ids = (
         _seed_booking(event_id)[0],
@@ -855,4 +1213,4 @@ def test_concurrent_sources_cannot_claim_one_destination(owner, confirmation_spy
     assert db.one("SELECT status FROM bookings WHERE id=?", (loser,))["status"] == "confirmed"
     assert db.one("SELECT COUNT(*) AS n FROM api_idempotency_replays")["n"] == 1
     assert len(_booking_audits()) == 2
-    assert len(confirmation_spy) == 1
+    assert len(workflow_dispatch_spy) == 1

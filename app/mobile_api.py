@@ -20,6 +20,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import (
     alerts,
+    booking_workflow,
     config,
     mobile_auth,
     mobile_client_api,
@@ -118,6 +119,7 @@ def _problem_title(status: int) -> str:
         422: "Request validation failed",
         429: "Too many requests",
         500: "Internal server error",
+        503: "Service unavailable",
     }.get(status, "Request failed")
 
 
@@ -342,14 +344,26 @@ def _auth_session(request: Request, pair: mobile_auth.TokenPair) -> AuthSession:
         refresh_token_expires_at=pair.refresh_expires_at,
         workspace=_workspace_context(request),
         principal=_principal(request, pair.principal),
+        available_commands=_available_commands(pair.principal),
         session_id=pair.session_id,
     )
+
+
+def _available_commands(core: mobile_auth.Principal) -> list[str]:
+    if (
+        core.kind == mobile_auth.STUDIO_OWNER
+        and "studio:write" in core.scopes
+        and booking_workflow.available()
+    ):
+        return ["booking.reschedule"]
+    return []
 
 
 def _current_session(request: Request, core: mobile_auth.Principal) -> CurrentSession:
     return CurrentSession(
         workspace=_workspace_context(request),
         principal=_principal(request, core),
+        available_commands=_available_commands(core),
     )
 
 

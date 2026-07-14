@@ -194,19 +194,31 @@ self-applied. Sources: `docs/MISE-REVIEW.md` (review), `docs/IOS-UPGRADE.md`
     `POST /api/v1/bookings/{id}/cancel`, naturally idempotent via the guarded
     confirmed→cancelled transition; audited and fires `booking_notify.cancelled`.
   - **S6c — booking reschedule + Idempotency-Key store — IMPLEMENTED (backend;
-    merge/activation held on S6e):** owner-only atomic create-new + cancel-old with server-side
-    slot/policy revalidation, linkage/intake carryover, two audit rows, a
-    session-bound hashed UUID replay receipt, expiry cleanup, and exact-response
-    replay. Migration 082 keeps this red-light. External notification/workflow
-    effects intentionally retain the existing best-effort behavior and are not
-    claimed as transactionally durable.
-  - **S6d — iOS wiring** for owner tasks and booking cancellation. Reschedule
-    activation is held until S6e defines and proves the client-calendar workflow.
-  - **S6e — durable booking workflow dispatch:** decide old CANCEL + replacement
-    REQUEST semantics, then add a transactional outbox/per-effect idempotency so a
-    crash after the booking commit cannot permanently skip email/inquiry/Notion/
-    Google Calendar work or duplicate already-completed effects. Red-light: this
-    sends client-facing messages and changes external workflow guarantees.
+    stacked under S6e):** owner-only atomic create-new + cancel-old with
+    server-side slot/policy revalidation, linkage/intake carryover, two audit
+    rows, a session-bound hashed UUID replay receipt, expiry cleanup, and
+    exact-response replay. Migration 082 keeps this red-light.
+  - **S6d — iOS task/cancel wiring — IMPLEMENTED (draft PR #161):** native task
+    completion/reopen and booking cancellation are wired. Native reschedule stays
+    hidden until the S6e backend draft is reviewed and activated.
+  - **S6e — durable booking workflow dispatch — IMPLEMENTED (backend; stacked
+    red-light draft):** migration 083 inserts six tenant-local effect rows in the
+    same transaction as S6c. The old client UID receives CANCEL before the
+    replacement UID can receive REQUEST; studio mail, Notion, and Google Calendar
+    effects have independent leased retry state. Completed effects are never reset,
+    stale leases recover on boot/short sweeps, and owner-only status/manual retry
+    routes expose bounded state; retry revalidates the owner session and audits the
+    reset under one writer lock. A lifecycle transition may retire an expired lease
+    even while delivery is disarmed, so cancellation cannot deadlock after a worker
+    crash. Migration 083 preserves every previously issued
+    calendar UID and gives new bookings tenant-scoped identity. Cancelling or
+    chaining a replacement atomically supersedes its stale queued effects across
+    mobile, public, and admin entry points; provider work with an active lease
+    returns a retryable conflict. Hosted recovery opens retained tenant DBs existing-only,
+    so a delete race cannot recreate storage. Auth advertises
+    `booking.reschedule` only while the default-off workflow flag and mailer are
+    armed. Delivery is intentionally at-least-once (stable Message-ID, with a
+    documented crash-after-acceptance duplicate window), not falsely exactly-once.
 
 ## Suggested order
 
@@ -215,11 +227,12 @@ Original: S2 → S1 → O1 → S3 → S4 → S5 → O2 → S6 → O4 → O3.
 **Done (merged):** S2, S1 (incl. fixing the compile errors it surfaced — the
 iOS app had never been built), O1 (ADR 0068), S3, S7, S8, S9, S4, S5, O4
 (ADR 0069), S6a, S6b. **Done (design):** O2 — which spawned S7 → S8 → S9.
-**Implemented (backend; red-light draft, merge held on S6e):** S6c.
+**Implemented (red-light drafts):** S6c + S6e backend; S6d task/cancel iOS.
 
-**Remaining:** S6d (task/cancel) → S6e → S6d (reschedule) → O3.
-S6d can wire task/cancel now, but reschedule stays unexposed until S6e. S6e and
-the AR-chase send command are red-light and wait on reviewed PRs. O4's two
+**Remaining:** human review/merge of S6c+S6e → S6d reschedule wiring → O3.
+Reschedule stays unexposed in iOS until the stacked backend drafts are reviewed
+and the server capability is deliberately armed. S6e and the AR-chase send
+command are red-light and wait on reviewed PRs. O4's two
 auth-touching follow-ups (hard scheme enforcement; a rotation mechanism) are
 likewise red-light and named in ADR
 0069. O3 (iOS distribution) and the Dionysus fate (from O1) are the two

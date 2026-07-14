@@ -205,6 +205,119 @@ def sync_booking(booking_id: int) -> None:
         log.info("notion booking %s mirrored as page %s", booking_id, page_id)
 
 
+def _reschedule_rows(source: int, replacement: int):
+    query = """SELECT b.*, e.name AS event_name, e.creates_notion_session,
+                      p.notion_page_id AS project_notion_page_id
+                 FROM bookings b
+                 JOIN event_types e ON e.id=b.event_type_id
+                 LEFT JOIN projects p ON p.id=b.project_id
+                WHERE b.id=?"""
+    source_row = db.one(query, (source,))
+    replacement_row = db.one(query, (replacement,))
+    if source_row is None:
+        raise ValueError(f"source booking {source} not found")
+    if replacement_row is None:
+        raise ValueError(f"replacement booking {replacement} not found")
+    if replacement_row["reschedule_of"] != source:
+        raise ValueError(f"booking {replacement} does not replace {source}")
+    return source_row, replacement_row
+
+
+def _transfer_notion_pointer(
+    source: int,
+    replacement: int,
+    *,
+    column: str,
+    provider_ref: str,
+    clear_source: bool,
+) -> None:
+    field = db.ident(column, {"notion_page_id", "notion_session_id"})
+    with db.tx() as con:
+        if clear_source:
+            con.execute(f"UPDATE bookings SET {field}=NULL WHERE id=?", (source,))
+        updated = con.execute(
+            f"UPDATE bookings SET {field}=? WHERE id=?",
+            (provider_ref, replacement),
+        )
+        if updated.rowcount != 1:
+            raise ValueError(f"replacement booking {replacement} not found")
+
+
+def reschedule_booking(source: int, replacement: int) -> str | None:
+    """Move and patch an existing Notion Bookings page for a reschedule.
+
+    This path never creates a page. Moving the pointer before PATCH preserves
+    retry identity after an uncertain provider response, while clearing the
+    cancelled source prevents a later legacy cancellation sync from clobbering
+    the logical page now owned by the replacement.
+    """
+    if not features.notion_bookings_enabled():
+        return None
+
+    source_row, replacement_row = _reschedule_rows(source, replacement)
+    provider_ref = replacement_row["notion_page_id"] or source_row["notion_page_id"]
+    if not provider_ref:
+        return None
+
+    _transfer_notion_pointer(
+        source,
+        replacement,
+        column="notion_page_id",
+        provider_ref=provider_ref,
+        clear_source=True,
+    )
+    start_iso = replacement_row["start_utc"].replace(" ", "T") + "Z"
+    end_iso = replacement_row["end_utc"].replace(" ", "T") + "Z"
+    _patch_page(
+        provider_ref,
+        {
+            "When": {"date": {"start": start_iso, "end": end_iso}},
+            "Status": {"select": {"name": "Confirmed"}},
+        },
+    )
+    log.info(
+        "notion booking page %s moved from booking %s to %s", provider_ref, source, replacement
+    )
+    return provider_ref
+
+
+def reschedule_session(source: int, replacement: int) -> str | None:
+    """Link and retime an existing Notion Session without creating a duplicate.
+
+    Session identity is intentionally shared by source history and replacement.
+    Only the shoot date is patched; pipeline-owned status, money, and shot-list
+    fields are left untouched.
+    """
+    if not features.notion_sessions_enabled():
+        return None
+
+    source_row, replacement_row = _reschedule_rows(source, replacement)
+    provider_ref = (
+        replacement_row["notion_session_id"]
+        or source_row["notion_session_id"]
+        or replacement_row["project_notion_page_id"]
+        or source_row["project_notion_page_id"]
+    )
+    if not provider_ref:
+        return None
+    if not replacement_row["creates_notion_session"] and not (
+        replacement_row["notion_session_id"] or source_row["notion_session_id"]
+    ):
+        return None
+
+    _transfer_notion_pointer(
+        source,
+        replacement,
+        column="notion_session_id",
+        provider_ref=provider_ref,
+        clear_source=False,
+    )
+    start_iso = replacement_row["start_utc"].replace(" ", "T") + "Z"
+    _patch_page(provider_ref, {"Shoot Date": {"date": {"start": start_iso}}})
+    log.info("notion session %s relinked from booking %s to %s", provider_ref, source, replacement)
+    return provider_ref
+
+
 def sync_session_for_booking(booking_id: int) -> None:
     """Seed/link a Notion 'Sessions' page (the pipeline spine) for a confirmed
     booking, so Odysseus's preshoot_pack / balance_chaser / digest attach to it

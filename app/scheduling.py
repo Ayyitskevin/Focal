@@ -22,7 +22,7 @@ import logging
 from collections import Counter
 from zoneinfo import ZoneInfo
 
-from . import config, db, gcal, security
+from . import booking_workflow, config, db, gcal, ics, security
 
 log = logging.getLogger("mise.scheduling")
 
@@ -310,11 +310,18 @@ def book_in_transaction(
     }
     if start_utc_str not in open_starts:
         raise SlotTaken("slot no longer available")
+    if exclude_id is not None:
+        # A chained reschedule must retire the prior replacement workflow under
+        # the same writer lock that claims its next slot. If provider work is
+        # already running, fail before inserting another confirmed booking.
+        booking_workflow.supersede_replacement(con, exclude_id)
     token = security.new_slug(20)
+    calendar_uid = ics.new_uid(token)
     cur = con.execute(
         """INSERT INTO bookings (token, event_type_id, name, email, phone,
-                                 notes, start_utc, end_utc, tz, reschedule_of)
-           VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                                 notes, start_utc, end_utc, tz, reschedule_of,
+                                 calendar_uid)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
         (
             token,
             et["id"],
@@ -326,6 +333,7 @@ def book_in_transaction(
             _fmt_utc(end_utc),
             visitor_tz,
             exclude_id,
+            calendar_uid,
         ),
     )
     return cur.lastrowid, token
@@ -373,6 +381,46 @@ def book(
         con.close()
 
 
+def reschedule(
+    et,
+    start_utc_str: str,
+    name: str,
+    email: str,
+    phone: str,
+    notes: str,
+    visitor_tz: str,
+    source_booking_id: int,
+) -> tuple[int, str]:
+    """Atomically claim a replacement slot and cancel its confirmed source."""
+    con = db.connect()
+    con.isolation_level = None
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        result = book_in_transaction(
+            con,
+            et,
+            start_utc_str,
+            name,
+            email,
+            phone,
+            notes,
+            visitor_tz,
+            exclude_id=source_booking_id,
+        )
+        if not cancel_in_transaction(con, source_booking_id, "Rescheduled"):
+            raise SlotTaken("source booking is no longer confirmed")
+        con.execute("COMMIT")
+        return result
+    except Exception:
+        try:
+            con.execute("ROLLBACK")
+        except Exception:
+            pass
+        raise
+    finally:
+        con.close()
+
+
 def booking_by_token(token: str):
     return db.one(
         """SELECT b.*, e.name AS event_name, e.slug AS event_slug,
@@ -383,18 +431,48 @@ def booking_by_token(token: str):
     )
 
 
+def cancel_in_transaction(con, booking_id: int, reason: str = "") -> bool:
+    """Cancel by id inside the caller's immediate transaction.
+
+    Superseding pending delivery and the confirmed→cancelled transition share
+    one writer lock. Running replacement effects raise ``WorkflowBusy`` so no
+    lifecycle entry point can race provider I/O and resurrect stale state.
+    """
+    row = con.execute(
+        "SELECT status FROM bookings WHERE id=?",
+        (booking_id,),
+    ).fetchone()
+    if row is None or row["status"] != "confirmed":
+        return False
+    booking_workflow.supersede_replacement(con, booking_id)
+    cur = con.execute(
+        """UPDATE bookings SET status='cancelled', cancel_reason=?,
+                  cancelled_at=datetime('now')
+           WHERE id=? AND status='confirmed'""",
+        (reason, booking_id),
+    )
+    return cur.rowcount > 0
+
+
 def cancel(token: str, reason: str = "") -> bool:
-    """Cancel a confirmed booking. Returns True only if a row actually flipped
-    (so a double-click or stale link cannot fire two cancellations)."""
+    """Atomically cancel a confirmed booking by manage token.
+
+    Returns True only if a row actually flipped, so a double-click or stale link
+    cannot fire two cancellations. ``WorkflowBusy`` is deliberately propagated.
+    """
     con = db.connect()
+    con.isolation_level = None
     try:
-        cur = con.execute(
-            """UPDATE bookings SET status='cancelled', cancel_reason=?,
-                      cancelled_at=datetime('now')
-               WHERE token=? AND status='confirmed'""",
-            (reason, token),
-        )
-        con.commit()
-        return cur.rowcount > 0
+        con.execute("BEGIN IMMEDIATE")
+        row = con.execute("SELECT id FROM bookings WHERE token=?", (token,)).fetchone()
+        changed = bool(row and cancel_in_transaction(con, int(row["id"]), reason))
+        con.execute("COMMIT")
+        return changed
+    except Exception:
+        try:
+            con.execute("ROLLBACK")
+        except Exception:
+            pass
+        raise
     finally:
         con.close()
