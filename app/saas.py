@@ -1347,6 +1347,32 @@ def tenant_runtime(tenant_or_slug):
         _TENANT_CTX.reset(tenant_token)
 
 
+@contextmanager
+def tenant_runtime_existing(tenant: dict):
+    """Enter a retained tenant without provisioning storage or a new DB.
+
+    Used by recovery/cleanup workers after immutable-id revalidation. The DB
+    layer opens with SQLite ``mode=rw``, so deletion between the path check and
+    the first query fails loud instead of recreating an empty tenant database.
+    """
+    if not tenant:
+        raise RuntimeError("tenant not found")
+    path = tenant_db_path(tenant["slug"])
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    tenant_token = _TENANT_CTX.set(dict(tenant))
+    db_token = db.set_request_db_path(path)
+    existing_token = db.set_existing_only()
+    dir_tokens = config.set_runtime_dirs(tenant_data_path(tenant["slug"]))
+    try:
+        yield tenant
+    finally:
+        config.reset_runtime_dirs(dir_tokens)
+        db.reset_existing_only(existing_token)
+        db.reset_request_db_path(db_token)
+        _TENANT_CTX.reset(tenant_token)
+
+
 def tenant_has_access(tenant: dict) -> bool:
     status = tenant["plan_status"]
     if status == "active":

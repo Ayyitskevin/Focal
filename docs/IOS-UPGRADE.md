@@ -5,9 +5,15 @@ Companion to `docs/MISE-REVIEW.md`. Audit first (verified against `ios/` at
 
 Delivery update (2026-07-13): the macOS iOS gate, shared helpers, owner commercial
 spine, resource rename, and document deep links have landed. Milestone 4a backend
-task completion and booking cancellation are merged; atomic booking reschedule is
-the current reviewed red-light slice, held on its client-calendar workflow before
-native activation. The audit below is preserved as the 2026-07-12 starting snapshot.
+task completion and booking cancellation are merged, and their native wiring is in
+draft PR #161. Atomic booking reschedule and its durable S6e client-calendar
+workflow are implemented as stacked red-light backend drafts; native reschedule
+and server activation remain held for human review. The workflow preserves legacy
+calendar UIDs, tenant-scopes new ones, supersedes stale queued effects through the
+shared public/admin/mobile lifecycle guard, retires expired leases even while
+delivery is disarmed, audits authorized manual retry, and uses existing-only
+hosted recovery. The audit below is preserved
+as the 2026-07-12 starting snapshot.
 
 ## Audit — what the app actually is
 
@@ -72,10 +78,14 @@ Each step is independently shippable; order minimizes rework.
 2. **Milestone 4a — low-risk owner mutations.** Task check-off and booking
    cancel/reschedule follow each existing `IOS-API-V1.md` command's
    idempotency contract. Task completion and booking cancellation are naturally
-   idempotent without a key; reschedule requires `Idempotency-Key`. Keep
-   transitions server-authoritative and use optimistic UI only where the queued
-   operation has a stable id. Start here because these are operator-only writes
-   with no money/legal surface.
+   idempotent without a key; reschedule requires one UUID `Idempotency-Key`
+   preserved across transport retries. Show reschedule only when
+   `available_commands` contains `booking.reschedule`; treat its `200` as
+   booking-changed/workflow-queued, then follow the returned workflow status.
+   Keep transitions server-authoritative and use optimistic UI only where the
+   queued operation has a stable id. Start here because these are operator-only
+   writes with no money/legal surface. Human review still gates the
+   client-facing delivery activation.
 3. **Commercial spine on mobile (the biggest product win —
    `MISE-REVIEW.md` §5).** New read-only `/api/v1` endpoints + owner
    screens for: AR chase assist (past-due invoices with chase state),

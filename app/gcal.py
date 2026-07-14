@@ -18,13 +18,14 @@ runtime dependency. The refresh token is never logged.
 """
 
 import datetime as dt
+import hashlib
 import json
 import logging
 import urllib.error
 import urllib.parse
 import urllib.request
 
-from . import config, db, features
+from . import config, db, features, urls
 
 log = logging.getLogger("mise.gcal")
 _UTC = dt.UTC
@@ -258,7 +259,7 @@ def _event_body(b) -> dict:
     parts = [f"Email: {b['email']}", f"Phone: {b['phone'] or '—'}"]
     if b["notes"]:
         parts.append(f"\n{b['notes']}")
-    parts.append(f"\nManage: {config.BASE_URL}/booking/{b['token']}")
+    parts.append(f"\nManage: {urls.public_base_url()}/booking/{b['token']}")
     return {
         "summary": f"{b['event_name']} · {b['name']}",
         "description": "\n".join(parts),
@@ -268,18 +269,146 @@ def _event_body(b) -> dict:
     }
 
 
+def _reschedule_event_id(source_id: int, replacement_id: int) -> str:
+    """Stable, tenant-scoped Google client id for a missing reschedule event.
+
+    Google accepts caller-supplied ids using base32hex characters. A stable id
+    closes the create/response crash window: retrying the same transition can
+    reconcile the same provider object instead of creating a second event. The
+    public origin separates equal SQLite ids belonging to different tenants.
+    """
+    origin = urls.public_base_url().rstrip("/").casefold()
+    digest = hashlib.sha256(
+        f"mise-reschedule:{origin}:{source_id}:{replacement_id}".encode()
+    ).hexdigest()
+    return f"mise{digest[:32]}"
+
+
+def _transfer_event_pointer(source_id: int, replacement_id: int, event_id: str) -> None:
+    """Make the confirmed replacement own the logical business-calendar event."""
+    with db.tx() as con:
+        replacement = con.execute(
+            "SELECT id FROM bookings WHERE id=?", (replacement_id,)
+        ).fetchone()
+        if replacement is None:
+            raise ValueError(f"replacement booking {replacement_id} not found")
+        con.execute("UPDATE bookings SET google_event_id=NULL WHERE id=?", (source_id,))
+        con.execute(
+            "UPDATE bookings SET google_event_id=? WHERE id=?",
+            (event_id, replacement_id),
+        )
+
+
 def _delete_event(booking_id: int) -> None:
     b = db.one("SELECT google_event_id FROM bookings WHERE id=?", (booking_id,))
     if not b or not b["google_event_id"]:
         return
+    deleted = False
     try:
         _api("DELETE", f"/calendars/{_cal()}/events/{b['google_event_id']}")
+        deleted = True
     except urllib.error.HTTPError as e:
-        if e.code not in (404, 410):  # already gone is fine
+        if e.code in (404, 410):  # already gone is fine
+            deleted = True
+        else:
             log.warning("gcal delete for booking %s failed: %s", booking_id, e.code)
     except Exception as e:
         log.warning("gcal delete for booking %s failed: %s", booking_id, e)
-    db.run("UPDATE bookings SET google_event_id=NULL WHERE id=?", (booking_id,))
+    if deleted:
+        db.run("UPDATE bookings SET google_event_id=NULL WHERE id=?", (booking_id,))
+
+
+def on_booking_rescheduled(
+    source_id: int,
+    replacement_id: int,
+    strict: bool = False,
+) -> str | None:
+    """Move one logical Google event from a source booking to its replacement.
+
+    The database pointer moves before provider I/O so a transient response never
+    loses the identity needed by a retry. A missing provider event is recreated
+    with a deterministic caller-supplied id; if creation succeeded but its
+    response was lost, the next attempt PATCHes that same object.
+    """
+    if not configured() or not is_connected():
+        return None
+
+    source = db.one("SELECT google_event_id FROM bookings WHERE id=?", (source_id,))
+    replacement = db.one(
+        """SELECT b.*, e.name AS event_name, e.location AS event_location
+             FROM bookings b JOIN event_types e ON e.id=b.event_type_id
+            WHERE b.id=?""",
+        (replacement_id,),
+    )
+    if source is None:
+        raise ValueError(f"source booking {source_id} not found")
+    if replacement is None:
+        raise ValueError(f"replacement booking {replacement_id} not found")
+    if replacement["reschedule_of"] != source_id:
+        raise ValueError(f"booking {replacement_id} does not replace {source_id}")
+
+    event_id = replacement["google_event_id"] or source["google_event_id"]
+    if not event_id:
+        event_id = _reschedule_event_id(source_id, replacement_id)
+    _transfer_event_pointer(source_id, replacement_id, event_id)
+    body = _event_body(replacement)
+
+    try:
+        event = _api("PATCH", f"/calendars/{_cal()}/events/{event_id}", body)
+    except urllib.error.HTTPError as exc:
+        if exc.code not in (404, 410):
+            if strict:
+                raise
+            log.warning("gcal reschedule for booking %s failed: %s", replacement_id, exc.code)
+            return None
+
+        event_id = _reschedule_event_id(source_id, replacement_id)
+        _transfer_event_pointer(source_id, replacement_id, event_id)
+        create_body = {**body, "id": event_id}
+        try:
+            event = _api("POST", f"/calendars/{_cal()}/events", create_body)
+        except urllib.error.HTTPError as create_exc:
+            if create_exc.code == 409:
+                try:
+                    event = _api("PATCH", f"/calendars/{_cal()}/events/{event_id}", body)
+                except Exception as reconcile_exc:
+                    if strict:
+                        raise
+                    log.warning(
+                        "gcal reschedule reconcile for booking %s failed: %s",
+                        replacement_id,
+                        reconcile_exc,
+                    )
+                    return None
+            elif strict:
+                raise
+            else:
+                log.warning(
+                    "gcal reschedule fallback for booking %s failed: %s",
+                    replacement_id,
+                    create_exc.code,
+                )
+                return None
+        except Exception as create_exc:
+            if strict:
+                raise
+            log.warning(
+                "gcal reschedule fallback for booking %s failed: %s",
+                replacement_id,
+                create_exc,
+            )
+            return None
+    except Exception as exc:
+        if strict:
+            raise
+        log.warning("gcal reschedule for booking %s failed: %s", replacement_id, exc)
+        return None
+
+    provider_ref = str(event.get("id") or event_id)
+    if provider_ref != event_id:
+        _transfer_event_pointer(source_id, replacement_id, provider_ref)
+    log.info("gcal event moved from booking %s to %s", source_id, replacement_id)
+    return provider_ref
 
 
 def on_booking_confirmed(booking_id: int) -> None:

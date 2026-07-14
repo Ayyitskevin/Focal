@@ -14,7 +14,7 @@ import re
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from .. import audit, booking_notify, db, gcal, scheduling, security
+from .. import audit, booking_notify, booking_workflow, db, gcal, scheduling, security
 from ..render import templates
 
 log = logging.getLogger("mise.admin.scheduling")
@@ -516,6 +516,13 @@ async def admin_cancel(booking_id: int):
     b = db.one("SELECT token FROM bookings WHERE id=?", (booking_id,))
     if not b:
         raise HTTPException(status_code=404)
-    if scheduling.cancel(b["token"], "Cancelled by Kevin Lee Photography"):
+    try:
+        changed = scheduling.cancel(b["token"], "Cancelled by Kevin Lee Photography")
+    except booking_workflow.WorkflowBusy as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Booking delivery is still in progress. Try again shortly.",
+        ) from exc
+    if changed:
         booking_notify.cancelled(booking_id, by_admin=True)
     return RedirectResponse("/admin/scheduling/bookings", status_code=303)

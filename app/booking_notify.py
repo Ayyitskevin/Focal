@@ -1,19 +1,39 @@
-"""Side-effects of a booking: confirmation/cancellation emails (client + Kevin),
-the .ics invite, the Odysseus inbox hook, and the dormant Notion writeback.
+"""Side-effects of a booking: email/calendar notices and provider writebacks.
 
 Kept separate from the routes so the public/admin handlers stay thin and the
-'what happens when a booking is made' story lives in one place. Every outbound
-step is best-effort and logged — a mail or Notion hiccup must never lose the
-booking, which is already committed before any of this runs (fail loud, not lost)."""
+"what happens when a booking is made" story lives in one place. Legacy confirm
+and cancel effects remain best-effort after commit. Durable reschedule effects
+are strict: failures escape to their retrying workflow instead of being swallowed.
+"""
 
 import datetime as dt
+import hashlib
 import logging
 from zoneinfo import ZoneInfo
 
-from . import config, db, gcal, ics, mailer, notion_sync, urls
+from . import config, db, features, gcal, ics, mailer, notion_sync, urls
+from .booking_workflow import NotApplicable
 
 log = logging.getLogger("mise.booking")
 _UTC = dt.UTC
+
+RESCHEDULE_CLIENT_CANCEL = "client_cancel_ics"
+RESCHEDULE_CLIENT_REQUEST = "client_request_ics"
+RESCHEDULE_STUDIO_NOTICE = "studio_reschedule_notice"
+RESCHEDULE_NOTION_BOOKING = "notion_booking_patch"
+RESCHEDULE_NOTION_SESSION = "notion_session_link"
+RESCHEDULE_GOOGLE_CALENDAR = "google_calendar_move"
+
+# This order is part of the effect contract. In particular, the old calendar UID
+# must be cancelled before the replacement UID is requested.
+RESCHEDULE_EFFECT_KINDS = (
+    RESCHEDULE_CLIENT_CANCEL,
+    RESCHEDULE_CLIENT_REQUEST,
+    RESCHEDULE_STUDIO_NOTICE,
+    RESCHEDULE_NOTION_BOOKING,
+    RESCHEDULE_NOTION_SESSION,
+    RESCHEDULE_GOOGLE_CALENDAR,
+)
 
 
 def _load(booking_id: int):
@@ -116,7 +136,7 @@ def confirm(booking_id: int) -> None:
         return
     biz_when = _when(b["start_utc"], config.TIMEZONE)
     cli_when = _when(b["start_utc"], b["tz"])
-    uid = ics.uid_for(booking_id)
+    uid = ics.uid_for(booking_id, b["calendar_uid"])
     loc = b["location"] or "Details to follow"
     summary = f"{b['event_name']} · {mailer.sender_name()}"
     details = (
@@ -240,7 +260,7 @@ def cancelled(booking_id: int, by_admin: bool = False) -> None:
             "filename": "cancel.ics",
             "method": "CANCEL",
             "content": ics.build(
-                uid=ics.uid_for(booking_id),
+                uid=ics.uid_for(booking_id, b["calendar_uid"]),
                 summary=summary,
                 description="This booking was cancelled.",
                 location=b["location"] or "",
@@ -287,3 +307,193 @@ def cancelled(booking_id: int, by_admin: bool = False) -> None:
 
     # Drop the matching Google calendar event (best-effort; no-op if not connected).
     gcal.on_booking_cancelled(booking_id)
+
+
+# ── durable reschedule effects ───────────────────────────────────────────────
+
+
+def _reschedule_pair(source_id: int, replacement_id: int):
+    source = _load(source_id)
+    replacement = _load(replacement_id)
+    if not source:
+        raise ValueError(f"source booking {source_id} not found")
+    if not replacement:
+        raise ValueError(f"replacement booking {replacement_id} not found")
+    if replacement["reschedule_of"] != source_id:
+        raise ValueError(f"booking {replacement_id} is not the replacement for booking {source_id}")
+    return source, replacement
+
+
+def _reschedule_message_id(source_id: int, replacement_id: int, kind: str) -> str:
+    """Stable, tenant-scoped SMTP identity without contact data in the header."""
+    origin = urls.public_base_url().rstrip("/").lower()
+    identity = (
+        f"mise-reschedule-message-v1\0{origin}\0{source_id}\0{replacement_id}\0{kind}"
+    ).encode()
+    digest = hashlib.sha256(identity).hexdigest()
+    return f"<mise-reschedule-{digest}@kleephotography.com>"
+
+
+def _require_mailer() -> None:
+    if not mailer.configured():
+        raise NotApplicable("booking email is not configured for this studio")
+
+
+def _send_reschedule_cancel(source, replacement) -> str:
+    _require_mailer()
+    kind = RESCHEDULE_CLIENT_CANCEL
+    message_id = _reschedule_message_id(source["id"], replacement["id"], kind)
+    summary = f"{source['event_name']} · {mailer.sender_name()}"
+    invite = {
+        "filename": "previous-time-cancelled.ics",
+        "method": "CANCEL",
+        "content": ics.build(
+            uid=ics.uid_for(source["id"], source["calendar_uid"]),
+            summary=summary,
+            description="This previous booking time was cancelled because the booking moved.",
+            location=source["location"] or "",
+            start_utc=source["start_utc"],
+            end_utc=source["end_utc"],
+            organizer_email=config.GMAIL_USER,
+            attendee_email=source["email"],
+            sequence=1,
+            cancelled=True,
+        ),
+    }
+    follow_up = (
+        "If your replacement remains active, its invitation for "
+        f"{_when(replacement['start_utc'], replacement['tz'])} will arrive separately. "
+        "If it is cancelled or replaced, no new invitation will follow."
+    )
+    body = (
+        f"Hi {source['name']},\n\n"
+        f"We cancelled your previous {source['event_name']} time as part of your "
+        f"reschedule:\n\n  {_when(source['start_utc'], source['tz'])}\n\n"
+        f"{follow_up}\n\n"
+        f"— {mailer.sender_name()}\n"
+    )
+    mailer.send(
+        source["email"],
+        f"Previous booking time cancelled — {source['event_name']}",
+        body,
+        reply_to=mailer.studio_inbox(),
+        ics=invite,
+        message_id=message_id,
+    )
+    return message_id
+
+
+def _send_reschedule_request(source, replacement) -> str:
+    _require_mailer()
+    kind = RESCHEDULE_CLIENT_REQUEST
+    message_id = _reschedule_message_id(source["id"], replacement["id"], kind)
+    summary = f"{replacement['event_name']} · {mailer.sender_name()}"
+    location = replacement["location"] or "Details to follow"
+    details = (
+        f"{replacement['event_desc']}\n\n" if replacement["event_desc"] else ""
+    ) + f"Manage this booking: {_manage_url(replacement['token'])}"
+    invite = {
+        "filename": "rescheduled-invite.ics",
+        "method": "REQUEST",
+        "content": ics.build(
+            uid=ics.uid_for(replacement["id"], replacement["calendar_uid"]),
+            summary=summary,
+            description=details,
+            location=location,
+            start_utc=replacement["start_utc"],
+            end_utc=replacement["end_utc"],
+            organizer_email=config.GMAIL_USER,
+            attendee_email=replacement["email"],
+            sequence=0,
+            cancelled=False,
+        ),
+    }
+    body = (
+        f"Hi {replacement['name']},\n\n"
+        f"Your booking has been rescheduled:\n\n"
+        f"  {replacement['event_name']}\n"
+        f"  {_when(replacement['start_utc'], replacement['tz'])}\n"
+        f"  {location}\n\n"
+        f"Add the new time with the attached invitation.\n\n"
+        f"Need to change or cancel? {_manage_url(replacement['token'])}\n\n"
+        f"— {mailer.sender_name()}\n"
+    )
+    mailer.send(
+        replacement["email"],
+        f"Booking rescheduled — {replacement['event_name']}",
+        body,
+        reply_to=mailer.studio_inbox(),
+        ics=invite,
+        message_id=message_id,
+    )
+    return message_id
+
+
+def _send_reschedule_studio_notice(source, replacement) -> str:
+    _require_mailer()
+    kind = RESCHEDULE_STUDIO_NOTICE
+    message_id = _reschedule_message_id(source["id"], replacement["id"], kind)
+    body = (
+        f"{replacement['name']} rescheduled their {replacement['event_name']}.\n\n"
+        f"Previous: {_when(source['start_utc'], config.TIMEZONE)}\n"
+        f"New: {_when(replacement['start_utc'], config.TIMEZONE)}\n"
+        f"Email: {replacement['email']}\n"
+        f"Manage: {_manage_url(replacement['token'])}\n"
+    )
+    mailer.send(
+        mailer.studio_inbox(),
+        f"Booking RESCHEDULED — {replacement['name']} · {replacement['event_name']}",
+        body,
+        reply_to=replacement["email"],
+        message_id=message_id,
+    )
+    return message_id
+
+
+def run_reschedule_effect(
+    kind: str,
+    source_id: int,
+    replacement_id: int,
+) -> str | None:
+    """Execute one strict, retryable reschedule effect.
+
+    Provider and transport failures deliberately escape to the durable workflow.
+    A provider that is not armed in the active tenant raises NotApplicable so the
+    outbox can record a terminal skip instead of retrying a disabled integration.
+    """
+    if kind not in RESCHEDULE_EFFECT_KINDS:
+        raise ValueError(f"unknown booking reschedule effect: {kind}")
+    source, replacement = _reschedule_pair(source_id, replacement_id)
+    if source["status"] != "cancelled":
+        raise ValueError(f"source booking {source_id} is not cancelled")
+    if kind != RESCHEDULE_CLIENT_CANCEL and replacement["status"] != "confirmed":
+        raise NotApplicable("replacement_superseded")
+
+    if kind == RESCHEDULE_CLIENT_CANCEL:
+        return _send_reschedule_cancel(source, replacement)
+    if kind == RESCHEDULE_CLIENT_REQUEST:
+        return _send_reschedule_request(source, replacement)
+    if kind == RESCHEDULE_STUDIO_NOTICE:
+        return _send_reschedule_studio_notice(source, replacement)
+    if kind == RESCHEDULE_NOTION_BOOKING:
+        if not features.notion_bookings_enabled():
+            raise NotApplicable("Notion booking sync is not enabled for this studio")
+        provider_ref = notion_sync.reschedule_booking(source_id, replacement_id)
+        if provider_ref is None:
+            raise NotApplicable("this booking has no existing Notion booking page")
+        return provider_ref
+    if kind == RESCHEDULE_NOTION_SESSION:
+        if not features.notion_sessions_enabled():
+            raise NotApplicable("Notion session sync is not enabled for this studio")
+        provider_ref = notion_sync.reschedule_session(source_id, replacement_id)
+        if provider_ref is None:
+            raise NotApplicable("this booking has no existing Notion session")
+        return provider_ref
+    if kind == RESCHEDULE_GOOGLE_CALENDAR:
+        if not gcal.configured() or not gcal.is_connected():
+            raise NotApplicable("Google Calendar is not connected for this studio")
+        provider_ref = gcal.on_booking_rescheduled(source_id, replacement_id, strict=True)
+        if provider_ref is None:
+            raise NotApplicable("this booking is not eligible for Google Calendar sync")
+        return provider_ref
+    raise AssertionError("validated reschedule effect was not dispatched")

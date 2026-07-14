@@ -19,6 +19,7 @@ MIGRATION_ALIASES = {
     "058_plutus_upsell.sql": {"055_plutus_upsell.sql"},
 }
 _DB_PATH_CTX: ContextVar[Path | None] = ContextVar("mise_db_path", default=None)
+_DB_EXISTING_ONLY_CTX: ContextVar[bool] = ContextVar("mise_db_existing_only", default=False)
 
 
 def current_db_path() -> Path:
@@ -33,10 +34,25 @@ def reset_request_db_path(token) -> None:
     _DB_PATH_CTX.reset(token)
 
 
+def set_existing_only(value: bool = True):
+    """Require connections in this context to open an existing DB read/write."""
+    return _DB_EXISTING_ONLY_CTX.set(value)
+
+
+def reset_existing_only(token) -> None:
+    _DB_EXISTING_ONLY_CTX.reset(token)
+
+
 def connect(path: Path | None = None) -> sqlite3.Connection:
     db_path = Path(path) if path is not None else current_db_path()
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(db_path, timeout=30)
+    if _DB_EXISTING_ONLY_CTX.get():
+        # SQLite's normal path mode creates a missing database. Background
+        # retention workers must fail instead if deletion races their sweep.
+        uri = f"{db_path.resolve().as_uri()}?mode=rw"
+        con = sqlite3.connect(uri, timeout=30, uri=True)
+    else:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        con = sqlite3.connect(db_path, timeout=30)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("PRAGMA foreign_keys=ON")

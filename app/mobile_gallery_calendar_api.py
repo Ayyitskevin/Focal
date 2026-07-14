@@ -23,7 +23,7 @@ import math
 import re
 from collections.abc import Sequence
 from typing import Annotated, Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import (
@@ -42,12 +42,14 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, 
 from . import (
     audit,
     booking_notify,
+    booking_workflow,
     config,
     db,
     delivery_gate,
     mobile_auth,
     mobile_idempotency,
     mobile_media,
+    scheduler,
     scheduling,
 )
 from .admin import studio as admin_studio
@@ -93,6 +95,7 @@ _BOOKING_COMMAND_PROBLEM_RESPONSES = {
     409: _problem_contract("Booking or idempotency conflict"),
     422: _problem_contract("Request validation failed"),
     429: _problem_contract("Rate limited"),
+    503: _problem_contract("Booking workflow unavailable"),
 }
 
 
@@ -306,6 +309,8 @@ class BookingRescheduleRequest(MobileReadModel):
 
 class BookingRescheduleResult(MobileReadModel):
     status: Literal["rescheduled"]
+    workflow_id: UUID
+    delivery_status: Literal["pending"]
     original_booking_id: int = Field(ge=1)
     replacement_booking_id: int = Field(ge=1)
     start_at: dt.datetime
@@ -322,6 +327,51 @@ class BookingRescheduleResult(MobileReadModel):
             raise ValueError("replacement booking must be distinct")
         if self.end_at <= self.start_at:
             raise ValueError("replacement booking must end after it starts")
+        return self
+
+
+class BookingWorkflowEffect(MobileReadModel):
+    kind: Literal[
+        "client_cancel_ics",
+        "client_request_ics",
+        "studio_reschedule_notice",
+        "notion_booking_patch",
+        "notion_session_link",
+        "google_calendar_move",
+    ]
+    sequence: int = Field(ge=10, le=60)
+    status: Literal["pending", "running", "retry", "succeeded", "skipped", "blocked"]
+    attempts: int = Field(ge=0)
+    next_attempt_at: dt.datetime | None = None
+    completed_at: dt.datetime | None = None
+    provider_ref: str | None = Field(default=None, max_length=255)
+    error_class: str | None = Field(default=None, max_length=96)
+    error_code: str | None = Field(default=None, max_length=96)
+
+    @field_validator("next_attempt_at", "completed_at")
+    @classmethod
+    def effect_timestamp_is_utc(
+        cls,
+        value: dt.datetime | None,
+    ) -> dt.datetime | None:
+        return _aware_utc(value) if value is not None else None
+
+
+class BookingWorkflowStatus(MobileReadModel):
+    workflow_id: UUID
+    status: Literal["pending", "running", "retry", "succeeded", "blocked"]
+    source_booking_id: int = Field(ge=1)
+    replacement_booking_id: int = Field(ge=1)
+    effects: list[BookingWorkflowEffect] = Field(min_length=1, max_length=12)
+
+    @model_validator(mode="after")
+    def valid_effect_order(self) -> BookingWorkflowStatus:
+        kinds = [effect.kind for effect in self.effects]
+        sequences = [effect.sequence for effect in self.effects]
+        if len(kinds) != len(set(kinds)):
+            raise ValueError("workflow effect kinds must be unique")
+        if sequences != sorted(sequences) or len(sequences) != len(set(sequences)):
+            raise ValueError("workflow effect sequence must be unique and ordered")
         return self
 
 
@@ -830,7 +880,9 @@ _BOOKING_BY_ID = """SELECT b.id, b.event_type_id, e.name AS event_name, b.name,
 _RESCHEDULE_SOURCE_BY_ID = """SELECT id, event_type_id, name, email, phone, notes,
                                      start_utc, tz, status, client_id, project_id,
                                      venue_address, dish_count, parking_notes,
-                                     style_refs, onsite_contact
+                                     style_refs, onsite_contact, inquiry_id,
+                                     google_event_id, notion_page_id,
+                                     notion_session_id
                                 FROM bookings WHERE id=?"""
 
 
@@ -874,6 +926,117 @@ def _rollback_quietly(con) -> None:
         con.execute("ROLLBACK")
     except Exception:
         pass
+
+
+def _booking_workflow_status(workflow_id: UUID) -> BookingWorkflowStatus:
+    summary = booking_workflow.summary(str(workflow_id))
+    if summary is None:
+        raise mobile_auth.MobileAuthError(
+            404,
+            "booking.workflow_not_found",
+            "Booking workflow not found.",
+        )
+    effects = [
+        {
+            **effect,
+            "next_attempt_at": (
+                dt.datetime.fromtimestamp(effect["next_attempt_at"], tz=dt.UTC)
+                if effect["next_attempt_at"] is not None
+                else None
+            ),
+            "completed_at": (
+                dt.datetime.fromtimestamp(effect["completed_at"], tz=dt.UTC)
+                if effect["completed_at"] is not None
+                else None
+            ),
+        }
+        for effect in summary["effects"]
+    ]
+    return BookingWorkflowStatus.model_validate(
+        {**summary, "workflow_id": workflow_id, "effects": effects}
+    )
+
+
+def _retry_booking_workflow(
+    workflow_id: UUID,
+    *,
+    principal: mobile_auth.Principal,
+) -> int:
+    """Authorize, reset, and audit a workflow retry under one writer lock."""
+    con = db.connect()
+    con.isolation_level = None
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        # The writer lock may have waited behind a concurrent session revocation.
+        # Re-read both authorization state and time only after that wait.
+        now_ts = mobile_idempotency.now_ts()
+        session = con.execute(
+            """SELECT tenant_key, principal_kind, absolute_expires_at, revoked_at
+                 FROM api_sessions WHERE id=?""",
+            (principal.session_id,),
+        ).fetchone()
+        if (
+            session is None
+            or session["tenant_key"] != principal.tenant_key
+            or session["principal_kind"] != principal.kind
+            or session["principal_kind"] != mobile_auth.STUDIO_OWNER
+            or session["revoked_at"] is not None
+            or int(session["absolute_expires_at"]) <= now_ts
+        ):
+            raise mobile_auth.MobileAuthError(
+                401,
+                "auth.invalid_token",
+                "The token is invalid or expired.",
+            )
+
+        if not booking_workflow.available():
+            raise mobile_auth.MobileAuthError(
+                503,
+                "booking.reschedule_unavailable",
+                "Booking reschedule delivery is not configured.",
+                retry_after=max(1, config.BOOKING_WORKFLOW_POLL_SECONDS),
+            )
+
+        workflow = con.execute(
+            """SELECT replacement_booking_id
+                 FROM booking_workflow_effects
+                WHERE workflow_id=?
+                ORDER BY sequence_no LIMIT 1""",
+            (str(workflow_id),),
+        ).fetchone()
+        if workflow is None:
+            raise mobile_auth.MobileAuthError(
+                404,
+                "booking.workflow_not_found",
+                "Booking workflow not found.",
+            )
+
+        effect_count = booking_workflow.retry_in_transaction(con, str(workflow_id))
+        if effect_count == 0:
+            raise mobile_auth.MobileAuthError(
+                409,
+                "booking.workflow_not_retryable",
+                "This booking workflow has no blocked effects to retry.",
+            )
+        audit.log(
+            con,
+            "booking",
+            int(workflow["replacement_booking_id"]),
+            "workflow_retry",
+            diff={
+                "effect_count": effect_count,
+                "session_id": principal.session_id,
+                "workflow_id": str(workflow_id),
+            },
+            actor="owner",
+        )
+        con.execute("COMMIT")
+        return effect_count
+    except Exception:
+        _rollback_quietly(con)
+        raise
+    finally:
+        con.close()
 
 
 def _reschedule_booking(
@@ -942,6 +1105,16 @@ def _reschedule_booking(
             con.execute("COMMIT")
             return result, False
 
+        if not booking_workflow.available():
+            raise mobile_auth.MobileAuthError(
+                503,
+                "booking.reschedule_unavailable",
+                "Booking reschedule delivery is not configured.",
+                retry_after=max(1, config.BOOKING_WORKFLOW_POLL_SECONDS),
+            )
+
+        workflow_id = uuid4()
+
         source = con.execute(_RESCHEDULE_SOURCE_BY_ID, (booking_id,)).fetchone()
         if source is None:
             raise HTTPException(status_code=404, detail="Booking not found.")
@@ -983,7 +1156,9 @@ def _reschedule_booking(
         con.execute(
             """UPDATE bookings
                   SET client_id=?, project_id=?, venue_address=?, dish_count=?,
-                      parking_notes=?, style_refs=?, onsite_contact=?
+                      parking_notes=?, style_refs=?, onsite_contact=?,
+                      inquiry_id=?, google_event_id=?, notion_page_id=?,
+                      notion_session_id=?
                 WHERE id=?""",
             (
                 source["client_id"],
@@ -993,19 +1168,47 @@ def _reschedule_booking(
                 source["parking_notes"],
                 source["style_refs"],
                 source["onsite_contact"],
+                source["inquiry_id"],
+                source["google_event_id"],
+                source["notion_page_id"],
+                source["notion_session_id"],
                 replacement_id,
             ),
         )
-        cancelled = con.execute(
+        if source["inquiry_id"] is not None:
+            con.execute(
+                """UPDATE inquiries
+                      SET shoot_date=?, service=?, message=?
+                    WHERE id=?""",
+                (
+                    start_utc[:10],
+                    event_type["name"],
+                    (
+                        f"Rescheduled {event_type['name']} for {start_utc[:10]}."
+                        f"\n\n{source['notes']}"
+                    ),
+                    source["inquiry_id"],
+                ),
+            )
+        if source["project_id"] is not None:
+            con.execute(
+                "UPDATE projects SET shoot_date=? WHERE id=?",
+                (start_utc[:10], source["project_id"]),
+            )
+        if not scheduling.cancel_in_transaction(
+            con,
+            booking_id,
+            "Rescheduled from the studio app",
+        ):
+            raise RuntimeError("booking reschedule lost source transition")
+        con.execute(
             """UPDATE bookings
-                  SET status='cancelled',
-                      cancel_reason='Rescheduled from the studio app',
-                      cancelled_at=datetime('now')
-                WHERE id=? AND status='confirmed'""",
+                  SET inquiry_id=NULL,
+                      google_event_id=NULL,
+                      notion_page_id=NULL
+                WHERE id=?""",
             (booking_id,),
         )
-        if cancelled.rowcount != 1:
-            raise RuntimeError("booking reschedule lost source transition")
 
         audit.log(
             con,
@@ -1015,6 +1218,7 @@ def _reschedule_booking(
             diff={
                 "replacement_booking_id": replacement_id,
                 "session_id": principal.session_id,
+                "workflow_id": str(workflow_id),
                 "start_utc": [source["start_utc"], start_utc],
                 "status": ["confirmed", "cancelled"],
             },
@@ -1028,6 +1232,7 @@ def _reschedule_booking(
             diff={
                 "session_id": principal.session_id,
                 "source_booking_id": booking_id,
+                "workflow_id": str(workflow_id),
                 "start_utc": start_utc,
                 "status": [None, "confirmed"],
             },
@@ -1042,10 +1247,18 @@ def _reschedule_booking(
             raise RuntimeError("booking reschedule replacement vanished")
         result = BookingRescheduleResult(
             status="rescheduled",
+            workflow_id=workflow_id,
+            delivery_status="pending",
             original_booking_id=booking_id,
             replacement_booking_id=int(replacement["id"]),
             start_at=_sqlite_utc(replacement["start_utc"]),
             end_at=_sqlite_utc(replacement["end_utc"]),
+        )
+        booking_workflow.enqueue_reschedule(
+            con,
+            source_booking_id=booking_id,
+            replacement_booking_id=replacement_id,
+            workflow_id=str(workflow_id),
         )
         response_json = result.model_dump_json()
         con.execute(
@@ -1073,6 +1286,14 @@ def _reschedule_booking(
             "booking.slot_unavailable",
             "That time is no longer available.",
         ) from exc
+    except booking_workflow.WorkflowBusy as exc:
+        _rollback_quietly(con)
+        raise mobile_auth.MobileAuthError(
+            409,
+            "booking.workflow_in_progress",
+            "Booking delivery is still in progress. Try again shortly.",
+            retry_after=max(1, config.BOOKING_WORKFLOW_POLL_SECONDS),
+        ) from exc
     except Exception:
         _rollback_quietly(con)
         raise
@@ -1086,20 +1307,31 @@ def cancel_booking(
     principal: Annotated[mobile_auth.Principal, Depends(require_studio_owner)],
     response: Response,
 ) -> Booking:
-    """Owner-authoritative booking cancel (M4a). Reuses the canonical
-    ``scheduling.cancel`` (its ``WHERE status='confirmed'`` guard makes this
-    idempotent — a repeat call is a no-op returning the already-cancelled state,
-    with no second email/calendar-drop and no second audit row). Only a real
-    ``confirmed → cancelled`` transition writes an audit row and fires the client
-    cancellation notice; the web ``/admin`` cancel writes no audit row."""
+    """Owner-authoritative booking cancel (M4a).
+
+    The canonical transactional cancellation guard also supersedes queued
+    replacement effects. A repeat call remains a no-op with no second notice or
+    audit row; running provider work returns a retryable conflict.
+    """
     _require_studio_write(principal)
-    existing = db.one("SELECT token, status FROM bookings WHERE id=?", (booking_id,))
-    if existing is None:
-        raise HTTPException(status_code=404, detail="Booking not found.")
-    if existing["status"] == "confirmed" and scheduling.cancel(
-        existing["token"], "Cancelled from the studio app"
-    ):
-        with db.tx() as con:
+    transitioned = False
+    con = db.connect()
+    con.isolation_level = None
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        existing = con.execute(
+            "SELECT status FROM bookings WHERE id=?",
+            (booking_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Booking not found.")
+        if existing["status"] == "confirmed":
+            if not scheduling.cancel_in_transaction(
+                con,
+                booking_id,
+                "Cancelled from the studio app",
+            ):
+                raise RuntimeError("booking cancel lost confirmed transition")
             audit.log(
                 con,
                 "booking",
@@ -1108,6 +1340,22 @@ def cancel_booking(
                 diff={"status": ["confirmed", "cancelled"]},
                 actor="owner",
             )
+            transitioned = True
+        con.execute("COMMIT")
+    except booking_workflow.WorkflowBusy as exc:
+        _rollback_quietly(con)
+        raise mobile_auth.MobileAuthError(
+            409,
+            "booking.workflow_in_progress",
+            "Booking delivery is still in progress. Try again shortly.",
+            retry_after=max(1, config.BOOKING_WORKFLOW_POLL_SECONDS),
+        ) from exc
+    except Exception:
+        _rollback_quietly(con)
+        raise
+    finally:
+        con.close()
+    if transitioned:
         booking_notify.cancelled(booking_id, by_admin=True)
     _set_private_headers(response)
     return _booking_from_row(db.one(_BOOKING_BY_ID, (booking_id,)))
@@ -1129,9 +1377,9 @@ def reschedule_booking(
 ) -> BookingRescheduleResult:
     """Atomically replace one confirmed owner booking at a server-valid slot.
 
-    The replay receipt, replacement, source cancellation, and audit rows share one
-    immediate transaction. External confirmation effects run only after commit and
-    only for the first execution; they remain the existing best-effort workflow.
+    The replay receipt, replacement, source cancellation, audit rows, and durable
+    delivery workflow share one immediate transaction. A successful response means
+    the booking changed and delivery was queued; it does not claim provider delivery.
     """
     _require_studio_write(principal)
     result, created = _reschedule_booking(
@@ -1142,14 +1390,59 @@ def reschedule_booking(
     )
     if created:
         try:
-            booking_notify.confirm(result.replacement_booking_id)
+            scheduler.wake_booking_workflows()
         except Exception as exc:
             log.error(
-                "booking reschedule post-commit effects failed: source=%s replacement=%s type=%s",
-                result.original_booking_id,
-                result.replacement_booking_id,
+                "booking reschedule workflow wake failed: workflow=%s type=%s",
+                result.workflow_id,
                 type(exc).__name__,
             )
+    _set_private_headers(response)
+    response.headers["Cache-Control"] = "no-store"
+    return result
+
+
+@router.get(
+    "/booking-workflows/{workflow_id}",
+    response_model=BookingWorkflowStatus,
+    dependencies=[Depends(_MOBILE_BEARER)],
+    tags=["scheduling"],
+)
+def booking_workflow_status(
+    workflow_id: Annotated[UUID, Path()],
+    response: Response,
+) -> BookingWorkflowStatus:
+    """Return bounded, contact-free delivery state for one tenant workflow."""
+    result = _booking_workflow_status(workflow_id)
+    _set_private_headers(response)
+    response.headers["Cache-Control"] = "no-store"
+    return result
+
+
+@router.post(
+    "/booking-workflows/{workflow_id}/retry",
+    response_model=BookingWorkflowStatus,
+    responses=_BOOKING_COMMAND_PROBLEM_RESPONSES,
+    dependencies=[Depends(_MOBILE_BEARER)],
+    tags=["scheduling"],
+)
+def retry_booking_workflow(
+    workflow_id: Annotated[UUID, Path()],
+    principal: Annotated[mobile_auth.Principal, Depends(require_studio_owner)],
+    response: Response,
+) -> BookingWorkflowStatus:
+    """Reset only terminal blocked effects, then wake this durable workflow."""
+    _require_studio_write(principal)
+    _retry_booking_workflow(workflow_id, principal=principal)
+    try:
+        scheduler.wake_booking_workflows()
+    except Exception as exc:
+        log.error(
+            "booking workflow retry wake failed: workflow=%s type=%s",
+            workflow_id,
+            type(exc).__name__,
+        )
+    result = _booking_workflow_status(workflow_id)
     _set_private_headers(response)
     response.headers["Cache-Control"] = "no-store"
     return result
