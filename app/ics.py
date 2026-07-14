@@ -8,9 +8,10 @@ credentials and lives elsewhere.
 """
 
 import datetime as dt
+import hashlib
 from urllib.parse import urlencode
 
-from . import mailer
+from . import mailer, urls
 
 
 def _compact(utc_str: str) -> str:
@@ -22,8 +23,16 @@ def _esc(text: str) -> str:
     return text.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
 
 
-def uid_for(booking_id: int) -> str:
-    return f"mise-booking-{booking_id}@kleephotography.com"
+def uid_for(booking_id: int, stored_uid: str | None = None) -> str:
+    """Return persisted identity, with the pre-083 form as a safe fallback."""
+    return stored_uid or f"mise-booking-{booking_id}@kleephotography.com"
+
+
+def new_uid(booking_token: str) -> str:
+    """Create a tenant-scoped opaque UID before the booking row has an id."""
+    origin = urls.public_base_url().rstrip("/").lower()
+    digest = hashlib.sha256(f"mise-booking-v2\0{origin}\0{booking_token}".encode()).hexdigest()
+    return f"mise-booking-{digest}@kleephotography.com"
 
 
 def build(

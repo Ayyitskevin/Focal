@@ -6,8 +6,10 @@ and the scoped OpenAPI document. Milestone 2 adds the owner dashboard, client an
 project collections, gallery manifests, event types, and booking agenda.
 Milestone 3 (ADR 0067) adds the shared-client reads (`/client/home`,
 `/client/galleries`, `/client/bookings`, project document collections), the
-gallery-guest favorite toggle, and bearer-authenticated media routes. The
-remaining commands stay in the planned Milestone 4 contract.
+gallery-guest favorite toggle, and bearer-authenticated media routes. Milestone
+4a adds owner task completion, booking cancellation, and the session-bound
+booking-reschedule command below. S6e adds its durable, operator-visible delivery
+workflow. Other commands remain planned.
 
 ## Conventions
 
@@ -110,11 +112,17 @@ Success:
         "display_name": "North Star Photo",
         "email": "owner@example.com",
         "scopes": ["studio:read", "studio:write"]
-      }
+      },
+      "available_commands": ["booking.reschedule"]
     }
 
 The same generic 401 problem covers unknown email and wrong password. Reuse the
 current IP lockout and tenant password verifier.
+
+`available_commands` is also returned by `GET /api/v1/me`. It contains
+`booking.reschedule` only for a write-scoped studio owner while the default-off
+durable workflow and outbound mail are configured. The native client must hide
+reschedule otherwise; the command independently rechecks the gate.
 
 ### Other auth routes
 
@@ -193,7 +201,9 @@ authorization; authorization is reevaluated on every page.
 | `POST /api/v1/invoices/{id}/checkout` | return server-created hosted checkout URL |
 | `POST /api/v1/bookings` | atomically revalidate slot and create booking |
 | `POST /api/v1/bookings/{id}/cancel` | owner: idempotently cancel a confirmed booking; audited; fires the client cancel notice (implemented, M4a) |
-| `POST /api/v1/bookings/{id}/reschedule` | atomically create replacement/cancel old |
+| `POST /api/v1/bookings/{id}/reschedule` | owner: atomically create replacement/cancel old and enqueue durable delivery; audited; session-bound replay |
+| `GET /api/v1/booking-workflows/{workflow_id}` | owner: bounded delivery status, with no booking contact/body/token fields |
+| `POST /api/v1/booking-workflows/{workflow_id}/retry` | write-scoped owner: reset only blocked effects and wake delivery |
 | `PATCH /api/v1/galleries/{g}/assets/{a}/cull` | owner keep/cut/restore command |
 | `POST /api/v1/captions/{id}/draft` | explicit AI draft; never auto-approve |
 
@@ -206,8 +216,146 @@ completion as an idempotent sub-resource (`PUT` = ensure done, `DELETE` = ensure
 open), so a repeat call is a safe no-op returning current state. It requires an owner
 bearer carrying `studio:write` and writes one `audit_log` row per real transition
 (`task`/`complete`|`reopen`, actor `owner`) — the web `/admin/tasks/{id}/toggle` path
-writes none. Booking cancel/reschedule (which is *not* naturally idempotent — each
-reschedule creates a new row) land next and bring the `Idempotency-Key` replay store.
+writes none. Booking cancellation is naturally idempotent; when it targets a
+replacement whose provider effect is already running, it returns
+`409 booking.workflow_in_progress` without changing either state. Rescheduling
+is not idempotent — each successful command creates a new row — so it uses the
+replay contract below.
+
+### Owner booking reschedule
+
+`POST /api/v1/bookings/{booking_id}/reschedule` requires an exact
+`studio_owner` bearer with `studio:write` plus a UUID `Idempotency-Key` header.
+
+    {
+      "start_at": "2026-07-16T11:00:00Z",
+      "time_zone": "America/New_York"
+    }
+
+`start_at` is an aware RFC 3339 whole-second instant; equivalent offsets and a
+zero fractional component canonicalize to UTC. `time_zone` is a valid IANA name
+used for the replacement booking's client-facing display context. The destination
+still comes from business-local availability and is revalidated server-side.
+
+    {
+      "status": "rescheduled",
+      "workflow_id": "86aa7d32-740e-4993-af8d-438bb80c366b",
+      "delivery_status": "pending",
+      "original_booking_id": 41,
+      "replacement_booking_id": 42,
+      "start_at": "2026-07-16T11:00:00Z",
+      "end_at": "2026-07-16T12:00:00Z"
+    }
+
+After a SQLite `BEGIN IMMEDIATE` writer lock, the command rechecks the mobile
+session, source state, event type, availability, notice/window policy, overlaps,
+and daily cap. Replacement creation, source cancellation, linkage/intake and
+external-ID transfer, inquiry/project date reconciliation, two audit rows, six
+workflow-effect rows, and the exact minimal replay response commit together.
+Failure to enqueue rolls the entire command back. No bearer, raw idempotency key,
+booking manage token, client contact field, or rendered message is copied into the
+receipt, audit payload, or workflow table.
+
+Replay scope is deliberately `(session_id, hash(Idempotency-Key))`. A refreshed
+access token in the same device session gets the exact stored response; the same
+key with a different canonical request returns `409 idempotency.key_conflict`.
+A logout/new login is a new replay namespace. Receipts become unusable at the
+session's absolute expiry and the recurring scheduler physically prunes them.
+This session scope is approved for booking reschedule only; payment/signature
+commands need their own durable-identity decision before reusing it.
+
+State conflicts return stable `409` codes: `booking.not_reschedulable`,
+`booking.unchanged`, `booking.event_unavailable`, `booking.slot_unavailable`, or
+`booking.workflow_in_progress` while a prior replacement effect is already
+running.
+Unknown bookings are `404`; malformed body/header input is `422`. If durable
+delivery is not armed, the command returns
+`503 booking.reschedule_unavailable` before any booking write.
+
+A `200` means the booking transition and workflow enqueue committed; it is not
+proof of provider delivery. The immutable replay therefore keeps
+`delivery_status: "pending"` and returns the stable `workflow_id` for status
+reads. After commit, an immediate dispatch wake is attempted; a startup drain and
+short periodic sweep recover crashes and expired leases in every retained tenant
+database, including non-billable tenants. Hosted recovery re-resolves immutable
+tenant identity and opens SQLite existing-only, so missing/deleted DBs and delete
+races cannot silently recreate storage.
+
+The six ordered effects are:
+
+1. old client invite: `METHOD:CANCEL`, old UID/times,
+   `STATUS:CANCELLED`, `SEQUENCE:1`;
+2. replacement invite: `METHOD:REQUEST`, replacement UID/times/manage URL,
+   `STATUS:CONFIRMED`, `SEQUENCE:0` — eligible only after effect 1 succeeds or
+   is explicitly inapplicable;
+3. one studio reschedule notice;
+4. patch/reuse the existing Notion booking page;
+5. patch/reuse the shared Notion Session;
+6. move/reuse the Google Calendar event.
+
+Each effect has its own attempt count, due time, lease, terminal status, provider
+reference, and bounded error class/code. Completed/skipped effects never rerun.
+Blocked CANCEL holds REQUEST pending; manual retry resets blocked effects only.
+Google/Notion identifiers move to the replacement (the shared Session remains on
+both historical rows), preventing duplicate external objects.
+
+Migration 083 stores calendar identity before changing its generation rule:
+preexisting bookings keep the exact `mise-booking-{id}@kleephotography.com` UID
+already issued to clients, while new bookings use a tenant-scoped UID. Cancelling
+or rescheduling a replacement under any mobile, public, or admin lifecycle path
+atomically marks its non-CANCEL queued effects `skipped` with
+`replacement_superseded`; the original source CANCEL remains eligible. An expired
+non-CANCEL lease is retired under the lifecycle writer lock even if delivery is
+currently disarmed. A non-CANCEL effect with an active lease returns 409 rather
+than racing provider I/O.
+
+SMTP cannot provide transactional exactly-once acceptance. Delivery is honest
+at-least-once: stable Message-IDs reduce duplicates, but a crash after provider
+acceptance and before the local success stamp can resend the same logical message.
+
+### Booking workflow status and retry
+
+`GET /api/v1/booking-workflows/{workflow_id}` requires a studio owner and
+returns:
+
+    {
+      "workflow_id": "86aa7d32-740e-4993-af8d-438bb80c366b",
+      "status": "retry",
+      "source_booking_id": 41,
+      "replacement_booking_id": 42,
+      "effects": [
+        {
+          "kind": "client_cancel_ics",
+          "sequence": 10,
+          "status": "retry",
+          "attempts": 2,
+          "next_attempt_at": "2026-07-13T18:30:05Z",
+          "completed_at": null,
+          "provider_ref": null,
+          "error_class": "TimeoutError",
+          "error_code": "exception"
+        }
+      ]
+    }
+
+Overall state is `pending|running|retry|succeeded|blocked`; effect state is
+`pending|running|retry|succeeded|skipped|blocked`. The response contains only
+stable IDs and bounded operational evidence—never contact fields, message bodies,
+credentials, raw tokens, or manage URLs.
+
+`POST /api/v1/booking-workflows/{workflow_id}/retry` additionally requires
+`studio:write`. It returns `409 booking.workflow_not_retryable` when nothing is
+blocked, `404 booking.workflow_not_found` for an unknown tenant-local workflow,
+and `503 booking.reschedule_unavailable` while dispatch is disarmed. The endpoint
+revalidates the session after acquiring its writer lock, resets blocked effects,
+and appends bounded owner/session audit evidence in the same transaction; only
+after commit does it wake delivery.
+
+This S6e contract is scoped to the owner `/api/v1` command. The existing public
+browser reschedule path remains on its legacy notification flow and must not be
+described as having these durable CANCEL/REQUEST guarantees. It does share the
+canonical atomic supersession/busy guard, so it cannot resurrect a queued native
+replacement workflow.
 
 ## Owner commercial spine (implemented — read-only)
 

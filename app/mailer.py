@@ -56,7 +56,12 @@ def _hdr(value: str) -> str:
 
 
 def _build_message(
-    to: str, subject: str, body: str, reply_to: str = "", ics: dict | None = None
+    to: str,
+    subject: str,
+    body: str,
+    reply_to: str = "",
+    ics: dict | None = None,
+    message_id: str = "",
 ) -> EmailMessage:
     msg = EmailMessage()
     # _hdr on the display name too: in hosted mode sender_name() is the tenant's
@@ -65,6 +70,9 @@ def _build_message(
     msg["From"] = f"{_hdr(sender_name())} <{config.GMAIL_USER}>"
     msg["To"] = _hdr(to)
     msg["Subject"] = _hdr(subject)
+    message_id = _hdr(message_id)
+    if message_id:
+        msg["Message-ID"] = message_id
     reply_to = _hdr(reply_to or _default_reply_to())
     if reply_to:
         msg["Reply-To"] = reply_to
@@ -80,13 +88,31 @@ def _build_message(
     return msg
 
 
-def send(to: str, subject: str, body: str, reply_to: str = "", ics: dict | None = None) -> None:
+def send(
+    to: str,
+    subject: str,
+    body: str,
+    reply_to: str = "",
+    ics: dict | None = None,
+    message_id: str = "",
+) -> None:
     """Send a plain-text email, optionally with a calendar invite attached.
 
     `ics` = {"filename", "content", "method"} — content is the VCALENDAR text from
     ics.build(); method ("REQUEST"/"CANCEL") must match its METHOD so Gmail/Apple
-    Mail render the in-line Accept/Decline (or removal) affordance."""
-    msg = _build_message(to, subject, body, reply_to=reply_to, ics=ics)
+    Mail render the in-line Accept/Decline (or removal) affordance.
+
+    message_id, when supplied, is a caller-owned stable RFC 5322 Message-ID.
+    Durable workflows reuse it on retry so providers and clients have a consistent
+    deduplication identity; callers that omit it retain the previous header set."""
+    msg = _build_message(
+        to,
+        subject,
+        body,
+        reply_to=reply_to,
+        ics=ics,
+        message_id=message_id,
+    )
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as s:
         s.login(config.GMAIL_USER, config.GMAIL_APP_PASSWORD)
         s.send_message(msg)

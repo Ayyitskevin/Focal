@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
-from .. import booking_notify, config, db, ics, mailer, scheduling, security
+from .. import booking_notify, booking_workflow, config, db, ics, mailer, scheduling, security
 from ..render import templates
 
 log = logging.getLogger("mise.public.scheduling")
@@ -216,7 +216,7 @@ async def invite(token: str):
     if not b:
         raise HTTPException(status_code=404)
     content = ics.build(
-        uid=ics.uid_for(b["id"]),
+        uid=ics.uid_for(b["id"], b["calendar_uid"]),
         summary=f"{b['event_name']} · {mailer.sender_name()}",
         description=b["notes"] or "",
         location=b["location"] or "",
@@ -239,8 +239,16 @@ async def cancel_booking(request: Request, token: str, reason: str = Form("")):
     b = scheduling.booking_by_token(token)
     if not b:
         raise HTTPException(status_code=404)
-    if b["status"] == "confirmed" and scheduling.cancel(token, reason.strip()[:500]):
-        booking_notify.cancelled(b["id"])
+    if b["status"] == "confirmed":
+        try:
+            changed = scheduling.cancel(token, reason.strip()[:500])
+        except booking_workflow.WorkflowBusy as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="Booking delivery is still in progress. Please try again shortly.",
+            ) from exc
+        if changed:
+            booking_notify.cancelled(b["id"])
     return RedirectResponse(f"/booking/{token}", status_code=303)
 
 
@@ -267,7 +275,7 @@ async def do_reschedule(request: Request, token: str, start: str = Form(...), tz
     if not et:
         raise HTTPException(status_code=404)
     try:
-        new_id, new_token = scheduling.book(
+        new_id, new_token = scheduling.reschedule(
             et,
             start,
             b["name"],
@@ -275,7 +283,7 @@ async def do_reschedule(request: Request, token: str, start: str = Form(...), tz
             b["phone"],
             b["notes"],
             tz or b["tz"],
-            exclude_id=b["id"],
+            source_booking_id=b["id"],
         )
     except scheduling.SlotTaken:
         ctx = _picker_ctx(et, request, is_reschedule=True, token=token)
@@ -283,8 +291,13 @@ async def do_reschedule(request: Request, token: str, start: str = Form(...), tz
         ctx["old_when"] = b["start_utc"]
         ctx["error"] = "Sorry — that time was just taken. Please pick another."
         return templates.TemplateResponse(request, "public/book_event.html", ctx, status_code=409)
-    # New slot held; release the old one and email the fresh invite.
-    scheduling.cancel(token, "Rescheduled")
+    except booking_workflow.WorkflowBusy:
+        ctx = _picker_ctx(et, request, is_reschedule=True, token=token)
+        ctx["form_action"] = f"/booking/{token}/reschedule"
+        ctx["old_when"] = b["start_utc"]
+        ctx["error"] = "Booking delivery is still in progress. Please try again shortly."
+        return templates.TemplateResponse(request, "public/book_event.html", ctx, status_code=409)
+    # The replacement and source cancellation committed atomically; notify after.
     booking_notify.confirm(new_id)
     log.info("booking %s rescheduled -> %s", b["id"], new_id)
     return RedirectResponse(f"/booking/{new_token}", status_code=303)

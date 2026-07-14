@@ -158,6 +158,7 @@ def test_auth_session_matches_swift_and_fastapi_encodes_rfc3339_utc():
         refresh_token_expires_at="2026-08-09T22:30:00Z",
         workspace=_workspace(),
         principal=_principal(),
+        available_commands=[],
         session_id="session_01J",
     )
 
@@ -172,6 +173,7 @@ def test_auth_session_matches_swift_and_fastapi_encodes_rfc3339_utc():
         "access_token_expires_at",
         "workspace",
         "principal",
+        "available_commands",
     }
 
 
@@ -182,6 +184,7 @@ def test_auth_session_rejects_naive_or_backwards_expirations():
         "token_type": "Bearer",
         "workspace": _workspace(),
         "principal": _principal(),
+        "available_commands": [],
     }
     with pytest.raises(ValidationError, match="UTC offset"):
         AuthSession(
@@ -198,17 +201,28 @@ def test_auth_session_rejects_naive_or_backwards_expirations():
 
 
 def test_me_is_structurally_token_and_secret_free():
-    current = CurrentSession(workspace=_workspace(), principal=_principal())
+    current = CurrentSession(
+        workspace=_workspace(),
+        principal=_principal(),
+        available_commands=[],
+    )
     payload = current.model_dump(mode="json")
 
-    assert set(CurrentSession.model_fields) == {"workspace", "principal"}
+    assert set(CurrentSession.model_fields) == {
+        "workspace",
+        "principal",
+        "available_commands",
+    }
     assert "access_token" not in json.dumps(payload)
     assert "refresh_token" not in json.dumps(payload)
     assert not ({"pin", "password_hash", "refresh_token_hash", "filesystem_path"} & set(payload))
 
     with pytest.raises(ValidationError):
         CurrentSession(
-            workspace=_workspace(), principal=_principal(), refresh_token="must-not-serialize"
+            workspace=_workspace(),
+            principal=_principal(),
+            available_commands=[],
+            refresh_token="must-not-serialize",
         )
 
 
