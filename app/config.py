@@ -396,6 +396,16 @@ VIDEO_CRF = int(os.environ.get("MISE_VIDEO_CRF", "23"))
 
 JOB_WORKERS = int(os.environ.get("MISE_JOB_WORKERS", "2"))
 
+# Durable booking workflow dispatch stays explicitly dark until its migration,
+# worker, and client-calendar semantics have been reviewed and activated together.
+# The mobile API advertises booking.reschedule only while this flag is armed and
+# outbound mail is configured.
+BOOKING_WORKFLOW_ENABLED = _b("MISE_BOOKING_WORKFLOW_ENABLED", "false")
+BOOKING_WORKFLOW_POLL_SECONDS = int(os.environ.get("MISE_BOOKING_WORKFLOW_POLL_SECONDS", "30"))
+BOOKING_WORKFLOW_LEASE_SECONDS = int(os.environ.get("MISE_BOOKING_WORKFLOW_LEASE_SECONDS", "120"))
+BOOKING_WORKFLOW_MAX_ATTEMPTS = int(os.environ.get("MISE_BOOKING_WORKFLOW_MAX_ATTEMPTS", "8"))
+BOOKING_WORKFLOW_BATCH_SIZE = int(os.environ.get("MISE_BOOKING_WORKFLOW_BATCH_SIZE", "20"))
+
 # Recurring-plan scheduler: how often the in-process thread sweeps for due
 # retainer drafts. Generates DRAFTS only (never sends/charges). The sweep is
 # idempotent, so the only effect of the interval is how soon after a restart a

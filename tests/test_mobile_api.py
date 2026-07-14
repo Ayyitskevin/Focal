@@ -107,6 +107,8 @@ def test_tenant_discovery_and_openapi_are_scoped_native_contracts(mobile_client)
         "/bookings",
         "/bookings/{booking_id}/cancel",
         "/bookings/{booking_id}/reschedule",
+        "/booking-workflows/{workflow_id}",
+        "/booking-workflows/{workflow_id}/retry",
         "/client/home",
         "/client/galleries",
         "/client/galleries/{gallery_id}",
@@ -144,19 +146,23 @@ def test_tenant_discovery_and_openapi_are_scoped_native_contracts(mobile_client)
     result_schema = schema["components"]["schemas"]["BookingRescheduleResult"]
     assert set(result_schema["required"]) == {
         "status",
+        "workflow_id",
+        "delivery_status",
         "original_booking_id",
         "replacement_booking_id",
         "start_at",
         "end_at",
     }
     assert result_schema["properties"]["status"]["const"] == "rescheduled"
+    assert result_schema["properties"]["workflow_id"]["format"] == "uuid"
+    assert result_schema["properties"]["delivery_status"]["const"] == "pending"
     assert {"MobileBearer": []} in reschedule["security"]
     bearer_scheme = schema["components"]["securitySchemes"]["MobileBearer"]
     assert bearer_scheme["type"] == "http"
     assert bearer_scheme["scheme"] == "bearer"
     assert bearer_scheme["bearerFormat"] == "opaque"
-    assert {"401", "403", "404", "409", "422", "429"} <= set(reschedule["responses"])
-    for status in ("401", "403", "404", "409", "422", "429"):
+    assert {"401", "403", "404", "409", "422", "429", "503"} <= set(reschedule["responses"])
+    for status in ("401", "403", "404", "409", "422", "429", "503"):
         assert set(reschedule["responses"][status]["content"]) == {"application/problem+json"}
         assert reschedule["responses"][status]["content"]["application/problem+json"]["schema"] == {
             "$ref": "#/components/schemas/APIProblem"
@@ -172,6 +178,7 @@ def test_owner_login_me_device_list_refresh_replay_and_logout(mobile_client):
     assert payload["token_type"] == "Bearer"
     assert payload["principal"]["kind"] == "studio_owner"
     assert payload["principal"]["scopes"] == ["studio:read", "studio:write"]
+    assert payload["available_commands"] == []
     assert payload["workspace"]["api_base_url"] == "https://studio.test/"
     assert payload["access_token"] not in repr(payload["workspace"])
 

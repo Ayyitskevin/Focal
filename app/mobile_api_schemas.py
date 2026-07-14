@@ -253,7 +253,13 @@ class AuthSession(MobileAPIModel):
     refresh_token_expires_at: datetime | None = None
     workspace: WorkspaceContext
     principal: Principal
+    available_commands: list[BoundedString] = Field(max_length=128)
     session_id: OpaqueID | None = None
+
+    @field_validator("available_commands")
+    @classmethod
+    def available_commands_unique(cls, value: list[str]) -> list[str]:
+        return _unique_strings(value)
 
     @field_validator("access_token_expires_at", "refresh_token_expires_at")
     @classmethod
@@ -275,6 +281,12 @@ class CurrentSession(MobileAPIModel):
 
     workspace: WorkspaceContext
     principal: Principal
+    available_commands: list[BoundedString] = Field(max_length=128)
+
+    @field_validator("available_commands")
+    @classmethod
+    def available_commands_unique(cls, value: list[str]) -> list[str]:
+        return _unique_strings(value)
 
 
 class SessionSummary(MobileAPIModel):
