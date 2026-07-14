@@ -50,6 +50,16 @@ final class OwnerCommandModel {
         bookingIDsInFlight.contains(id)
     }
 
+    /// Shares one per-booking mutation lock across cancellation and
+    /// rescheduling so two consequential transitions cannot race from the UI.
+    func beginBookingMutation(_ id: Int64) -> Bool {
+        canWrite && bookingIDsInFlight.insert(id).inserted
+    }
+
+    func endBookingMutation(_ id: Int64) {
+        bookingIDsInFlight.remove(id)
+    }
+
     /// Drops optimistic task IDs once a successful dashboard refresh proves
     /// the server list has caught up. A stale/failed snapshot should not call
     /// this method, so its optimistic overlay remains intact.
@@ -125,10 +135,9 @@ final class OwnerCommandModel {
 
     @discardableResult
     func cancelBooking(_ booking: Booking) async -> Bool {
-        guard canWrite, booking.status == .confirmed,
-              bookingIDsInFlight.insert(booking.id).inserted
+        guard booking.status == .confirmed, beginBookingMutation(booking.id)
         else { return false }
-        defer { bookingIDsInFlight.remove(booking.id) }
+        defer { endBookingMutation(booking.id) }
 
         bookingNotice = nil
         do {

@@ -25,6 +25,7 @@ enum OwnerRepositoryError: LocalizedError, Sendable {
     case pendingBookingRescheduleNotFound
     case pendingBookingRescheduleMismatch
     case invalidBookingRescheduleResponse
+    case inactiveSession
 
     var errorDescription: String? {
         switch self {
@@ -44,6 +45,8 @@ enum OwnerRepositoryError: LocalizedError, Sendable {
             "The requested booking reschedule does not match the saved attempt."
         case .invalidBookingRescheduleResponse:
             "The server returned an inconsistent booking reschedule result."
+        case .inactiveSession:
+            "This signed-out repository can no longer update local state."
         }
     }
 }
@@ -75,6 +78,7 @@ actor OwnerRepository {
     private let client: any APIClientProtocol
     private let cache: TenantJSONCache
     private let sessionID: String?
+    private var cacheIsActive = true
 
     init(
         client: any APIClientProtocol,
@@ -181,37 +185,33 @@ actor OwnerRepository {
     ) async throws -> PendingBookingRescheduleAttempt {
         let currentSessionID = try await requireBookingRescheduleSession()
         let normalizedStartAt = MiseJSON.wholeSecondUTCDate(startAt)
-
-        if let existing = try await cache.read(
-            Key.pendingBookingReschedule,
-            as: PendingBookingRescheduleAttempt.self
-        )?.value {
-            guard existing.sessionID == currentSessionID else {
-                try? await cache.remove(Key.pendingBookingReschedule)
-                throw OwnerRepositoryError.bookingRescheduleSessionMismatch
-            }
-            guard
-                existing.bookingID == bookingID,
-                existing.startAt == normalizedStartAt,
-                existing.timeZone == timeZone
-            else {
-                throw OwnerRepositoryError.pendingBookingRescheduleConflict
-            }
-            return existing
-        }
-
-        let attempt = PendingBookingRescheduleAttempt(
+        let proposed = PendingBookingRescheduleAttempt(
             sessionID: currentSessionID,
             bookingID: bookingID,
             startAt: normalizedStartAt,
             timeZone: timeZone,
             idempotencyKey: UUID()
         )
-        try await cache.write(
-            attempt,
+        let attempt = try await cache.writeCommandIfAbsent(
+            proposed,
             key: Key.pendingBookingReschedule,
             etag: nil
-        )
+        ).value
+        try await requireActiveCache()
+        guard attempt.sessionID == currentSessionID else {
+            _ = try? await cache.removeCommand(
+                Key.pendingBookingReschedule,
+                ifMatches: attempt
+            )
+            throw OwnerRepositoryError.bookingRescheduleSessionMismatch
+        }
+        guard
+            attempt.bookingID == bookingID,
+            attempt.startAt == normalizedStartAt,
+            attempt.timeZone == timeZone
+        else {
+            throw OwnerRepositoryError.pendingBookingRescheduleConflict
+        }
         return attempt
     }
 
@@ -219,14 +219,18 @@ actor OwnerRepository {
         -> PendingBookingRescheduleAttempt?
     {
         let currentSessionID = try await requireBookingRescheduleSession()
-        guard let attempt = try await cache.read(
+        guard let attempt = try await cache.readCommand(
             Key.pendingBookingReschedule,
             as: PendingBookingRescheduleAttempt.self
         )?.value else {
             return nil
         }
+        try await requireActiveCache()
         guard attempt.sessionID == currentSessionID else {
-            try? await cache.remove(Key.pendingBookingReschedule)
+            _ = try? await cache.removeCommand(
+                Key.pendingBookingReschedule,
+                ifMatches: attempt
+            )
             throw OwnerRepositoryError.bookingRescheduleSessionMismatch
         }
         return attempt
@@ -252,11 +256,15 @@ actor OwnerRepository {
                 idempotencyKey: saved.idempotencyKey
             )
         )
+        try await requireActiveCache()
         guard
             result.status == .rescheduled,
             result.deliveryStatus == .pending,
             result.originalBookingID == saved.bookingID,
+            result.replacementBookingID > 0,
             result.replacementBookingID != saved.bookingID,
+            result.startAt == saved.startAt,
+            MiseJSON.wholeSecondUTCDate(result.endAt) == result.endAt,
             result.endAt > result.startAt
         else {
             throw OwnerRepositoryError.invalidBookingRescheduleResponse
@@ -270,7 +278,13 @@ actor OwnerRepository {
             key: Key.latestBookingReschedule,
             etag: nil
         )
-        try await cache.remove(Key.pendingBookingReschedule)
+        try await requireActiveCache()
+        guard try await cache.removeCommand(
+            Key.pendingBookingReschedule,
+            ifMatches: saved
+        ) else {
+            throw OwnerRepositoryError.pendingBookingRescheduleMismatch
+        }
         try? await cache.remove(Key.bookings)
         try? await cache.remove(Key.dashboard)
         return result
@@ -284,8 +298,10 @@ actor OwnerRepository {
             return false
         }
         guard saved == attempt else { return false }
-        try await cache.remove(Key.pendingBookingReschedule)
-        return true
+        return try await cache.removeCommand(
+            Key.pendingBookingReschedule,
+            ifMatches: attempt
+        )
     }
 
     func latestBookingRescheduleResult() async throws
@@ -371,6 +387,7 @@ actor OwnerRepository {
     }
 
     func purgeCache() async {
+        cacheIsActive = false
         try? await cache.removeAll()
     }
 
@@ -478,12 +495,22 @@ actor OwnerRepository {
     }
 
     private func requireBookingRescheduleSession() async throws -> String {
+        guard cacheIsActive else {
+            throw OwnerRepositoryError.inactiveSession
+        }
         guard let sessionID, !sessionID.isEmpty else {
-            try? await cache.remove(Key.pendingBookingReschedule)
-            try? await cache.remove(Key.latestBookingReschedule)
             throw OwnerRepositoryError.missingBookingRescheduleSession
         }
         return sessionID
+    }
+
+    private func requireActiveCache() async throws {
+        guard cacheIsActive else {
+            // A sign-out can interleave while an API request is suspended. Remove
+            // any file a late response might have recreated before refusing it.
+            try? await cache.removeAll()
+            throw OwnerRepositoryError.inactiveSession
+        }
     }
 
     private func sendWithMetadata<Response: Decodable & Sendable>(
@@ -501,12 +528,14 @@ actor OwnerRepository {
         if let apiError = error as? APIError,
            case .unauthenticated = apiError
         {
+            cacheIsActive = false
             try? await cache.removeAll()
             return
         }
         guard let sessionError = error as? SessionError else { return }
         switch sessionError {
         case .expired, .identityChanged, .workspaceMismatch:
+            cacheIsActive = false
             try? await cache.removeAll()
         }
     }

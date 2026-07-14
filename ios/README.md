@@ -55,7 +55,12 @@ and avoiding it in the foundation keeps auth/session behavior auditable.
   the owner agenda. Task check-off is optimistic and naturally idempotent;
   booking cancellation remains visible until the server confirms it because a
   real transition starts best-effort client-notification and calendar cleanup.
-  Native booking rescheduling remains a separate follow-up.
+  Native booking rescheduling is implemented as a capability-gated draft: its
+  destination must come from the source-aware slot feed, the exact session-bound
+  request and idempotency key are persisted before POST, ambiguous outcomes can
+  only replay that saved command, and provider-workflow status remains visible
+  after the booking moves. Keep it inactive until its stacked backend drafts and
+  the session-identity review are approved.
 - Do not add access tokens, refresh tokens, PINs, Stripe secrets, or APNs keys to
   xcconfig files.
 

@@ -414,12 +414,7 @@ struct EventTypeSlots: Codable, Hashable, Sendable {
         self.day = day
         self.timeZone = timeZone
         self.rescheduleBookingID = rescheduleBookingID
-        self.slots = slots.sorted { lhs, rhs in
-            if lhs.startAt == rhs.startAt {
-                return lhs.endAt < rhs.endAt
-            }
-            return lhs.startAt < rhs.startAt
-        }
+        self.slots = slots
     }
 
     init(from decoder: Decoder) throws {

@@ -26,7 +26,9 @@ final class ModelDecodingTests: XCTestCase {
                 "display_name": "North Star",
                 "email": "owner@example.com",
                 "scopes": ["studio:read"]
-              }
+              },
+              "available_commands": ["booking.reschedule"],
+              "session_id": "session_01J"
             }
             """.utf8
         )
@@ -40,6 +42,109 @@ final class ModelDecodingTests: XCTestCase {
         )
         XCTAssertEqual(session.principal.kind, .studioOwner)
         XCTAssertTrue(session.principal.allows("studio:read"))
+        XCTAssertEqual(session.availableCommands, ["booking.reschedule"])
+        XCTAssertEqual(session.sessionID, "session_01J")
+    }
+
+    func testAuthSessionDecodesOldPersistedPayloadWithoutAdditiveFields() throws {
+        let data = Data(
+            """
+            {
+              "access_token": "access",
+              "refresh_token": "refresh",
+              "token_type": "Bearer",
+              "access_token_expires_at": "2026-07-09T22:45:00Z",
+              "refresh_token_expires_at": "2026-08-08T22:30:00Z",
+              "workspace": {
+                "cache_namespace": "tenant_42",
+                "slug": "north-star",
+                "display_name": "North Star",
+                "api_base_url": "https://north-star.example.com",
+                "brand_accent_hex": null,
+                "time_zone": "America/New_York",
+                "currency_code": "USD"
+              },
+              "principal": {
+                "id": "studio_owner",
+                "kind": "studio_owner",
+                "display_name": "North Star",
+                "email": null,
+                "scopes": ["studio:read"]
+              }
+            }
+            """.utf8
+        )
+
+        let session = try MiseJSON.decoder().decode(AuthSession.self, from: data)
+
+        XCTAssertEqual(session.availableCommands, [])
+        XCTAssertNil(session.sessionID)
+        XCTAssertFalse(session.context.allowsCommand("booking.reschedule"))
+    }
+
+    func testCurrentSessionCommandGateIsExactAndCaseSensitive() throws {
+        let data = Data(
+            """
+            {
+              "workspace": {
+                "cache_namespace": "tenant_42",
+                "slug": "north-star",
+                "display_name": "North Star",
+                "api_base_url": "https://north-star.example.com",
+                "brand_accent_hex": null,
+                "time_zone": "America/New_York",
+                "currency_code": "USD"
+              },
+              "principal": {
+                "id": "studio_owner",
+                "kind": "studio_owner",
+                "display_name": "North Star",
+                "email": null,
+                "scopes": ["studio:read", "studio:write"]
+              },
+              "available_commands": ["booking.reschedule"]
+            }
+            """.utf8
+        )
+
+        let session = try MiseJSON.decoder().decode(CurrentSession.self, from: data)
+
+        XCTAssertTrue(session.allowsCommand("booking.reschedule"))
+        XCTAssertFalse(session.allowsCommand("Booking.Reschedule"))
+        XCTAssertFalse(session.allowsCommand("booking.cancel"))
+        XCTAssertNil(session.sessionID)
+    }
+
+    func testAuthSessionContextPropagatesCapabilitiesAndSessionID() {
+        let session = AuthSession(
+            accessToken: "access",
+            refreshToken: "refresh",
+            tokenType: "Bearer",
+            accessTokenExpiresAt: Date(timeIntervalSince1970: 1_800_000_000),
+            refreshTokenExpiresAt: Date(timeIntervalSince1970: 1_800_086_400),
+            workspace: WorkspaceContext(
+                cacheNamespace: "tenant_42",
+                slug: "north-star",
+                displayName: "North Star",
+                apiBaseURL: URL(string: "https://north-star.example.com")!,
+                brandAccentHex: nil,
+                timeZone: "America/New_York",
+                currencyCode: "USD"
+            ),
+            principal: Principal(
+                id: "studio_owner",
+                kind: .studioOwner,
+                displayName: "North Star",
+                email: nil,
+                scopes: ["studio:read", "studio:write"]
+            ),
+            availableCommands: ["booking.reschedule"],
+            sessionID: "session_01J"
+        )
+
+        XCTAssertEqual(session.context.availableCommands, ["booking.reschedule"])
+        XCTAssertTrue(session.context.allowsCommand("booking.reschedule"))
+        XCTAssertEqual(session.context.sessionID, "session_01J")
     }
 
     func testLocalDateUsesScalarWireFormat() throws {

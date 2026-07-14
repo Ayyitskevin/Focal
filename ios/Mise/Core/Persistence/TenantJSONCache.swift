@@ -1,6 +1,10 @@
 import CryptoKit
 import Foundation
 
+enum TenantJSONCacheError: Error, Sendable {
+    case invalidEnvelope
+}
+
 struct TenantCacheRecord<Value: Codable & Sendable>: Sendable {
     let value: Value
     let storedAt: Date
@@ -14,6 +18,7 @@ struct TenantCacheRecord<Value: Codable & Sendable>: Sendable {
 /// cannot cross a tenant boundary.
 actor TenantJSONCache {
     private static let schemaVersion = 1
+    private static let commandLock = NSLock()
 
     private let cacheNamespace: String
     private let fileManager: FileManager
@@ -65,12 +70,78 @@ actor TenantJSONCache {
         }
     }
 
+    /// Command journals are not disposable snapshots. A protected, corrupt, or
+    /// version-mismatched file must fail closed without deleting the only replay
+    /// key that can safely resolve an ambiguous mutation.
+    func readCommand<Value: Codable & Sendable>(
+        _ key: String,
+        as type: Value.Type = Value.self
+    ) throws -> TenantCacheRecord<Value>? {
+        Self.commandLock.lock()
+        defer { Self.commandLock.unlock() }
+        return try readStrict(key, as: type)
+    }
+
+    /// Atomically keeps the first command written for this tenant/key across all
+    /// cache actors in the app process. Callers compare the returned value with
+    /// their requested command and either reuse it or surface a conflict.
+    @discardableResult
+    func writeCommandIfAbsent<Value: Codable & Sendable>(
+        _ value: Value,
+        key: String,
+        etag: String?,
+        storedAt: Date = Date()
+    ) throws -> TenantCacheRecord<Value> {
+        Self.commandLock.lock()
+        defer { Self.commandLock.unlock() }
+        if let existing = try readStrict(key, as: Value.self) {
+            return existing
+        }
+        return try writeUnlocked(
+            value,
+            key: key,
+            etag: etag,
+            storedAt: storedAt
+        )
+    }
+
+    /// Compare-and-delete prevents a late response from erasing a different
+    /// command that another scene or repository instance persisted.
+    @discardableResult
+    func removeCommand<Value: Codable & Sendable & Equatable>(
+        _ key: String,
+        ifMatches expected: Value
+    ) throws -> Bool {
+        Self.commandLock.lock()
+        defer { Self.commandLock.unlock() }
+        guard let current = try readStrict(key, as: Value.self) else {
+            return false
+        }
+        guard current.value == expected else { return false }
+        try fileManager.removeItem(at: fileURL(for: key))
+        return true
+    }
+
     @discardableResult
     func write<Value: Codable & Sendable>(
         _ value: Value,
         key: String,
         etag: String?,
         storedAt: Date = Date()
+    ) throws -> TenantCacheRecord<Value> {
+        try writeUnlocked(
+            value,
+            key: key,
+            etag: etag,
+            storedAt: storedAt
+        )
+    }
+
+    private func writeUnlocked<Value: Codable & Sendable>(
+        _ value: Value,
+        key: String,
+        etag: String?,
+        storedAt: Date
     ) throws -> TenantCacheRecord<Value> {
         try prepareDirectory()
         let envelope = TenantCacheEnvelope(
@@ -112,6 +183,8 @@ actor TenantJSONCache {
     }
 
     func removeAll() throws {
+        Self.commandLock.lock()
+        defer { Self.commandLock.unlock() }
         guard fileManager.fileExists(atPath: namespaceDirectory.path) else { return }
         try fileManager.removeItem(at: namespaceDirectory)
     }
@@ -130,6 +203,30 @@ actor TenantJSONCache {
         values.isExcludedFromBackup = true
         var directory = namespaceDirectory
         try directory.setResourceValues(values)
+    }
+
+    private func readStrict<Value: Codable & Sendable>(
+        _ key: String,
+        as type: Value.Type
+    ) throws -> TenantCacheRecord<Value>? {
+        let url = fileURL(for: key)
+        guard fileManager.fileExists(atPath: url.path) else { return nil }
+        let data = try Data(contentsOf: url)
+        let envelope = try MiseJSON.decoder().decode(
+            TenantCacheEnvelope<Value>.self,
+            from: data
+        )
+        guard
+            envelope.schemaVersion == Self.schemaVersion,
+            envelope.cacheNamespace == cacheNamespace
+        else {
+            throw TenantJSONCacheError.invalidEnvelope
+        }
+        return TenantCacheRecord(
+            value: envelope.value,
+            storedAt: envelope.storedAt,
+            etag: envelope.etag
+        )
     }
 
     private func fileURL(for key: String) -> URL {

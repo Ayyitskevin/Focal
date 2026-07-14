@@ -34,6 +34,7 @@ struct OwnerCompanionView: View {
     @State private var bookings: ResourceModel<[Booking]>
     @State private var commercial: ResourceModel<[CommercialAction]>
     @State private var commands: OwnerCommandModel
+    @State private var reschedule: BookingRescheduleModel
 
     let session: CurrentSession
     let repository: OwnerRepository
@@ -53,7 +54,7 @@ struct OwnerCompanionView: View {
         self.mediaLoader = mediaLoader
         self.isSigningOut = isSigningOut
         self.signOut = signOut
-        _commands = State(initialValue: OwnerCommandModel(
+        let commandModel = OwnerCommandModel(
             canWrite: session.principal.allows("studio:write"),
             setTaskCompletion: { id, completed in
                 try await repository.setTaskCompletion(id: id, completed: completed)
@@ -61,6 +62,12 @@ struct OwnerCompanionView: View {
             cancelBooking: { id in
                 try await repository.cancelBooking(id: id)
             }
+        )
+        _commands = State(initialValue: commandModel)
+        _reschedule = State(initialValue: BookingRescheduleModel(
+            session: session,
+            commands: commandModel,
+            repository: repository
         ))
         _home = State(initialValue: ResourceModel(
             staleAfter: 15 * 60,
@@ -163,7 +170,8 @@ struct OwnerCompanionView: View {
             CalendarAgendaView(
                 model: bookings,
                 timeZoneIdentifier: session.workspace.timeZone,
-                commands: commands
+                commands: commands,
+                reschedule: reschedule
             )
         case .commercial:
             CommercialView(model: commercial, repository: repository)
