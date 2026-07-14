@@ -9,7 +9,8 @@ Milestone 3 (ADR 0067) adds the shared-client reads (`/client/home`,
 gallery-guest favorite toggle, and bearer-authenticated media routes. Milestone
 4a adds owner task completion, booking cancellation, and the session-bound
 booking-reschedule command below. S6e adds its durable, operator-visible delivery
-workflow. Other commands remain planned.
+workflow. S6f implements the source-aware slot read required by native
+reschedule. Other commands remain planned.
 
 ## Conventions
 
@@ -157,13 +158,13 @@ client-wide session.
 | `GET /api/v1/projects/{id}/contracts` | `Page<Contract>` |
 | `GET /api/v1/projects/{id}/invoices` | `Page<Invoice>` |
 | `GET /api/v1/event-types` | `Page<EventType>` |
-| `GET /api/v1/event-types/{id}/slots` | server-computed available slots |
+| `GET /api/v1/event-types/{id}/slots?day=YYYY-MM-DD` | server-computed available slots; optional validated `reschedule_booking_id` source exclusion (implemented, S6f) |
 | `GET /api/v1/bookings` | `Page<Booking>` |
 | `GET /api/v1/ai/runs` | `Page<AIRun>` |
 | `GET /api/v1/galleries/{id}/cull` | paged cull deck/results |
 
 The Milestone 2 endpoints are available only to the exact `studio_owner`
-principal with `studio:read`. Client/project detail, slot, AI-run, and
+principal with `studio:read`. Client/project detail, AI-run, and
 cull-result reads remain reserved contract surface until their delivery slices.
 
 ### Milestone 3 — shared-client reads (implemented)
@@ -221,6 +222,42 @@ replacement whose provider effect is already running, it returns
 `409 booking.workflow_in_progress` without changing either state. Rescheduling
 is not idempotent — each successful command creates a new row — so it uses the
 replay contract below.
+
+### Owner booking availability
+
+`GET /api/v1/event-types/{event_type_id}/slots?day=YYYY-MM-DD` returns
+server-computed availability for one business-local day. Native reschedule must
+also send `reschedule_booking_id={source_booking_id}`; the server verifies that
+the source exists, is confirmed, and uses the route event type before excluding
+it from overlap and same-day daily-cap accounting.
+
+    {
+      "event_type_id": 7,
+      "day": "2026-07-16",
+      "time_zone": "America/New_York",
+      "reschedule_booking_id": 41,
+      "slots": [
+        {
+          "start_at": "2026-07-16T13:00:00Z",
+          "end_at": "2026-07-16T14:00:00Z"
+        }
+      ]
+    }
+
+Slots are sorted, unique UTC whole-second instants. `day` and `time_zone` use
+the server business zone; the reschedule command still sends the source
+booking's `time_zone` as its client-facing display context. The source's current
+start is omitted because the command rejects an unchanged booking. Empty
+availability is `200` with `slots: []`.
+
+This response is advisory and never reserves a slot. Google free/busy filtering
+may make it more restrictive than the transactional booking rule. The eventual
+`POST /reschedule` always re-derives database availability while holding its
+writer lock, so stale or forged submissions still return
+`409 booking.slot_unavailable`. Responses use `Cache-Control: no-store`.
+Unknown event types or source bookings are `404`. Stable source-state conflicts
+are `409 booking.event_unavailable`, `booking.not_reschedulable`, or
+`booking.event_mismatch`.
 
 ### Owner booking reschedule
 

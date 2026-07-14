@@ -225,19 +225,46 @@ def _slots_utc(
 # ── public API ───────────────────────────────────────────────────────────────
 
 
-def slots_for_day(et, day: dt.date, visitor_tz: str = "") -> list[dict]:
-    """Render-ready open slots for `day`: each item has the UTC value (form
-    payload) plus a label in the visitor's timezone (falling back to business)."""
-    disp = _display_tz(visitor_tz)
+def slot_starts_for_day(
+    et,
+    day: dt.date,
+    *,
+    exclude_id: int | None = None,
+) -> list[dt.datetime]:
+    """Return server-computed UTC slot starts for one business-local day.
+
+    ``exclude_id`` is used by reschedule previews so the confirmed source is
+    released from both overlap and daily-cap accounting. This is still an
+    advisory read: ``book_in_transaction`` re-derives the open set while
+    holding the writer lock before it commits a booking transition.
+    """
     tz = _biz_tz()
+    ref = now_utc()
+    today_local = ref.astimezone(tz).date()
+    if day < today_local or (day - today_local).days > et["booking_window_days"]:
+        return []
     day_start = dt.datetime.combine(day, dt.time(), tz).astimezone(_UTC)
     day_end = dt.datetime.combine(day + dt.timedelta(days=1), dt.time(), tz).astimezone(_UTC)
     busy = gcal.free_busy(day_start, day_end)
     con = db.connect()
     try:
-        starts = _slots_utc(con, et, day, now_utc(), busy)
+        return _slots_utc(
+            con,
+            et,
+            day,
+            ref,
+            busy,
+            exclude_id=exclude_id,
+        )
     finally:
         con.close()
+
+
+def slots_for_day(et, day: dt.date, visitor_tz: str = "") -> list[dict]:
+    """Render-ready open slots for `day`: each item has the UTC value (form
+    payload) plus a label in the visitor's timezone (falling back to business)."""
+    disp = _display_tz(visitor_tz)
+    starts = slot_starts_for_day(et, day)
     rendered = []
     for s in starts:
         local = s.astimezone(disp)

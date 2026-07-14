@@ -66,6 +66,7 @@ _SAFE_JOB_ID = re.compile(r"^[A-Za-z0-9._:-]{1,255}$")
 _RFC3339_WHOLE_SECOND = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.0+)?(?:Z|[+-]\d{2}:\d{2})$"
 )
+_INT64_MAX = 2**63 - 1
 _BOOKING_RESCHEDULE_COMMAND = "booking.reschedule.v1"
 _IDEMPOTENCY_KEY_DOMAIN = b"mise-mobile-idempotency-key-v1\0"
 _IDEMPOTENCY_REQUEST_DOMAIN = b"mise-mobile-idempotency-request-v1\0"
@@ -96,6 +97,15 @@ _BOOKING_COMMAND_PROBLEM_RESPONSES = {
     422: _problem_contract("Request validation failed"),
     429: _problem_contract("Rate limited"),
     503: _problem_contract("Booking workflow unavailable"),
+}
+
+_BOOKING_SLOT_PROBLEM_RESPONSES = {
+    401: _problem_contract("Authentication failed"),
+    403: _problem_contract("Insufficient scope"),
+    404: _problem_contract("Event type or booking not found"),
+    409: _problem_contract("Event type or booking unavailable"),
+    422: _problem_contract("Request validation failed"),
+    429: _problem_contract("Rate limited"),
 }
 
 
@@ -233,6 +243,40 @@ class EventType(MobileReadModel):
     booking_window_days: int = Field(ge=1)
     slot_step_minutes: int = Field(ge=1)
     active: bool
+
+
+class BookingSlot(MobileReadModel):
+    start_at: dt.datetime
+    end_at: dt.datetime
+
+    @field_validator("start_at", "end_at")
+    @classmethod
+    def slot_timestamp_is_utc_whole_second(cls, value: dt.datetime) -> dt.datetime:
+        normalized = _aware_utc(value)
+        if normalized.microsecond:
+            raise ValueError("slot timestamp must use whole-second precision")
+        return normalized
+
+    @model_validator(mode="after")
+    def valid_time_range(self) -> BookingSlot:
+        if self.end_at <= self.start_at:
+            raise ValueError("slot must end after it starts")
+        return self
+
+
+class EventTypeSlots(MobileReadModel):
+    event_type_id: int = Field(ge=1, le=_INT64_MAX)
+    day: dt.date
+    time_zone: str = Field(min_length=1, max_length=255)
+    reschedule_booking_id: int | None = Field(default=None, ge=1, le=_INT64_MAX)
+    slots: list[BookingSlot] = Field(max_length=2048)
+
+    @model_validator(mode="after")
+    def slots_are_unique_and_ordered(self) -> EventTypeSlots:
+        starts = [slot.start_at for slot in self.slots]
+        if starts != sorted(starts) or len(starts) != len(set(starts)):
+            raise ValueError("slots must be unique and ordered")
+        return self
 
 
 class Booking(MobileReadModel):
@@ -884,6 +928,89 @@ _RESCHEDULE_SOURCE_BY_ID = """SELECT id, event_type_id, name, email, phone, note
                                      google_event_id, notion_page_id,
                                      notion_session_id
                                 FROM bookings WHERE id=?"""
+
+_SLOT_SOURCE_BY_ID = """SELECT id, event_type_id, start_utc, status
+                           FROM bookings WHERE id=?"""
+
+
+@router.get(
+    "/event-types/{event_type_id}/slots",
+    response_model=EventTypeSlots,
+    responses=_BOOKING_SLOT_PROBLEM_RESPONSES,
+    tags=["scheduling"],
+)
+def list_event_type_slots(
+    event_type_id: Annotated[int, Path(ge=1, le=_INT64_MAX)],
+    day: Annotated[dt.date, Query()],
+    response: Response,
+    reschedule_booking_id: Annotated[int | None, Query(ge=1, le=_INT64_MAX)] = None,
+) -> EventTypeSlots:
+    """Return advisory server-computed slots for one business-local day.
+
+    A reschedule preview supplies its confirmed source booking so overlap and
+    daily-cap accounting evaluate the destination as though that source were
+    released. The exact current start is still omitted because the mutation
+    rejects a no-op. The eventual command revalidates under its writer lock.
+    """
+    event_type = db.one("SELECT * FROM event_types WHERE id=?", (event_type_id,))
+    if event_type is None:
+        raise mobile_auth.MobileAuthError(
+            404,
+            "event_type.not_found",
+            "Event type not found.",
+        )
+    if not bool(event_type["active"]):
+        raise mobile_auth.MobileAuthError(
+            409,
+            "booking.event_unavailable",
+            "This booking type is no longer available.",
+        )
+
+    source_start: dt.datetime | None = None
+    if reschedule_booking_id is not None:
+        source = db.one(_SLOT_SOURCE_BY_ID, (reschedule_booking_id,))
+        if source is None:
+            raise mobile_auth.MobileAuthError(
+                404,
+                "booking.not_found",
+                "Booking not found.",
+            )
+        if int(source["event_type_id"]) != event_type_id:
+            raise mobile_auth.MobileAuthError(
+                409,
+                "booking.event_mismatch",
+                "The booking does not use this event type.",
+            )
+        if source["status"] != "confirmed":
+            raise mobile_auth.MobileAuthError(
+                409,
+                "booking.not_reschedulable",
+                "Only a confirmed booking can be rescheduled.",
+            )
+        source_start = _sqlite_utc(str(source["start_utc"]))
+
+    starts = sorted(
+        set(
+            scheduling.slot_starts_for_day(
+                event_type,
+                day,
+                exclude_id=reschedule_booking_id,
+            )
+        )
+    )
+    if source_start is not None:
+        starts = [start for start in starts if start != source_start]
+    duration = dt.timedelta(minutes=int(event_type["duration_min"]))
+    result = EventTypeSlots(
+        event_type_id=event_type_id,
+        day=day,
+        time_zone=config.TIMEZONE,
+        reschedule_booking_id=reschedule_booking_id,
+        slots=[BookingSlot(start_at=start, end_at=start + duration) for start in starts],
+    )
+    _set_private_headers(response)
+    response.headers["Cache-Control"] = "no-store"
+    return result
 
 
 def _require_studio_write(principal: mobile_auth.Principal) -> None:
