@@ -87,7 +87,7 @@ final class OwnerMutationContractTests: XCTestCase {
         XCTAssertNil(retry.idempotencyKey)
     }
 
-    func testSlotFeedSortsDecodedInstants() throws {
+    func testSlotFeedPreservesWireOrderForStrictModelValidation() throws {
         let feed = try MiseJSON.decoder().decode(
             EventTypeSlots.self,
             from: Data(
@@ -110,7 +110,7 @@ final class OwnerMutationContractTests: XCTestCase {
         XCTAssertEqual(feed.day, LocalDate(rawValue: "2026-07-16"))
         XCTAssertEqual(feed.timeZone, "America/New_York")
         XCTAssertEqual(feed.rescheduleBookingID, 91)
-        XCTAssertLessThan(feed.slots[0].startAt, feed.slots[1].startAt)
+        XCTAssertGreaterThan(feed.slots[0].startAt, feed.slots[1].startAt)
     }
 
     func testBookingWorkflowDTOsPreserveUnknownValuesAndAllEvidence() throws {
@@ -356,6 +356,99 @@ final class OwnerMutationContractTests: XCTestCase {
         XCTAssertEqual(pending, attempt)
         XCTAssertNotNil(cachedBookings)
         XCTAssertNotNil(cachedDashboard)
+    }
+
+    func testMismatchedRescheduleStartPreservesExactReplayAttempt() async throws {
+        let context = makeCache()
+        defer { try? FileManager.default.removeItem(at: context.root) }
+        let invalid = Self.rescheduleResultJSON
+            .replacingOccurrences(
+                of: #""start_at":"2026-07-16T13:00:00Z""#,
+                with: #""start_at":"2026-07-16T13:30:00Z""#
+            )
+        let repository = OwnerRepository(
+            client: OwnerMutationContractClient([.value(Data(invalid.utf8))]),
+            cache: context.cache,
+            sessionID: "session-a"
+        )
+        let attempt = try await repository.prepareBookingReschedule(
+            bookingID: 91,
+            startAt: try Self.date("2026-07-16T13:00:00Z"),
+            timeZone: "America/New_York"
+        )
+
+        do {
+            _ = try await repository.submitBookingReschedule(attempt)
+            XCTFail("Expected the mismatched committed start to be rejected.")
+        } catch OwnerRepositoryError.invalidBookingRescheduleResponse {
+            // A wrong 200 must not consume the exact-replay command.
+        }
+
+        let pending = try await repository.pendingBookingRescheduleAttempt()
+        XCTAssertEqual(pending, attempt)
+    }
+
+    func testCorruptPendingCommandFailsLoudWithoutDeletingReplayEvidence() async throws {
+        let context = makeCache()
+        defer { try? FileManager.default.removeItem(at: context.root) }
+        try await context.cache.write(
+            ["not-a-reschedule-attempt"],
+            key: "booking.reschedule.pending.v1",
+            etag: nil
+        )
+        let repository = OwnerRepository(
+            client: OwnerMutationContractClient([]),
+            cache: context.cache,
+            sessionID: "session-a"
+        )
+
+        do {
+            _ = try await repository.prepareBookingReschedule(
+                bookingID: 91,
+                startAt: try Self.date("2026-07-16T13:00:00Z"),
+                timeZone: "America/New_York"
+            )
+            XCTFail("Expected a corrupt command journal to fail closed.")
+        } catch is DecodingError {
+            // The command file must remain available for explicit recovery.
+        }
+
+        let evidence = try await context.cache.read(
+            "booking.reschedule.pending.v1",
+            as: [String].self
+        )
+        XCTAssertEqual(evidence?.value, ["not-a-reschedule-attempt"])
+    }
+
+    func testConcurrentRepositoriesReuseOneAtomicPendingCommand() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = OwnerRepository(
+            client: OwnerMutationContractClient([]),
+            cache: TenantJSONCache(cacheNamespace: "workspace_test", rootDirectory: root),
+            sessionID: "session-a"
+        )
+        let second = OwnerRepository(
+            client: OwnerMutationContractClient([]),
+            cache: TenantJSONCache(cacheNamespace: "workspace_test", rootDirectory: root),
+            sessionID: "session-a"
+        )
+        let start = try Self.date("2026-07-16T13:00:00Z")
+
+        async let firstAttempt = first.prepareBookingReschedule(
+            bookingID: 91,
+            startAt: start,
+            timeZone: "America/New_York"
+        )
+        async let secondAttempt = second.prepareBookingReschedule(
+            bookingID: 91,
+            startAt: start,
+            timeZone: "America/New_York"
+        )
+
+        let attempts = try await (firstAttempt, secondAttempt)
+        XCTAssertEqual(attempts.0, attempts.1)
     }
 
     func testSamePreparedAttemptReusesExactBodyAndKeyAcrossRetry() async throws {
