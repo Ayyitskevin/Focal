@@ -391,6 +391,177 @@ struct Booking: Codable, Hashable, Sendable, Identifiable {
     let createdAt: Date
 }
 
+struct BookingSlot: Codable, Hashable, Sendable {
+    let startAt: Date
+    let endAt: Date
+}
+
+struct EventTypeSlots: Codable, Hashable, Sendable {
+    let eventTypeID: Int64
+    let day: LocalDate
+    let timeZone: String
+    let rescheduleBookingID: Int64?
+    let slots: [BookingSlot]
+
+    init(
+        eventTypeID: Int64,
+        day: LocalDate,
+        timeZone: String,
+        rescheduleBookingID: Int64?,
+        slots: [BookingSlot]
+    ) {
+        self.eventTypeID = eventTypeID
+        self.day = day
+        self.timeZone = timeZone
+        self.rescheduleBookingID = rescheduleBookingID
+        self.slots = slots.sorted { lhs, rhs in
+            if lhs.startAt == rhs.startAt {
+                return lhs.endAt < rhs.endAt
+            }
+            return lhs.startAt < rhs.startAt
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            eventTypeID: try container.decode(Int64.self, forKey: .eventTypeID),
+            day: try container.decode(LocalDate.self, forKey: .day),
+            timeZone: try container.decode(String.self, forKey: .timeZone),
+            rescheduleBookingID: try container.decodeIfPresent(
+                Int64.self,
+                forKey: .rescheduleBookingID
+            ),
+            slots: try container.decode([BookingSlot].self, forKey: .slots)
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case eventTypeID
+        case day
+        case timeZone
+        case rescheduleBookingID
+        case slots
+    }
+}
+
+struct BookingRescheduleStatus: APIStringValue {
+    let rawValue: String
+    init(rawValue: String) { self.rawValue = rawValue }
+
+    static let rescheduled = Self(rawValue: "rescheduled")
+}
+
+struct BookingDeliveryStatus: APIStringValue {
+    let rawValue: String
+    init(rawValue: String) { self.rawValue = rawValue }
+
+    static let pending = Self(rawValue: "pending")
+}
+
+struct BookingRescheduleRequest: Codable, Hashable, Sendable {
+    let startAt: Date
+    let timeZone: String
+
+    init(startAt: Date, timeZone: String) {
+        self.startAt = startAt
+        self.timeZone = timeZone
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        startAt = try container.decode(Date.self, forKey: .startAt)
+        timeZone = try container.decode(String.self, forKey: .timeZone)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(
+            MiseJSON.wholeSecondUTCString(from: startAt),
+            forKey: .startAt
+        )
+        try container.encode(timeZone, forKey: .timeZone)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case startAt
+        case timeZone
+    }
+}
+
+struct BookingRescheduleResult: Codable, Hashable, Sendable {
+    let status: BookingRescheduleStatus
+    let workflowID: UUID
+    let deliveryStatus: BookingDeliveryStatus
+    let originalBookingID: Int64
+    let replacementBookingID: Int64
+    let startAt: Date
+    let endAt: Date
+}
+
+struct BookingWorkflowState: APIStringValue {
+    let rawValue: String
+    init(rawValue: String) { self.rawValue = rawValue }
+
+    static let pending = Self(rawValue: "pending")
+    static let running = Self(rawValue: "running")
+    static let retry = Self(rawValue: "retry")
+    static let succeeded = Self(rawValue: "succeeded")
+    static let blocked = Self(rawValue: "blocked")
+}
+
+struct BookingWorkflowEffectKind: APIStringValue {
+    let rawValue: String
+    init(rawValue: String) { self.rawValue = rawValue }
+
+    static let clientCancelICS = Self(rawValue: "client_cancel_ics")
+    static let clientRequestICS = Self(rawValue: "client_request_ics")
+    static let studioRescheduleNotice = Self(rawValue: "studio_reschedule_notice")
+    static let notionBookingPatch = Self(rawValue: "notion_booking_patch")
+    static let notionSessionLink = Self(rawValue: "notion_session_link")
+    static let googleCalendarMove = Self(rawValue: "google_calendar_move")
+}
+
+struct BookingWorkflowEffectState: APIStringValue {
+    let rawValue: String
+    init(rawValue: String) { self.rawValue = rawValue }
+
+    static let pending = Self(rawValue: "pending")
+    static let running = Self(rawValue: "running")
+    static let retry = Self(rawValue: "retry")
+    static let succeeded = Self(rawValue: "succeeded")
+    static let skipped = Self(rawValue: "skipped")
+    static let blocked = Self(rawValue: "blocked")
+}
+
+struct BookingWorkflowEffect: Codable, Hashable, Sendable {
+    let kind: BookingWorkflowEffectKind
+    let sequence: Int
+    let status: BookingWorkflowEffectState
+    let attempts: Int
+    let nextAttemptAt: Date?
+    let completedAt: Date?
+    let providerRef: String?
+    let errorClass: String?
+    let errorCode: String?
+}
+
+struct BookingWorkflowStatus: Codable, Hashable, Sendable {
+    let workflowID: UUID
+    let status: BookingWorkflowState
+    let sourceBookingID: Int64
+    let replacementBookingID: Int64
+    let effects: [BookingWorkflowEffect]
+}
+
+struct PendingBookingRescheduleAttempt: Codable, Hashable, Sendable {
+    let sessionID: String
+    let bookingID: Int64
+    let startAt: Date
+    let timeZone: String
+    let idempotencyKey: UUID
+}
+
 struct AIRun: Codable, Hashable, Sendable, Identifiable {
     let id: Int64
     let capability: String
