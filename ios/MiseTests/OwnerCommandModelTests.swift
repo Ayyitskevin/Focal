@@ -217,7 +217,7 @@ final class OwnerCommandModelTests: XCTestCase {
             TaskCompletion(id: id, done: completed, completedAt: completed ? Date() : nil)
         },
         cancel: @escaping @Sendable (Int64) async throws -> Booking = {
-            Self.booking(id: $0, status: .cancelled)
+            OwnerCommandModelTests.booking(id: $0, status: .cancelled)
         }
     ) -> OwnerCommandModel {
         OwnerCommandModel(
