@@ -420,12 +420,12 @@ final class BookingRescheduleModelTests: XCTestCase {
 
     @MainActor
     private func makeModel(
-        session: CurrentSession = Self.session(),
+        session: CurrentSession? = nil,
         commands: OwnerCommandModel? = nil,
         harness: RescheduleHarness
     ) -> BookingRescheduleModel {
         BookingRescheduleModel(
-            session: session,
+            session: session ?? Self.session(),
             commands: commands ?? makeCommands(),
             dependencies: makeDependencies(harness: harness)
         )
