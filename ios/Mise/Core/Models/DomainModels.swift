@@ -131,6 +131,12 @@ struct TaskSummary: Codable, Hashable, Sendable, Identifiable {
     let isOverdue: Bool
 }
 
+struct TaskCompletion: Codable, Hashable, Sendable, Identifiable {
+    let id: Int64
+    let done: Bool
+    let completedAt: Date?
+}
+
 struct UpcomingProject: Codable, Hashable, Sendable, Identifiable {
     let id: Int64
     let title: String

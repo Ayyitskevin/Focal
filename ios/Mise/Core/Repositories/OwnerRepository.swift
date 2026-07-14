@@ -30,8 +30,8 @@ enum OwnerRepositoryError: LocalizedError, Sendable {
     }
 }
 
-/// Read-only owner data access. Every persisted value is scoped to the workspace's
-/// opaque cache namespace by `TenantJSONCache`.
+/// Owner data access. Every persisted value is scoped to the workspace's opaque
+/// cache namespace by `TenantJSONCache`.
 actor OwnerRepository {
     private enum Key {
         static let dashboard = "dashboard.v1"
@@ -108,6 +108,21 @@ actor OwnerRepository {
             MiseEndpoints.Scheduling.bookings(cursor: cursor, limit: 100)
         }
         return try await persist(values, key: Key.bookings)
+    }
+
+    func setTaskCompletion(id: Int64, completed: Bool) async throws -> TaskCompletion {
+        let value = try await send(
+            MiseEndpoints.Tasks.completion(id: id, completed: completed)
+        )
+        try? await cache.remove(Key.dashboard)
+        return value
+    }
+
+    func cancelBooking(id: Int64) async throws -> Booking {
+        let value = try await send(MiseEndpoints.Scheduling.cancelBooking(id: id))
+        try? await cache.remove(Key.bookings)
+        try? await cache.remove(Key.dashboard)
+        return value
     }
 
     func cachedGallery(id: Int64) async throws -> ResourceSnapshot<GalleryDetail>? {

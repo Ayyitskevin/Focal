@@ -33,6 +33,7 @@ struct OwnerCompanionView: View {
     @State private var galleries: ResourceModel<[GallerySummary]>
     @State private var bookings: ResourceModel<[Booking]>
     @State private var commercial: ResourceModel<[CommercialAction]>
+    @State private var commands: OwnerCommandModel
 
     let session: CurrentSession
     let repository: OwnerRepository
@@ -52,6 +53,15 @@ struct OwnerCompanionView: View {
         self.mediaLoader = mediaLoader
         self.isSigningOut = isSigningOut
         self.signOut = signOut
+        _commands = State(initialValue: OwnerCommandModel(
+            canWrite: session.principal.allows("studio:write"),
+            setTaskCompletion: { id, completed in
+                try await repository.setTaskCompletion(id: id, completed: completed)
+            },
+            cancelBooking: { id in
+                try await repository.cancelBooking(id: id)
+            }
+        ))
         _home = State(initialValue: ResourceModel(
             staleAfter: 15 * 60,
             cached: { try await repository.cachedDashboard() },
@@ -142,7 +152,7 @@ struct OwnerCompanionView: View {
     private func screen(_ destination: OwnerDestination) -> some View {
         switch destination {
         case .home:
-            HomeView(model: home) { selection = $0 }
+            HomeView(model: home, commands: commands) { selection = $0 }
         case .clients:
             ClientsView(model: clients)
         case .projects:
@@ -152,7 +162,8 @@ struct OwnerCompanionView: View {
         case .calendar:
             CalendarAgendaView(
                 model: bookings,
-                timeZoneIdentifier: session.workspace.timeZone
+                timeZoneIdentifier: session.workspace.timeZone,
+                commands: commands
             )
         case .commercial:
             CommercialView(model: commercial, repository: repository)
