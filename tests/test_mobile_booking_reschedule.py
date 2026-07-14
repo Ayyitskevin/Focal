@@ -394,6 +394,10 @@ def test_idempotency_key_is_required_uuid(owner, monkeypatch, key):
     [
         ("2026-07-16T11:00:00", "UTC"),
         ("2026-07-16T11:00:00.250Z", "UTC"),
+        ("2026-07-16T11:00Z", "UTC"),
+        ("2026-07-16T11:00:00.0000001Z", "UTC"),
+        ("20260716T110000Z", "UTC"),
+        ("2026-W29-4T11:00:00Z", "UTC"),
         (_TARGET_RFC3339, "Mars/Olympus"),
     ],
 )

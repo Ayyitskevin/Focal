@@ -141,6 +141,20 @@ def test_tenant_discovery_and_openapi_are_scoped_native_contracts(mobile_client)
     assert reschedule["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/BookingRescheduleResult"
     }
+    result_schema = schema["components"]["schemas"]["BookingRescheduleResult"]
+    assert set(result_schema["required"]) == {
+        "status",
+        "original_booking_id",
+        "replacement_booking_id",
+        "start_at",
+        "end_at",
+    }
+    assert result_schema["properties"]["status"]["const"] == "rescheduled"
+    assert {"MobileBearer": []} in reschedule["security"]
+    bearer_scheme = schema["components"]["securitySchemes"]["MobileBearer"]
+    assert bearer_scheme["type"] == "http"
+    assert bearer_scheme["scheme"] == "bearer"
+    assert bearer_scheme["bearerFormat"] == "opaque"
     assert {"401", "403", "404", "409", "422", "429"} <= set(reschedule["responses"])
     for status in ("401", "403", "404", "409", "422", "429"):
         assert set(reschedule["responses"][status]["content"]) == {"application/problem+json"}
