@@ -275,6 +275,24 @@ enum MiseEndpoints {
             APIEndpoint(method: .get, path: "/api/v1/event-types")
         }
 
+        static func eventTypeSlots(
+            eventTypeID: Int64,
+            day: LocalDate,
+            rescheduleBookingID: Int64? = nil
+        ) -> APIEndpoint<EventTypeSlots> {
+            APIEndpoint(
+                method: .get,
+                path: "/api/v1/event-types/\(eventTypeID)/slots",
+                queryItems: [
+                    APIQueryItem(name: "day", value: day.rawValue),
+                    APIQueryItem(
+                        name: "reschedule_booking_id",
+                        value: rescheduleBookingID.map { String($0) }
+                    ),
+                ]
+            )
+        }
+
         static func bookings(
             cursor: String? = nil,
             limit: Int = 25
@@ -305,6 +323,37 @@ enum MiseEndpoints {
             APIEndpoint(
                 method: .post,
                 path: "/api/v1/bookings/\(id)/cancel"
+            )
+        }
+
+        static func rescheduleBooking(
+            id: Int64,
+            body: BookingRescheduleRequest,
+            idempotencyKey: UUID
+        ) throws -> APIEndpoint<BookingRescheduleResult> {
+            try .json(
+                method: .post,
+                path: "/api/v1/bookings/\(id)/reschedule",
+                body: body,
+                idempotencyKey: idempotencyKey
+            )
+        }
+
+        static func bookingWorkflow(
+            id: UUID
+        ) -> APIEndpoint<BookingWorkflowStatus> {
+            APIEndpoint(
+                method: .get,
+                path: "/api/v1/booking-workflows/\(id.uuidString.lowercased())"
+            )
+        }
+
+        static func retryBookingWorkflow(
+            id: UUID
+        ) -> APIEndpoint<BookingWorkflowStatus> {
+            APIEndpoint(
+                method: .post,
+                path: "/api/v1/booking-workflows/\(id.uuidString.lowercased())/retry"
             )
         }
     }
