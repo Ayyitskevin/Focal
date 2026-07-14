@@ -104,6 +104,7 @@ def test_tenant_discovery_and_openapi_are_scoped_native_contracts(mobile_client)
         "/galleries/{gallery_id}/assets/{asset_id}/favorite",
         "/tasks/{task_id}/completion",
         "/event-types",
+        "/event-types/{event_type_id}/slots",
         "/bookings",
         "/bookings/{booking_id}/cancel",
         "/bookings/{booking_id}/reschedule",
@@ -124,6 +125,25 @@ def test_tenant_discovery_and_openapi_are_scoped_native_contracts(mobile_client)
         "/media/galleries/{gallery_id}/assets/{asset_id}/{variant}",
     }
     assert all("admin" not in path for path in schema["paths"])
+
+    slots = schema["paths"]["/event-types/{event_type_id}/slots"]["get"]
+    slot_parameters = {parameter["name"]: parameter for parameter in slots["parameters"]}
+    assert slot_parameters["event_type_id"]["required"] is True
+    assert slot_parameters["event_type_id"]["schema"]["minimum"] == 1
+    assert slot_parameters["event_type_id"]["schema"]["maximum"] == 2**63 - 1
+    assert slot_parameters["day"]["required"] is True
+    assert slot_parameters["day"]["schema"]["format"] == "date"
+    assert slot_parameters["reschedule_booking_id"]["required"] is False
+    assert slot_parameters["reschedule_booking_id"]["schema"]["anyOf"][0]["minimum"] == 1
+    assert slot_parameters["reschedule_booking_id"]["schema"]["anyOf"][0]["maximum"] == 2**63 - 1
+    assert slots["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/EventTypeSlots"
+    }
+    slots_schema = schema["components"]["schemas"]["EventTypeSlots"]
+    assert set(slots_schema["required"]) == {"event_type_id", "day", "time_zone", "slots"}
+    assert slots_schema["additionalProperties"] is False
+    assert slots_schema["properties"]["slots"]["maxItems"] == 2048
+    assert {"401", "403", "404", "409", "422", "429"} <= set(slots["responses"])
 
     reschedule = schema["paths"]["/bookings/{booking_id}/reschedule"]["post"]
     idempotency_header = next(

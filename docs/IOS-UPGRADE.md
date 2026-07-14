@@ -7,8 +7,9 @@ Delivery update (2026-07-13): the macOS iOS gate, shared helpers, owner commerci
 spine, resource rename, and document deep links have landed. Milestone 4a backend
 task completion and booking cancellation are merged, and their native wiring is in
 draft PR #161. Atomic booking reschedule and its durable S6e client-calendar
-workflow are implemented as stacked red-light backend drafts; native reschedule
-and server activation remain held for human review. The workflow preserves legacy
+workflow are implemented as stacked red-light backend drafts. Its source-aware
+slot feed is implemented in the following S6f draft; native reschedule and server
+activation remain held for human review. The workflow preserves legacy
 calendar UIDs, tenant-scopes new ones, supersedes stale queued effects through the
 shared public/admin/mobile lifecycle guard, retires expired leases even while
 delivery is disarmed, audits authorized manual retry, and uses existing-only
