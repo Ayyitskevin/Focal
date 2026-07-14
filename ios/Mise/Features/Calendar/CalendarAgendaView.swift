@@ -3,11 +3,14 @@ import SwiftUI
 struct CalendarAgendaView: View {
     let model: ResourceModel<[Booking]>
     let timeZoneIdentifier: String
+    let commands: OwnerCommandModel
+
+    @State private var bookingToCancel: Booking?
 
     var body: some View {
         ResourceView(
             model: model,
-            isEmpty: { $0.isEmpty },
+            isEmpty: { commands.visibleBookings(from: $0).isEmpty },
             content: agenda,
             empty: {
                 ContentUnavailableView(
@@ -18,10 +21,40 @@ struct CalendarAgendaView: View {
             }
         )
         .navigationTitle("Calendar")
+        .confirmationDialog(
+            "Cancel booking?",
+            isPresented: Binding(
+                get: { bookingToCancel != nil },
+                set: { if !$0 { bookingToCancel = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: bookingToCancel
+        ) { booking in
+            Button("Cancel booking", role: .destructive) {
+                Task {
+                    _ = await commands.cancelBooking(booking)
+                    await refreshBookings()
+                }
+            }
+            Button("Keep booking", role: .cancel) {}
+        } message: { booking in
+            Text(cancellationMessage(for: booking))
+        }
+        .alert(
+            "Booking cancellation",
+            isPresented: Binding(
+                get: { commands.bookingNotice != nil },
+                set: { if !$0 { commands.bookingNotice = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(commands.bookingNotice ?? "")
+        }
     }
 
     private func agenda(_ bookings: [Booking]) -> some View {
-        let grouped = groupedBookings(bookings)
+        let grouped = groupedBookings(commands.visibleBookings(from: bookings))
         return List {
             ForEach(grouped) { group in
                 Section(dayFormatter.string(from: group.day)) {
@@ -40,15 +73,28 @@ struct CalendarAgendaView: View {
                             Spacer(minLength: 0)
                             if booking.status == .cancelled {
                                 Text("Cancelled").font(.caption).foregroundStyle(.red)
+                            } else if commands.canWrite {
+                                if commands.isBookingInFlight(booking.id) {
+                                    ProgressView()
+                                        .frame(width: 44, height: 44)
+                                        .accessibilityLabel("Cancelling \(booking.eventName)")
+                                } else {
+                                    Button("Cancel", role: .destructive) {
+                                        bookingToCancel = booking
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .frame(minWidth: 44, minHeight: 44)
+                                    .accessibilityLabel("Cancel \(booking.eventName) for \(booking.name)")
+                                    .accessibilityHint("Requires confirmation. Mise will attempt to notify the client.")
+                                }
                             }
                         }
                         .padding(.vertical, 4)
-                        .accessibilityElement(children: .combine)
                     }
                 }
             }
         }
-        .refreshable { await model.refresh() }
+        .refreshable { await refreshBookings() }
     }
 
     private func groupedBookings(_ bookings: [Booking]) -> [BookingDayGroup] {
@@ -79,6 +125,21 @@ struct CalendarAgendaView: View {
         formatter.timeStyle = .short
         formatter.timeZone = timeZone
         return formatter
+    }
+
+    private func cancellationMessage(for booking: Booking) -> String {
+        let day = dayFormatter.string(from: booking.startAt)
+        let time = timeFormatter.string(from: booking.startAt)
+        return "Cancel \(booking.eventName) for \(booking.name) on \(day) at \(time)? "
+            + "This marks the booking cancelled. Mise will attempt to notify the client "
+            + "and remove the linked calendar event."
+    }
+
+    private func refreshBookings() async {
+        await model.refresh()
+        if case let .loaded(snapshot) = model.state {
+            commands.reconcileBookings(with: snapshot.value)
+        }
     }
 }
 

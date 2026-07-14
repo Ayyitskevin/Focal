@@ -70,6 +70,18 @@ enum MiseEndpoints {
         path: "/api/v1/dashboard"
     )
 
+    enum Tasks {
+        static func completion(
+            id: Int64,
+            completed: Bool
+        ) -> APIEndpoint<TaskCompletion> {
+            APIEndpoint(
+                method: completed ? .put : .delete,
+                path: "/api/v1/tasks/\(id)/completion"
+            )
+        }
+    }
+
     enum Clients {
         static func list(
             cursor: String? = nil,
@@ -286,6 +298,13 @@ enum MiseEndpoints {
                 path: "/api/v1/bookings",
                 body: body,
                 idempotencyKey: idempotencyKey
+            )
+        }
+
+        static func cancelBooking(id: Int64) -> APIEndpoint<Booking> {
+            APIEndpoint(
+                method: .post,
+                path: "/api/v1/bookings/\(id)/cancel"
             )
         }
     }
