@@ -1,12 +1,16 @@
 # AGENTS.md — scope contract for autonomous work on Mise
 
-Mise is **live production**: flow `100.90.17.20:8400` · `/opt/mise` · `kleephotography.com`.
-It handles **real Stripe money for real clients**. This file is the contract that lets an
-agent work continuously without a human watching every commit. Read it before you touch
-anything. When code and this file disagree, stop and ask — don't reconcile silently.
+Mise is a **product-incubation sandbox** — a web + iOS "solo studio OS" for wedding
+photographers, under active exploration by a fleet of AI agents. It is **NOT deployed and
+has no live users.** This file is the contract that lets an agent work continuously without
+a human watching every commit. Read it before you touch anything. When code and this file
+disagree, stop and ask — don't reconcile silently.
 
-This repo (`~/ai-workspace/mise-claude`, or your own clone) is a **working copy, NOT
-production**. flow `/opt/mise` is git + deploy canonical. Never scratch-edit the flow tree.
+The **live** photography site lives in a **separate repo, `github.com/Ayyitskevin/kleephotography`**
+— that repo is what deploys to flow `100.90.17.20:8400` · `/opt/mise` · `kleephotography.com`
+and handles real Stripe money for real clients. Do not confuse the two: nothing you push to
+THIS repo reaches production, and you never edit the flow deploy tree from here. Work in your
+own clone or a `claude/<topic>` branch.
 
 ## Green-light — work freely, commit straight to `main`, push `all`
 

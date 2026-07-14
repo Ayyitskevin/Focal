@@ -1,0 +1,39 @@
+name: Dependabot auto-merge
+
+# Closes the loop that caused the pillow-CVE incident: Dependabot PR #133 (the
+# pillow 12.3.0 security bump) was green for a week but nobody merged it, so main
+# stayed red. This enables GitHub native auto-merge on NON-major Dependabot PRs,
+# so they land themselves once the required checks pass.
+#
+# Majors — including major *security* bumps — intentionally fall through to a
+# human, because stripe/pay and auth code live in-tree and a major API break there
+# is exactly the kind of change worth a human gate. The main-red alarm (ci.yml)
+# surfaces a lingering red main so a stuck major bump can't go unnoticed for a week.
+#
+# Requires (already configured on the repo): "Allow auto-merge" ON, and at least
+# one required status check on main (the `smoke` check) so --auto actually waits
+# for CI instead of merging immediately.
+
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable auto-merge for non-major updates
+        if: ${{ steps.meta.outputs.update-type != 'version-update:semver-major' }}
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

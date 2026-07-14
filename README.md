@@ -2,6 +2,10 @@
 
 A pocket-sized studio OS for wedding photographers. iOS-first client & studio management: CRM pipeline, proposals-to-payments, gallery proofing, and booking — in one warm, boutique-grade app.
 
+> **Status: product-incubation sandbox — not deployed, no live users.** This repo is an
+> AI-agent exploration of the Mise product. The live photography site is a **separate**
+> repo, [`Ayyitskevin/kleephotography`](https://github.com/Ayyitskevin/kleephotography).
+
 Mise combines the parts solo creatives usually stitch together from Pixieset,
 HoneyBook, Dubsado, ShootProof, and spreadsheets:
 
