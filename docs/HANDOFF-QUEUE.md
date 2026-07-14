@@ -168,13 +168,15 @@ self-applied. Sources: `docs/MISE-REVIEW.md` (review), `docs/IOS-UPGRADE.md`
 
 ### S6. M4a mutations — implementation (after O2 sets patterns; backend+iOS)
 - **What:** Task check-off, booking cancel/reschedule per the existing
-  `IOS-API-V1.md` commands: `Idempotency-Key` required,
-  server-authoritative transitions, audit rows, rate limits; iOS side uses
-  existing endpoint catalog entries.
-- **Done:** endpoints live with contract tests (idempotent replay returns
-  the same result; transition rules enforced); iOS screens wired.
-- **Verify:** pytest contract tests incl. idempotency-replay and
-  cross-principal denial; iOS tests under S1 CI.
+  `IOS-API-V1.md` commands: task completion and cancellation are naturally
+  idempotent without a key, while reschedule requires `Idempotency-Key`;
+  all keep server-authoritative transitions, audit rows, and rate limits.
+  The iOS side uses existing endpoint catalog entries.
+- **Done:** endpoints live with contract tests (naturally idempotent repeats
+  or keyed replay return the stable result; transition rules enforced); iOS
+  screens wired.
+- **Verify:** pytest contract tests including natural idempotency, keyed
+  replay, and cross-principal denial; iOS tests under S1 CI.
 - **Risk:** **red-light** (booking/money-adjacent state, audit trail) →
   reviewed draft PR, human merge.
 - **Decomposition (mapped from the real server flows):** one command per PR,

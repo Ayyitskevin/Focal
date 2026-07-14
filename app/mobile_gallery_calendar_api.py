@@ -26,7 +26,17 @@ from typing import Annotated, Literal
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, Response
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    Response,
+)
+from fastapi.security import HTTPBearer
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from . import (
@@ -51,9 +61,17 @@ from .mobile_api_schemas import APIProblem
 
 _HEX_COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 _SAFE_JOB_ID = re.compile(r"^[A-Za-z0-9._:-]{1,255}$")
+_RFC3339_WHOLE_SECOND = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.0+)?(?:Z|[+-]\d{2}:\d{2})$"
+)
 _BOOKING_RESCHEDULE_COMMAND = "booking.reschedule.v1"
 _IDEMPOTENCY_KEY_DOMAIN = b"mise-mobile-idempotency-key-v1\0"
 _IDEMPOTENCY_REQUEST_DOMAIN = b"mise-mobile-idempotency-request-v1\0"
+_MOBILE_BEARER = HTTPBearer(
+    auto_error=False,
+    bearerFormat="opaque",
+    scheme_name="MobileBearer",
+)
 log = logging.getLogger("mise.mobile_booking")
 
 
@@ -258,8 +276,8 @@ class BookingRescheduleRequest(MobileReadModel):
         # and models strict.
         if not isinstance(value, str):
             return value
-        raw = value.strip()
-        if "T" not in raw:
+        raw = value
+        if _RFC3339_WHOLE_SECOND.fullmatch(raw) is None:
             raise ValueError("start_at must be an RFC 3339 timestamp")
         candidate = f"{raw[:-1]}+00:00" if raw.endswith("Z") else raw
         try:
@@ -287,7 +305,7 @@ class BookingRescheduleRequest(MobileReadModel):
 
 
 class BookingRescheduleResult(MobileReadModel):
-    status: Literal["rescheduled"] = "rescheduled"
+    status: Literal["rescheduled"]
     original_booking_id: int = Field(ge=1)
     replacement_booking_id: int = Field(ge=1)
     start_at: dt.datetime
@@ -1023,6 +1041,7 @@ def _reschedule_booking(
         if replacement is None:
             raise RuntimeError("booking reschedule replacement vanished")
         result = BookingRescheduleResult(
+            status="rescheduled",
             original_booking_id=booking_id,
             replacement_booking_id=int(replacement["id"]),
             start_at=_sqlite_utc(replacement["start_utc"]),
@@ -1098,6 +1117,7 @@ def cancel_booking(
     "/bookings/{booking_id}/reschedule",
     response_model=BookingRescheduleResult,
     responses=_BOOKING_COMMAND_PROBLEM_RESPONSES,
+    dependencies=[Depends(_MOBILE_BEARER)],
     tags=["scheduling"],
 )
 def reschedule_booking(
