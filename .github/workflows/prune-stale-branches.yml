@@ -1,0 +1,52 @@
+name: Prune stale branches
+
+# Backstop for delete-branch-on-merge: reports agent branches (claude/*, codex/*, cursor/*,
+# grok/*) whose PR is merged and that are older than AGE_DAYS. The scheduled run is ALWAYS a
+# dry-run (it only logs what it WOULD delete) — deleting shared refs unattended is a human-gated
+# action. To actually prune, run it from the Actions tab with apply=yes.
+#
+# Safety rails: only ever agent-prefixed branches; never main; never an open-PR head; requires a
+# merged-PR head (proof the work is in main via squash); age gate. Reversible: each SHA is in the
+# run log, and merged PRs keep a Restore button ~90 days.
+
+on:
+  schedule:
+    - cron: '0 4 * * 1'   # Mondays 04:00 UTC — dry-run report only
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'yes = actually delete (default: dry-run report only)'
+        default: 'no'
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      R: ${{ github.repository }}
+      AGE_DAYS: '30'
+      APPLY: ${{ github.event.inputs.apply }}
+    steps:
+      - name: Report (or, with apply=yes, delete) merged agent branches
+        run: |
+          set -euo pipefail
+          cut=$(date -u -d "-${AGE_DAYS} days" +%s)
+          gh pr list --repo "$R" --state open   --limit 500 --json headRefName --jq '.[].headRefName' | sort -u > open.txt
+          gh pr list --repo "$R" --state merged --limit 999 --json headRefName --jq '.[].headRefName' | sort -u > merged.txt
+          gh api --paginate "repos/$R/branches?per_page=100" --jq '.[]|[.name,.commit.sha]|@tsv' \
+          | while IFS=$'\t' read -r n s; do
+              case "$n" in claude/*|codex/*|cursor/*|grok/*) : ;; *) continue ;; esac  # agent branches only
+              grep -qxF "$n" open.txt   && { echo "skip (open-PR head): $n"; continue; } # never an open PR
+              grep -qxF "$n" merged.txt || { echo "skip (no merged PR): $n"; continue; } # require proof in main
+              d=$(gh api "repos/$R/commits/$s" --jq '.commit.committer.date')
+              [ "$(date -u -d "$d" +%s)" -gt "$cut" ] && { echo "skip (too new):      $n"; continue; }
+              if [ "${APPLY:-no}" = "yes" ]; then
+                echo "DELETE $n ($s)"; gh api -X DELETE "repos/$R/git/refs/heads/$n"
+              else
+                echo "DRY-RUN would delete $n ($s)"
+              fi
+            done

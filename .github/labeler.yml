@@ -1,0 +1,7 @@
+# Auto-labels PRs by their source branch (actions/labeler@v5). The <agent>/<slug> prefix
+# convention (see AGENTS.md) is what makes this — and the stale-branch pruner — safe and legible.
+agent:
+  - head-branch: ['^claude/', '^codex/', '^cursor/', '^grok/']
+
+dependencies:
+  - head-branch: ['^dependabot/']

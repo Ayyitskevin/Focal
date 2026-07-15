@@ -49,10 +49,11 @@ minutes; the cost of an unattended money/schema mistake is an incident.
 ```sh
 source .venv/bin/activate
 # 1. unit (fast, pure logic — no DB/network)
-python -m pytest tests/ --ignore=tests/test_smoke.py -q -m unit
-# 2. full smoke (e2e against a throwaway DB)
+python -m pytest tests/ -m unit
+# 2. full smoke — the WHOLE e2e suite (everything not marked unit), throwaway DB.
+#    NOT just tests/test_smoke.py: `-m unit` + `-m "not unit"` partition all of tests/.
 MISE_DATA_DIR=$(mktemp -d) MISE_SECRET_KEY=test MISE_ADMIN_PASSWORD=pw \
-  python -m pytest tests/test_smoke.py -q
+  python -m pytest tests/ -m "not unit"
 # 3. lint + format (CI enforces both, strict)
 ruff check . && ruff format --check .
 ```
@@ -74,6 +75,10 @@ locally before pushing — CI runs the same on `main` and on PRs.
   They live in untracked `.env` per machine (`.env.example` documents the keys).
 - **One financial clock.** Studio date boundaries read `studio._today()` (monkeypatchable
   wall-clock), not `datetime.date.today()` directly.
+- **Branch naming.** Agent work goes on `<agent>/<slug>` — `claude/…`, `codex/…`, `cursor/…`,
+  `grok/…`; never a bare branch name. Merged branches auto-delete, and both the stale-branch
+  pruner and the PR auto-labeler key off these prefixes, so an off-pattern branch is invisible
+  to the cleanup and never gets labeled.
 
 ## Operating the live admin (if your task does, not just edits code)
 
