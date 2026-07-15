@@ -15,6 +15,6 @@ known-first-party = ["app"]
 [tool.ruff.lint.per-file-ignores]
 "tests/test_smoke.py" = ["E401", "UP017", "E731", "F401", "F841", "UP012"]
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "-q --tb=short"
+# pytest configuration (markers, testpaths, addopts) lives in pytest.ini — the single
+# source of truth. This block used to duplicate it here but silently lost precedence to
+# pytest.ini AND lacked the marker registry, so removing it ends that two-config drift.

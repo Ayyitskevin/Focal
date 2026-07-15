@@ -39,7 +39,7 @@ jobs:
 
       - name: Run unit tests (fast feedback)
         run: |
-          .venv/bin/python -m pytest tests/ --ignore=tests/test_smoke.py -q -m unit --tb=short
+          .venv/bin/python -m pytest tests/ -m unit --tb=short
 
       - name: Lint with ruff
         run: |
@@ -51,13 +51,18 @@ jobs:
           .venv/bin/pip install ruff
           .venv/bin/ruff format --check .
 
-      - name: Run full smoke suite
+      # Runs EVERY test not marked `unit` — i.e. the whole end-to-end suite, not just
+      # tests/test_smoke.py. The old target (test_smoke.py only) silently skipped ~223
+      # unmarked/smoke tests in the other test_smoke_*.py files, so a chunk of the suite
+      # never ran yet CI reported green. `-m unit` + `-m "not unit"` now partition all of
+      # tests/ exactly once; --strict-markers (pytest.ini) makes a typo'd marker a hard error.
+      - name: Run full smoke suite (everything not marked unit)
         run: |
           MISE_DATA_DIR=$(mktemp -d) \
           MISE_SECRET_KEY=test-secret \
           MISE_ADMIN_PASSWORD=test-pw \
           MISE_ENV_FILE=/nonexistent \
-            .venv/bin/python -m pytest tests/test_smoke.py -q --tb=short
+            .venv/bin/python -m pytest tests/ -m "not unit" --tb=short
 
   # Fails the build when any pinned dependency has a published CVE (ADR 0065).
   # A separate job so an OSV/PyPI outage never blocks the test gate above; a

@@ -19,6 +19,9 @@ The hosted promise is simple:
 
 > Professional client studio, hosted and maintained for you, only $20/month.
 
+Exactly **$20/month**, every feature included. **No paid tiers**, no add-ons, and no
+per-seat upsell — one flat price, and every studio gets the whole toolkit.
+
 ## Why $20 Is A Bargain
 
 | What solo creatives need | Usually bought as | Included in Mise |
