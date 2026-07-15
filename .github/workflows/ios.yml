@@ -15,6 +15,12 @@ on:
     branches: [ main ]
     paths: [ 'ios/**', '.github/workflows/ios.yml' ]
 
+# macOS runner minutes are METERED — cancelling a branch's superseded in-flight build when
+# a new commit lands is the biggest single minute-saver here. Never cancels main.
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   build-test:
     runs-on: macos-latest

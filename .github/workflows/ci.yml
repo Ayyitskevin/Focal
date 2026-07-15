@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [ main ]
 
+# Cancel a branch's older in-flight CI when a new commit is pushed to it — saves runner
+# minutes across the high-churn agent branches. Never cancels main: every commit to main
+# gets a complete, uninterrupted validation run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   smoke:
     runs-on: ubuntu-latest
@@ -35,21 +42,17 @@ jobs:
         run: |
           python -m venv .venv
           .venv/bin/pip install --upgrade pip
-          .venv/bin/pip install -r requirements.txt pytest httpx
+          .venv/bin/pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Run unit tests (fast feedback)
         run: |
           .venv/bin/python -m pytest tests/ -m unit --tb=short
 
       - name: Lint with ruff
-        run: |
-          .venv/bin/pip install ruff
-          .venv/bin/ruff check . --output-format=github
+        run: .venv/bin/ruff check . --output-format=github
 
       - name: Check ruff format
-        run: |
-          .venv/bin/pip install ruff
-          .venv/bin/ruff format --check .
+        run: .venv/bin/ruff format --check .
 
       # Runs EVERY test not marked `unit` — i.e. the whole end-to-end suite, not just
       # tests/test_smoke.py. The old target (test_smoke.py only) silently skipped ~223
@@ -64,23 +67,10 @@ jobs:
           MISE_ENV_FILE=/nonexistent \
             .venv/bin/python -m pytest tests/ -m "not unit" --tb=short
 
-  # Fails the build when any pinned dependency has a published CVE (ADR 0065).
-  # A separate job so an OSV/PyPI outage never blocks the test gate above; a
-  # finding here means "bump the pin", not "the code broke".
-  dependency-audit:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Audit pinned dependencies for known vulnerabilities
-        run: |
-          python -m pip install --quiet pip-audit
-          pip-audit -r requirements.txt
+  # (The CVE audit moved OUT of the per-push gate to .github/workflows/dependency-audit.yml —
+  # a daily scheduled run that opens a tracking issue on a finding. Rationale: a transitive
+  # CVE with a pending fix should not turn unrelated feature work red; Dependabot auto-merge
+  # lands the bump, and the daily audit + this alarm keep it from going unnoticed.)
 
   # Closes the "nobody noticed main was red for a week" gap: when the smoke gate
   # fails on a push to main, open (or refresh) an assigned tracking issue. Default
