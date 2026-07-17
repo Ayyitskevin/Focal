@@ -1,6 +1,17 @@
 import Foundation
 
 enum MiseJSON {
+    static func wholeSecondUTCDate(_ date: Date) -> Date {
+        Date(timeIntervalSince1970: floor(date.timeIntervalSince1970))
+    }
+
+    static func wholeSecondUTCString(from date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: wholeSecondUTCDate(date))
+    }
+
     static func decoder() -> JSONDecoder {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .custom { codingPath in

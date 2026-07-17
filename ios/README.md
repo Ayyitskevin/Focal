@@ -55,9 +55,13 @@ and avoiding it in the foundation keeps auth/session behavior auditable.
   the owner agenda. Task check-off is optimistic and naturally idempotent;
   booking cancellation remains visible until the server confirms it because a
   real transition starts best-effort client-notification and calendar cleanup.
-  The atomic booking-reschedule backend and source-aware slot feed are implemented,
-  but the server capability remains default-off. Native reschedule wiring is a
-  separate human-gated recovery because its stacked PR did not reach `main`.
+  Native booking rescheduling is implemented as a capability-gated flow: its
+  destination must come from the source-aware slot feed, the exact session-bound
+  request and idempotency key are persisted before POST, ambiguous outcomes can
+  only replay that saved command, and provider-workflow status remains visible
+  after the booking moves. The reschedule backend and slot feed are on `main`;
+  the server capability stays default-off (`MISE_BOOKING_WORKFLOW_ENABLED`) until
+  the durable-workflow and session-identity reviews are approved.
 - Do not add access tokens, refresh tokens, PINs, Stripe secrets, or APNs keys to
   xcconfig files.
 

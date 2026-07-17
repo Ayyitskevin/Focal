@@ -48,6 +48,42 @@ struct Principal: Codable, Hashable, Sendable {
 struct CurrentSession: Codable, Hashable, Sendable {
     let workspace: WorkspaceContext
     let principal: Principal
+    let availableCommands: [String]
+    let sessionID: String?
+
+    init(
+        workspace: WorkspaceContext,
+        principal: Principal,
+        availableCommands: [String] = [],
+        sessionID: String? = nil
+    ) {
+        self.workspace = workspace
+        self.principal = principal
+        self.availableCommands = availableCommands
+        self.sessionID = sessionID
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        workspace = try container.decode(WorkspaceContext.self, forKey: .workspace)
+        principal = try container.decode(Principal.self, forKey: .principal)
+        availableCommands = try container.decodeIfPresent(
+            [String].self,
+            forKey: .availableCommands
+        ) ?? []
+        sessionID = try container.decodeIfPresent(String.self, forKey: .sessionID)
+    }
+
+    func allowsCommand(_ command: String) -> Bool {
+        availableCommands.contains(command)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case workspace
+        case principal
+        case availableCommands
+        case sessionID
+    }
 }
 
 struct AuthSession: Codable, Hashable, Sendable {
@@ -58,9 +94,57 @@ struct AuthSession: Codable, Hashable, Sendable {
     let refreshTokenExpiresAt: Date?
     let workspace: WorkspaceContext
     let principal: Principal
+    let availableCommands: [String]
+    let sessionID: String?
+
+    init(
+        accessToken: String,
+        refreshToken: String?,
+        tokenType: String,
+        accessTokenExpiresAt: Date,
+        refreshTokenExpiresAt: Date?,
+        workspace: WorkspaceContext,
+        principal: Principal,
+        availableCommands: [String] = [],
+        sessionID: String? = nil
+    ) {
+        self.accessToken = accessToken
+        self.refreshToken = refreshToken
+        self.tokenType = tokenType
+        self.accessTokenExpiresAt = accessTokenExpiresAt
+        self.refreshTokenExpiresAt = refreshTokenExpiresAt
+        self.workspace = workspace
+        self.principal = principal
+        self.availableCommands = availableCommands
+        self.sessionID = sessionID
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        accessToken = try container.decode(String.self, forKey: .accessToken)
+        refreshToken = try container.decodeIfPresent(String.self, forKey: .refreshToken)
+        tokenType = try container.decode(String.self, forKey: .tokenType)
+        accessTokenExpiresAt = try container.decode(Date.self, forKey: .accessTokenExpiresAt)
+        refreshTokenExpiresAt = try container.decodeIfPresent(
+            Date.self,
+            forKey: .refreshTokenExpiresAt
+        )
+        workspace = try container.decode(WorkspaceContext.self, forKey: .workspace)
+        principal = try container.decode(Principal.self, forKey: .principal)
+        availableCommands = try container.decodeIfPresent(
+            [String].self,
+            forKey: .availableCommands
+        ) ?? []
+        sessionID = try container.decodeIfPresent(String.self, forKey: .sessionID)
+    }
 
     var context: CurrentSession {
-        CurrentSession(workspace: workspace, principal: principal)
+        CurrentSession(
+            workspace: workspace,
+            principal: principal,
+            availableCommands: availableCommands,
+            sessionID: sessionID
+        )
     }
 
     func accessTokenIsUsable(at date: Date, leeway: TimeInterval = 60) -> Bool {
@@ -70,6 +154,18 @@ struct AuthSession: Codable, Hashable, Sendable {
     func refreshTokenIsUsable(at date: Date) -> Bool {
         guard refreshToken != nil else { return false }
         return refreshTokenExpiresAt.map { $0 > date } ?? true
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case accessToken
+        case refreshToken
+        case tokenType
+        case accessTokenExpiresAt
+        case refreshTokenExpiresAt
+        case workspace
+        case principal
+        case availableCommands
+        case sessionID
     }
 }
 

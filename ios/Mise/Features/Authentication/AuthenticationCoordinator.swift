@@ -424,7 +424,8 @@ final class AuthenticationCoordinator {
         {
             ownerRepository = OwnerRepository(
                 client: workspace.apiClient,
-                cache: TenantJSONCache(cacheNamespace: context.workspace.cacheNamespace)
+                cache: TenantJSONCache(cacheNamespace: context.workspace.cacheNamespace),
+                sessionID: context.sessionID
             )
             clientRepository = nil
             return

@@ -151,6 +151,26 @@ final class OwnerCommandModelTests: XCTestCase {
     }
 
     @MainActor
+    func testSharedBookingMutationLockSuppressesCancellation() async {
+        let calls = CallCounter()
+        let model = makeModel(cancel: { id in
+            await calls.record()
+            return Self.booking(id: id, status: .cancelled)
+        })
+        let booking = Self.booking(id: 96, status: .confirmed)
+
+        XCTAssertTrue(model.beginBookingMutation(booking.id))
+        let didCancel = await model.cancelBooking(booking)
+        let callCount = await calls.value()
+        XCTAssertFalse(didCancel)
+        XCTAssertEqual(callCount, 0)
+        XCTAssertTrue(model.isBookingInFlight(booking.id))
+
+        model.endBookingMutation(booking.id)
+        XCTAssertFalse(model.isBookingInFlight(booking.id))
+    }
+
+    @MainActor
     func testBookingFailureKeepsRowAndUsesAmbiguitySafeNotice() async {
         let model = makeModel(cancel: { _ in throw TestFailure.offline })
         let booking = Self.booking(id: 93, status: .confirmed)
