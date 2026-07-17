@@ -106,6 +106,28 @@ struct OwnerCompanionView: View {
     }
 
     var body: some View {
+        Group {
+            if let lockout = home.billingLockout {
+                // A lapsed subscription locks the whole studio, not one screen —
+                // override the tabs with the billing state (conductor plan T1).
+                BillingLockedView(
+                    manageBillingURL: accountLinks.manageBilling,
+                    detail: lockout.message,
+                    isRetrying: home.isRefreshing,
+                    retry: { await home.refresh() }
+                )
+            } else {
+                tabs
+            }
+        }
+        // Load the dashboard from the shell so a 402 is detected even before the
+        // owner opens the Home tab (load() is idempotent; the tab's own load is a
+        // no-op after this).
+        .task { await home.load() }
+    }
+
+    @ViewBuilder
+    private var tabs: some View {
         if horizontalSizeClass == .regular {
             NavigationSplitView {
                 List(OwnerDestination.allCases) { destination in

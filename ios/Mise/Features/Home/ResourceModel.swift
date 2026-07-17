@@ -16,11 +16,21 @@ enum ResourceLoadState<Value: Codable & Sendable>: Sendable {
     }
 }
 
+/// A studio-wide billing lockout surfaced when a read returns HTTP 402
+/// (`tenant.subscription_required`). It is not a data-load failure — the session
+/// is valid, the subscription lapsed — so the owner shell renders a dedicated
+/// billing state instead of a generic error (conductor plan T1).
+struct BillingLockout: Sendable, Equatable {
+    let message: String?
+}
+
 @MainActor
 @Observable
 final class ResourceModel<Value: Codable & Sendable> {
     private(set) var state: ResourceLoadState<Value> = .idle
     private(set) var isRefreshing = false
+    /// Non-nil once a refresh returned 402; cleared on the next successful load.
+    private(set) var billingLockout: BillingLockout?
     let staleAfter: TimeInterval
     private let cached: @Sendable () async throws -> ResourceSnapshot<Value>?
     private let remote: @Sendable () async throws -> ResourceSnapshot<Value>
@@ -58,7 +68,9 @@ final class ResourceModel<Value: Codable & Sendable> {
         state = .loading(previous)
         defer { isRefreshing = false }
         do {
-            state = .loaded(try await remote())
+            let snapshot = try await remote()
+            billingLockout = nil
+            state = .loaded(snapshot)
         } catch is CancellationError {
             if let previous {
                 state = .loaded(previous)
@@ -67,6 +79,10 @@ final class ResourceModel<Value: Codable & Sendable> {
                 loaded = false
             }
         } catch {
+            if let apiError = error as? APIError,
+               case let .subscriptionRequired(problem) = apiError {
+                billingLockout = BillingLockout(message: problem?.bestMessage)
+            }
             state = .failed(previous, message: error.localizedDescription)
         }
     }

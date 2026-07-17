@@ -32,4 +32,12 @@ final class StudioAccountLinksTests: XCTestCase {
             "https://studio.test/admin/export-studio"
         )
     }
+
+    func testManageBillingLink() throws {
+        XCTAssertEqual(
+            StudioAccountLinks(workspaceOrigin: try XCTUnwrap(URL(string: "https://studio.test/")))
+                .manageBilling.absoluteString,
+            "https://studio.test/admin/billing"
+        )
+    }
 }

@@ -15,4 +15,11 @@ struct StudioAccountLinks: Sendable {
     var deleteStudio: URL {
         workspaceOrigin.appending(path: "admin/delete-studio")
     }
+
+    /// Where a billing-locked owner resolves a lapsed subscription. Equivalent to
+    /// the descriptor's `manage_billing_url` for hosted tenants; used as the
+    /// fallback when that field isn't retained in the session (conductor plan T1).
+    var manageBilling: URL {
+        workspaceOrigin.appending(path: "admin/billing")
+    }
 }
