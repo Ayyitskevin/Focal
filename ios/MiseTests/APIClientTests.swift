@@ -84,6 +84,42 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(invalidationCount, 1)
     }
 
+    func testSubscriptionRequiredPreservesSessionAndProblem() async throws {
+        MockURLProtocol.setHandler { request in
+            (
+                Self.response(
+                    url: request.url!,
+                    status: 402,
+                    headers: ["Content-Type": "application/problem+json"]
+                ),
+                Data(
+                    #"{"title":"Subscription required","status":402,"code":"tenant.subscription_required","detail":"Update billing to continue."}"#.utf8
+                )
+            )
+        }
+
+        let authorizer = StubAuthorizer(initial: "token", refreshed: "other")
+        let client = makeClient(authorizer: authorizer)
+        let endpoint = APIEndpoint<EmptyResponse>(
+            method: .get,
+            path: "/api/v1/test/subscription"
+        )
+
+        do {
+            _ = try await client.send(endpoint)
+            XCTFail("Expected HTTP 402 to require subscription recovery.")
+        } catch let APIError.subscriptionRequired(problem) {
+            XCTAssertEqual(problem?.status, 402)
+            XCTAssertEqual(problem?.code, "tenant.subscription_required")
+            XCTAssertEqual(problem?.detail, "Update billing to continue.")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        let invalidationCount = await authorizer.invalidationCount()
+        XCTAssertEqual(invalidationCount, 0)
+    }
+
     func testRejectsUnexpectedRedirect() async throws {
         MockURLProtocol.setHandler { request in
             (

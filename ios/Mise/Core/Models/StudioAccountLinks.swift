@@ -7,6 +7,19 @@ import Foundation
 /// can find account deletion from inside the app (Guideline 5.1.1(v)).
 struct StudioAccountLinks: Sendable {
     let workspaceOrigin: URL
+    let preferredManageBillingURL: URL?
+
+    init(
+        workspaceOrigin: URL,
+        preferredManageBillingURL: URL? = nil
+    ) {
+        self.workspaceOrigin = workspaceOrigin
+        self.preferredManageBillingURL = preferredManageBillingURL
+    }
+
+    var manageBilling: URL {
+        preferredManageBillingURL ?? workspaceOrigin.appending(path: "admin/billing")
+    }
 
     var exportStudio: URL {
         workspaceOrigin.appending(path: "admin/export-studio")

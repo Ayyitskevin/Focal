@@ -78,12 +78,11 @@ failure, which read as "everything is failing." Rules to prevent recurrence:
 
 | Item | State |
 |---|---|
-| Native reschedule recovery (#165), game plan + ADR 0070 (#166), packaging layer (#167), funnel fields (#169), hosted happy-path test (#170) | ✅ merged |
+| Native reschedule recovery (#165), game plan + ADR 0070 (#166), packaging layer (#167), funnel fields (#169), hosted happy-path test (#170), app funnel links (#171), reschedule hardening (#168) | ✅ merged |
 | Red main (3 commits) | ✅ cured at `1a45430`; postmortem rules above |
-| #171 — app "Start a studio" link + funnel-URL decode | 🔄 CI re-running on fixed base; merge when green |
-| #168 — codex session/persistence hardening for reschedule journals | 🔄 CI running; **held for Kevin's security review by design** — do not merge from the fleet |
 | `MISE_BOOKING_WORKFLOW_ENABLED` | ⛔ stays `false` until T2 |
-| Tickets T1–T10 below | ⬜ open |
+| T1 — 402 "manage billing" screen | ✅ implemented; iOS PR `build-test` remains the merge gate |
+| Tickets T2–T10 below | ⬜ open |
 
 ## 4. Work orders
 

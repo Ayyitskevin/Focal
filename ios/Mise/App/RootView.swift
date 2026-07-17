@@ -19,6 +19,7 @@ struct RootView: View {
             case let .signedIn(session):
                 SignedInShell(
                     session: session,
+                    manageBillingURL: authentication.workspace?.descriptor.manageBillingURL,
                     ownerRepository: authentication.ownerRepository,
                     clientRepository: authentication.clientRepository,
                     mediaLoader: authentication.mediaLoader,
@@ -73,6 +74,7 @@ private struct LoadingSessionView: View {
 @MainActor
 private struct SignedInShell: View {
     let session: CurrentSession
+    let manageBillingURL: URL?
     let ownerRepository: OwnerRepository?
     let clientRepository: ClientRepository?
     let mediaLoader: AuthenticatedMediaLoader?
@@ -86,6 +88,7 @@ private struct SignedInShell: View {
         {
             OwnerCompanionView(
                 session: session,
+                preferredManageBillingURL: manageBillingURL,
                 repository: repository,
                 mediaLoader: mediaLoader,
                 isSigningOut: isSigningOut,

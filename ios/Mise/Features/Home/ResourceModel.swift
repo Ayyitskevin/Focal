@@ -1,11 +1,35 @@
 import Foundation
 import Observation
 
+enum ResourceLoadFailure: Equatable, Sendable {
+    case subscriptionRequired
+    case general(message: String)
+
+    init(_ error: Error) {
+        if let apiError = error as? APIError,
+           case .subscriptionRequired = apiError
+        {
+            self = .subscriptionRequired
+        } else {
+            self = .general(message: error.localizedDescription)
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .subscriptionRequired:
+            "This studio’s subscription needs attention."
+        case let .general(message):
+            message
+        }
+    }
+}
+
 enum ResourceLoadState<Value: Codable & Sendable>: Sendable {
     case idle
     case loading(ResourceSnapshot<Value>?)
     case loaded(ResourceSnapshot<Value>)
-    case failed(ResourceSnapshot<Value>?, message: String)
+    case failed(ResourceSnapshot<Value>?, failure: ResourceLoadFailure)
 
     var snapshot: ResourceSnapshot<Value>? {
         switch self {
@@ -21,6 +45,7 @@ enum ResourceLoadState<Value: Codable & Sendable>: Sendable {
 final class ResourceModel<Value: Codable & Sendable> {
     private(set) var state: ResourceLoadState<Value> = .idle
     private(set) var isRefreshing = false
+    private(set) var requiresSubscriptionRecovery = false
     let staleAfter: TimeInterval
     private let cached: @Sendable () async throws -> ResourceSnapshot<Value>?
     private let remote: @Sendable () async throws -> ResourceSnapshot<Value>
@@ -58,7 +83,9 @@ final class ResourceModel<Value: Codable & Sendable> {
         state = .loading(previous)
         defer { isRefreshing = false }
         do {
-            state = .loaded(try await remote())
+            let snapshot = try await remote()
+            requiresSubscriptionRecovery = false
+            state = .loaded(snapshot)
         } catch is CancellationError {
             if let previous {
                 state = .loaded(previous)
@@ -67,7 +94,11 @@ final class ResourceModel<Value: Codable & Sendable> {
                 loaded = false
             }
         } catch {
-            state = .failed(previous, message: error.localizedDescription)
+            let failure = ResourceLoadFailure(error)
+            if failure == .subscriptionRequired {
+                requiresSubscriptionRecovery = true
+            }
+            state = .failed(previous, failure: failure)
         }
     }
 }
