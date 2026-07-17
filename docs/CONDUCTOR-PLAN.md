@@ -75,22 +75,33 @@ failure, which read as "everything is failing." Rules to prevent recurrence:
   says so in its opening line.
 - **R-PR-2. Claim a ticket before starting it** (from the 2026-07-17 T1 collision:
   two agents built the 402 screen in parallel — `claude/t1-billing-402` and
-  `codex/ios-subscription-required` — because neither branch name revealed the
-  claim, wasting a CI run and forcing #173 closed for #174). The claim is the
-  branch name, visible to everyone the instant it's pushed:
-  1. **Pre-flight.** Before writing code for `Tn`, check for an existing claim:
-     `git ls-remote --heads origin '*t<n>-*'` **and** scan open PRs for `T<n>` in
-     the title/body. If either exists, that ticket is taken — pick another.
-  2. **Branch name is the claim:** `<agent>/t<n>-<slug>` (e.g.
-     `claude/t3-demo-studio`). Push the branch (even empty/WIP) early to stake it;
-     a ticket-prefixed name is what makes `ls-remote` find it.
-  3. **First push wins.** If you discover a collision after starting, the
-     later-pushed branch yields: close your PR in favor of the earlier one,
-     porting any better ideas via review comment (as #174 did with #173's
-     sticky-retry). Don't race to merge.
-  4. Mark the ticket **claimed** in the board (§3) in the same first push, and
-     keep board edits confined to your ticket's row so two agents never edit the
-     same board line (this PR deliberately touches only §2 for that reason).
+  `codex/ios-subscription-required` — wasting a CI run and forcing #173 closed for
+  #174). **The claim is an OPEN, ticket-tagged draft PR** — not a branch. A branch
+  alone can't hold a claim: a closed PR's branch lingers on the remote (e.g.
+  `claude/t1-billing-402` outlived #173), and `ls-remote` exposes no push time, so
+  "first branch wins" is neither releasable nor observable. PR state is: it opens,
+  closes/merges, and carries a queryable `created_at`.
+  1. **Pre-flight.** Before writing code for `Tn`, list **open** PRs and look for
+     one whose title starts `Tn — …` or whose head branch matches `*/t<n>-*`. If an
+     open one exists, the ticket is taken — pick another. Closed or merged PRs do
+     **not** hold a claim (that is how a claim is released). A stale remote branch
+     with no open PR is only a hint, never a claim.
+  2. **Stake it.** Branch `<agent>/t<n>-<slug>` (e.g. `claude/t3-demo-studio`) **and**
+     PR title prefixed `Tn — <summary>`; open the draft PR early (even WIP) so the
+     claim is visible. The branch is the discovery hint; the open PR is authoritative.
+  3. **Earliest open PR wins — unless the conductor reassigns.** *Default:* if two
+     open PRs target `Tn`, the earlier GitHub `created_at` holds it and the later
+     closes in its favor, porting good ideas via review comment. *Exception:* when the
+     earliest claim doesn't cover the ticket's full acceptance surface, the conductor
+     may reassign `Tn` to a more complete PR — recording the reason on the superseded
+     PR and closing it, so ownership stays singular and observable. Either way exactly
+     one open PR ends up owning the ticket; don't race to merge. (T1 went the exception
+     route: #173 was earlier but only handled Home's 402; #174 covered every
+     `ResourceView`, so #173 was closed with the reason recorded and #174 became
+     authoritative — keeping #173's sticky-retry idea.)
+  4. **Board updates happen at merge, in your ticket's own row** (§3) — never on a
+     feature branch pre-merge (invisible on `main` until then) and never on another
+     ticket's row. This PR touches only §2 for exactly that reason.
 
 ## 3. Board (as of 2026-07-17 evening)
 
