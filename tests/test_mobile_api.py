@@ -427,3 +427,41 @@ def test_billing_locked_owner_can_recover_session_but_feature_data_stays_blocked
     assert blocked.status_code == 402
     assert blocked.headers["content-type"].startswith("application/problem+json")
     assert blocked.json()["code"] == "tenant.subscription_required"
+
+
+def test_healthy_hosted_tenant_reads_its_own_data_on_its_subdomain(tmp_path, monkeypatch):
+    # The revenue-critical happy path: a trialing (healthy) studio, on its own
+    # host, reads its own owner data through /api/v1. The existing hosted tests
+    # only cover the auth/recovery surface and the billing-LOCKED 402 — this pins
+    # that a NON-locked tenant actually gets 200s with tenant-scoped feature data.
+    _configure_hosted(tmp_path, monkeypatch)
+    tenant = saas.create_tenant("bloom", "Bloom Studio", "owner@bloom.test", "hosted-password")
+    other = saas.create_tenant("rival", "Rival Studio", "owner@rival.test", "hosted-password")
+    with saas.tenant_runtime(tenant):
+        db.run("INSERT INTO clients (name, notes) VALUES (?,?)", ("Bloom Client", "notes"))
+    with saas.tenant_runtime(other):
+        db.run(
+            "INSERT INTO clients (name, notes) VALUES (?,?)", ("Rival Client", "SHOULD-NOT-LEAK")
+        )
+
+    client = TestClient(app, base_url="https://bloom.mise.test")
+    login = client.post(
+        "/api/v1/auth/studio/login",
+        json={"email": "owner@bloom.test", "password": "hosted-password", "device": _device()},
+    )
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    dashboard = client.get("/api/v1/dashboard", headers=headers)
+    clients = client.get("/api/v1/clients", headers=headers)
+    galleries = client.get("/api/v1/galleries", headers=headers)
+    client.close()
+
+    assert login.status_code == 200
+    assert dashboard.status_code == 200
+    assert "generated_at" in dashboard.json()
+    # Tenant-scoped read: this studio sees its own client and never the rival's.
+    assert clients.status_code == 200
+    names = [row["name"] for row in clients.json()["items"]]
+    assert names == ["Bloom Client"]
+    # An empty feature collection is a healthy 200, not a 402 or an error.
+    assert galleries.status_code == 200
+    assert galleries.json()["items"] == []
