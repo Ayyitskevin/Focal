@@ -69,11 +69,75 @@ final class SessionAuthenticatorTests: XCTestCase {
         XCTAssertNil(try persistence.load())
     }
 
+    func testRefreshPreservesSessionIDUsedByReplayJournal() async throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let oldSession = Self.session(
+            origin: "https://studio.example.com",
+            accessToken: "old",
+            refreshToken: "refresh-old",
+            accessExpiresAt: now.addingTimeInterval(-1),
+            sessionID: "session-original"
+        )
+        let newSession = Self.session(
+            origin: "https://studio.example.com",
+            accessToken: "new",
+            refreshToken: "refresh-new",
+            accessExpiresAt: now.addingTimeInterval(900),
+            sessionID: "session-original"
+        )
+        let persistence = InMemorySessionPersistence(oldSession)
+        let authenticator = SessionAuthenticator(
+            persistence: persistence,
+            refresher: SlowRefresher(response: newSession),
+            expectedBaseURL: URL(string: "https://studio.example.com")!,
+            now: { now }
+        )
+
+        let token = try await authenticator.bearerToken()
+        XCTAssertEqual(token, "new")
+        XCTAssertEqual(try persistence.load()?.sessionID, "session-original")
+    }
+
+    func testRefreshRejectsChangedSessionIDAndPurgesStoredSession() async throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let oldSession = Self.session(
+            origin: "https://studio.example.com",
+            accessToken: "old",
+            refreshToken: "refresh-old",
+            accessExpiresAt: now.addingTimeInterval(-1),
+            sessionID: "session-original"
+        )
+        let newSession = Self.session(
+            origin: "https://studio.example.com",
+            accessToken: "new",
+            refreshToken: "refresh-new",
+            accessExpiresAt: now.addingTimeInterval(900),
+            sessionID: "session-replaced"
+        )
+        let persistence = InMemorySessionPersistence(oldSession)
+        let authenticator = SessionAuthenticator(
+            persistence: persistence,
+            refresher: SlowRefresher(response: newSession),
+            expectedBaseURL: URL(string: "https://studio.example.com")!,
+            now: { now }
+        )
+
+        do {
+            _ = try await authenticator.bearerToken()
+            XCTFail("Expected a changed backend session ID to be rejected.")
+        } catch SessionError.identityChanged {
+            // Expected. Idempotency replay must stay bound to one backend session.
+        }
+
+        XCTAssertNil(try persistence.load())
+    }
+
     private static func session(
         origin: String,
         accessToken: String,
         refreshToken: String,
-        accessExpiresAt: Date
+        accessExpiresAt: Date,
+        sessionID: String? = nil
     ) -> AuthSession {
         AuthSession(
             accessToken: accessToken,
@@ -96,7 +160,8 @@ final class SessionAuthenticatorTests: XCTestCase {
                 displayName: "Studio",
                 email: nil,
                 scopes: ["studio:read"]
-            )
+            ),
+            sessionID: sessionID
         )
     }
 }

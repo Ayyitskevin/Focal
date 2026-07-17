@@ -355,6 +355,65 @@ final class BookingRescheduleModelTests: XCTestCase {
     }
 
     @MainActor
+    func testUnreadableCommittedWorkflowHandleBlocksEveryNewReschedule() async {
+        let harness = RescheduleHarness(session: Self.session())
+        let model = BookingRescheduleModel(
+            session: Self.session(),
+            commands: makeCommands(),
+            dependencies: makeDependencies(
+                harness: harness,
+                latestResult: { throw TenantJSONCacheError.invalidEnvelope }
+            )
+        )
+
+        await model.restore()
+        await model.refreshCapability()
+
+        XCTAssertNil(model.latestResult)
+        XCTAssertTrue(model.recoveryIsBlocked)
+        XCTAssertTrue(model.hasAmbiguousAttempt)
+        XCTAssertFalse(model.canStartNewReschedule)
+        XCTAssertTrue(model.notice?.contains("New reschedules are blocked") == true)
+    }
+
+    @MainActor
+    func testDefinitivePendingDiscardCannotClearWorkflowRecoveryBlock() async {
+        let harness = RescheduleHarness(
+            session: Self.session(),
+            pending: Self.attempt(),
+            submitReplies: [
+                .failure(
+                    .conflict(
+                        APIProblem(
+                            status: 409,
+                            code: "booking.slot_unavailable",
+                            detail: "That time is no longer available."
+                        )
+                    )
+                ),
+            ]
+        )
+        let model = BookingRescheduleModel(
+            session: Self.session(),
+            commands: makeCommands(),
+            dependencies: makeDependencies(
+                harness: harness,
+                latestResult: { throw TenantJSONCacheError.invalidEnvelope }
+            )
+        )
+        await model.restore()
+        await model.refreshCapability()
+
+        let replayed = await model.retryPending()
+
+        XCTAssertFalse(replayed)
+        XCTAssertNil(model.pendingAttempt)
+        XCTAssertTrue(model.recoveryIsBlocked)
+        XCTAssertTrue(model.hasAmbiguousAttempt)
+        XCTAssertFalse(model.canStartNewReschedule)
+    }
+
+    @MainActor
     func testBlockedWorkflowRetryUsesDedicatedCommandAndUpdatesState() async {
         let result = Self.result()
         let harness = RescheduleHarness(
@@ -447,7 +506,8 @@ final class BookingRescheduleModelTests: XCTestCase {
     private func makeDependencies(
         harness: RescheduleHarness,
         slots: (@Sendable (Int64, LocalDate, Int64) async throws -> EventTypeSlots)? = nil,
-        pending: (@Sendable () async throws -> PendingBookingRescheduleAttempt?)? = nil
+        pending: (@Sendable () async throws -> PendingBookingRescheduleAttempt?)? = nil,
+        latestResult: (@Sendable () async throws -> BookingRescheduleResult?)? = nil
     ) -> BookingRescheduleDependencies {
         BookingRescheduleDependencies(
             currentSession: { try await harness.currentSession() },
@@ -468,7 +528,7 @@ final class BookingRescheduleModelTests: XCTestCase {
             pending: pending ?? { try await harness.pending() },
             submit: { try await harness.submit($0) },
             discard: { try await harness.discard($0) },
-            latestResult: { try await harness.latestResult() },
+            latestResult: latestResult ?? { try await harness.latestResult() },
             workflow: { try await harness.workflow($0) },
             retryWorkflow: { try await harness.retryWorkflow($0) }
         )

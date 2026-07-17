@@ -155,7 +155,8 @@ actor SessionAuthenticator: RequestAuthorizing {
                 matchesExpectedOrigin(refreshed),
                 refreshed.workspace.cacheNamespace == previous.workspace.cacheNamespace,
                 refreshed.principal.id == previous.principal.id,
-                refreshed.principal.kind == previous.principal.kind
+                refreshed.principal.kind == previous.principal.kind,
+                previous.sessionID == nil || refreshed.sessionID == previous.sessionID
             else {
                 invalidate()
                 throw SessionError.identityChanged

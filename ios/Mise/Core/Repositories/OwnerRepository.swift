@@ -51,7 +51,7 @@ enum OwnerRepositoryError: LocalizedError, Sendable {
     }
 }
 
-private struct StoredBookingRescheduleResult: Codable, Sendable {
+private struct StoredBookingRescheduleResult: Codable, Equatable, Sendable {
     let sessionID: String
     let result: BookingRescheduleResult
 }
@@ -65,13 +65,21 @@ actor OwnerRepository {
         static let projects = "projects.v1"
         static let galleries = "galleries.v1"
         static let bookings = "bookings.v1"
-        static let pendingBookingReschedule = "booking.reschedule.pending.v1"
-        static let latestBookingReschedule = "booking.reschedule.latest.v1"
+        static let legacyPendingBookingReschedule = "booking.reschedule.pending.v1"
+        static let legacyLatestBookingReschedule = "booking.reschedule.latest.v1"
         static let commercialActions = "commercial.actions.v1"
         static let companies = "commercial.companies.v1"
 
         static func gallery(_ id: Int64) -> String {
             "gallery.\(id).v1"
+        }
+
+        static func pendingBookingReschedule(sessionID: String) -> String {
+            "booking.reschedule.pending.v2.\(sessionID)"
+        }
+
+        static func latestBookingReschedule(sessionID: String) -> String {
+            "booking.reschedule.latest.v2.\(sessionID)"
         }
     }
 
@@ -192,17 +200,17 @@ actor OwnerRepository {
             timeZone: timeZone,
             idempotencyKey: UUID()
         )
-        let attempt = try await cache.writeCommandIfAbsent(
-            proposed,
-            key: Key.pendingBookingReschedule,
-            etag: nil
-        ).value
+        let attempt = if let pending = try await pendingBookingRescheduleAttempt() {
+            pending
+        } else {
+            try await cache.writeCommandIfAbsent(
+                proposed,
+                key: Key.pendingBookingReschedule(sessionID: currentSessionID),
+                etag: nil
+            ).value
+        }
         try await requireActiveCache()
         guard attempt.sessionID == currentSessionID else {
-            _ = try? await cache.removeCommand(
-                Key.pendingBookingReschedule,
-                ifMatches: attempt
-            )
             throw OwnerRepositoryError.bookingRescheduleSessionMismatch
         }
         guard
@@ -219,21 +227,53 @@ actor OwnerRepository {
         -> PendingBookingRescheduleAttempt?
     {
         let currentSessionID = try await requireBookingRescheduleSession()
-        guard let attempt = try await cache.readCommand(
-            Key.pendingBookingReschedule,
+        let key = Key.pendingBookingReschedule(sessionID: currentSessionID)
+        if let attempt = try await cache.readCommand(
+            key,
+            as: PendingBookingRescheduleAttempt.self
+        )?.value {
+            if let legacy = try await cache.readLegacyCommand(
+                Key.legacyPendingBookingReschedule,
+                as: PendingBookingRescheduleAttempt.self
+            )?.value, legacy.sessionID == currentSessionID {
+                guard let reconciled = try await cache.migrateLegacyCommandIfMatches(
+                    Key.legacyPendingBookingReschedule,
+                    to: key,
+                    expected: legacy
+                ), reconciled.value == attempt else {
+                    throw TenantJSONCacheError.invalidEnvelope
+                }
+            }
+            try await requireActiveCache()
+            guard attempt.sessionID == currentSessionID else {
+                throw OwnerRepositoryError.bookingRescheduleSessionMismatch
+            }
+            return attempt
+        }
+
+        guard let legacy = try await cache.readLegacyCommand(
+            Key.legacyPendingBookingReschedule,
             as: PendingBookingRescheduleAttempt.self
         )?.value else {
+            try await requireActiveCache()
             return nil
         }
         try await requireActiveCache()
-        guard attempt.sessionID == currentSessionID else {
-            _ = try? await cache.removeCommand(
-                Key.pendingBookingReschedule,
-                ifMatches: attempt
-            )
+        guard legacy.sessionID == currentSessionID else {
+            return nil
+        }
+        guard let migrated = try await cache.migrateLegacyCommandIfMatches(
+            Key.legacyPendingBookingReschedule,
+            to: key,
+            expected: legacy
+        ) else {
+            throw TenantJSONCacheError.invalidEnvelope
+        }
+        try await requireActiveCache()
+        guard migrated.value.sessionID == currentSessionID else {
             throw OwnerRepositoryError.bookingRescheduleSessionMismatch
         }
-        return attempt
+        return migrated.value
     }
 
     func submitBookingReschedule(
@@ -270,19 +310,18 @@ actor OwnerRepository {
             throw OwnerRepositoryError.invalidBookingRescheduleResponse
         }
 
-        try await cache.write(
-            StoredBookingRescheduleResult(
-                sessionID: saved.sessionID,
-                result: result
-            ),
-            key: Key.latestBookingReschedule,
-            etag: nil
+        let stored = StoredBookingRescheduleResult(
+            sessionID: saved.sessionID,
+            result: result
+        )
+        let commit = try await cache.commitCommand(
+            stored,
+            resultKey: Key.latestBookingReschedule(sessionID: saved.sessionID),
+            consuming: Key.pendingBookingReschedule(sessionID: saved.sessionID),
+            ifMatches: saved
         )
         try await requireActiveCache()
-        guard try await cache.removeCommand(
-            Key.pendingBookingReschedule,
-            ifMatches: saved
-        ) else {
+        guard commit != .conflict else {
             throw OwnerRepositoryError.pendingBookingRescheduleMismatch
         }
         try? await cache.remove(Key.bookings)
@@ -299,7 +338,7 @@ actor OwnerRepository {
         }
         guard saved == attempt else { return false }
         return try await cache.removeCommand(
-            Key.pendingBookingReschedule,
+            Key.pendingBookingReschedule(sessionID: saved.sessionID),
             ifMatches: attempt
         )
     }
@@ -308,17 +347,53 @@ actor OwnerRepository {
         -> BookingRescheduleResult?
     {
         let currentSessionID = try await requireBookingRescheduleSession()
-        guard let stored = try await cache.read(
-            Key.latestBookingReschedule,
+        let key = Key.latestBookingReschedule(sessionID: currentSessionID)
+        if let stored = try await cache.readCommand(
+            key,
+            as: StoredBookingRescheduleResult.self
+        )?.value {
+            if let legacy = try await cache.readLegacyCommand(
+                Key.legacyLatestBookingReschedule,
+                as: StoredBookingRescheduleResult.self
+            )?.value, legacy.sessionID == currentSessionID {
+                guard let reconciled = try await cache.migrateLegacyCommandIfMatches(
+                    Key.legacyLatestBookingReschedule,
+                    to: key,
+                    expected: legacy
+                ), reconciled.value == stored else {
+                    throw TenantJSONCacheError.invalidEnvelope
+                }
+            }
+            try await requireActiveCache()
+            guard stored.sessionID == currentSessionID else {
+                throw OwnerRepositoryError.bookingRescheduleSessionMismatch
+            }
+            return stored.result
+        }
+
+        guard let legacy = try await cache.readLegacyCommand(
+            Key.legacyLatestBookingReschedule,
             as: StoredBookingRescheduleResult.self
         )?.value else {
+            try await requireActiveCache()
             return nil
         }
-        guard stored.sessionID == currentSessionID else {
-            try? await cache.remove(Key.latestBookingReschedule)
+        try await requireActiveCache()
+        guard legacy.sessionID == currentSessionID else {
+            return nil
+        }
+        guard let migrated = try await cache.migrateLegacyCommandIfMatches(
+            Key.legacyLatestBookingReschedule,
+            to: key,
+            expected: legacy
+        ) else {
+            throw TenantJSONCacheError.invalidEnvelope
+        }
+        try await requireActiveCache()
+        guard migrated.value.sessionID == currentSessionID else {
             throw OwnerRepositoryError.bookingRescheduleSessionMismatch
         }
-        return stored.result
+        return migrated.value.result
     }
 
     func bookingWorkflowStatus(id: UUID) async throws -> BookingWorkflowStatus {
@@ -388,7 +463,7 @@ actor OwnerRepository {
 
     func purgeCache() async {
         cacheIsActive = false
-        try? await cache.removeAll()
+        await removeLocalState()
     }
 
     private func cached<Value: Codable & Sendable>(
@@ -507,10 +582,15 @@ actor OwnerRepository {
     private func requireActiveCache() async throws {
         guard cacheIsActive else {
             // A sign-out can interleave while an API request is suspended. Remove
-            // any file a late response might have recreated before refusing it.
-            try? await cache.removeAll()
+            // only disposable snapshots; durable session journals stay available
+            // to another scene that may still be resolving the exact command.
+            await removeLocalState()
             throw OwnerRepositoryError.inactiveSession
         }
+    }
+
+    private func removeLocalState() async {
+        try? await cache.removeAll()
     }
 
     private func sendWithMetadata<Response: Decodable & Sendable>(
@@ -529,14 +609,14 @@ actor OwnerRepository {
            case .unauthenticated = apiError
         {
             cacheIsActive = false
-            try? await cache.removeAll()
+            await removeLocalState()
             return
         }
         guard let sessionError = error as? SessionError else { return }
         switch sessionError {
         case .expired, .identityChanged, .workspaceMismatch:
             cacheIsActive = false
-            try? await cache.removeAll()
+            await removeLocalState()
         }
     }
 }

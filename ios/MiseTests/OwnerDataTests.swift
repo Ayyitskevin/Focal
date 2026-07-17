@@ -18,6 +18,94 @@ final class OwnerDataTests: XCTestCase {
         XCTAssertEqual(secondValue?.value, [9])
     }
 
+    func testSnapshotPurgePreservesDurableAndLegacyCommandJournals() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = TenantJSONCache(cacheNamespace: "tenant_one", rootDirectory: root)
+        try await cache.write([1, 2], key: "clients", etag: nil)
+        try await cache.writeCommandIfAbsent(
+            ["durable"],
+            key: "booking.reschedule.pending.v2.session-a",
+            etag: nil
+        )
+        try await cache.write(
+            ["legacy-pending"],
+            key: "booking.reschedule.pending.v1",
+            etag: nil
+        )
+        try await cache.write(
+            ["legacy-latest"],
+            key: "booking.reschedule.latest.v1",
+            etag: nil
+        )
+
+        try await cache.removeAll()
+
+        let snapshot = try await cache.read("clients", as: [Int].self)
+        let durable = try await cache.readCommand(
+            "booking.reschedule.pending.v2.session-a",
+            as: [String].self
+        )
+        let legacyPending = try await cache.readLegacyCommand(
+            "booking.reschedule.pending.v1",
+            as: [String].self
+        )
+        let legacyLatest = try await cache.readLegacyCommand(
+            "booking.reschedule.latest.v1",
+            as: [String].self
+        )
+        XCTAssertNil(snapshot)
+        XCTAssertEqual(durable?.value, ["durable"])
+        XCTAssertEqual(legacyPending?.value, ["legacy-pending"])
+        XCTAssertEqual(legacyLatest?.value, ["legacy-latest"])
+    }
+
+    func testLateCommandCommitCannotOverwriteNewerWorkflowHandle() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = TenantJSONCache(cacheNamespace: "tenant_one", rootDirectory: root)
+        let commandKey = "booking.reschedule.pending.v2.session-a"
+        let resultKey = "booking.reschedule.latest.v2.session-a"
+        let firstCommand = CacheCommand(id: "first")
+        let secondCommand = CacheCommand(id: "second")
+        let firstResult = CacheResult(id: "first")
+        let secondResult = CacheResult(id: "second")
+
+        try await cache.writeCommandIfAbsent(firstCommand, key: commandKey, etag: nil)
+        let firstCommit = try await cache.commitCommand(
+            firstResult,
+            resultKey: resultKey,
+            consuming: commandKey,
+            ifMatches: firstCommand
+        )
+        try await cache.writeCommandIfAbsent(secondCommand, key: commandKey, etag: nil)
+        let secondCommit = try await cache.commitCommand(
+            secondResult,
+            resultKey: resultKey,
+            consuming: commandKey,
+            ifMatches: secondCommand
+        )
+        let lateFirstCommit = try await cache.commitCommand(
+            firstResult,
+            resultKey: resultKey,
+            consuming: commandKey,
+            ifMatches: firstCommand
+        )
+        let repeatedSecondCommit = try await cache.commitCommand(
+            secondResult,
+            resultKey: resultKey,
+            consuming: commandKey,
+            ifMatches: secondCommand
+        )
+        let latest = try await cache.readCommand(resultKey, as: CacheResult.self)
+
+        XCTAssertEqual(firstCommit, .committed)
+        XCTAssertEqual(secondCommit, .committed)
+        XCTAssertEqual(lateFirstCommit, .conflict)
+        XCTAssertEqual(repeatedSecondCommit, .alreadyCommitted)
+        XCTAssertEqual(latest?.value, secondResult)
+    }
+
     func testDashboardUsesETagAndTouchesCacheOnNotModified() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -86,6 +174,14 @@ final class OwnerDataTests: XCTestCase {
         portalPublished: true,
         createdAt: Date(timeIntervalSince1970: 1_700_000_000)
     )
+}
+
+private struct CacheCommand: Codable, Equatable, Sendable {
+    let id: String
+}
+
+private struct CacheResult: Codable, Equatable, Sendable {
+    let id: String
 }
 
 private actor QueuedOwnerClient: APIClientProtocol {

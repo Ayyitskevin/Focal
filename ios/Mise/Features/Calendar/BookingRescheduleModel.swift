@@ -82,7 +82,6 @@ final class BookingRescheduleModel {
     private(set) var isSubmitting = false
     private(set) var isRefreshingWorkflow = false
     private(set) var pendingAttempt: PendingBookingRescheduleAttempt?
-    private(set) var recoveryIsBlocked = false
     private(set) var latestResult: BookingRescheduleResult?
     private(set) var workflowStatus: BookingWorkflowStatus?
     private(set) var workflowNotice: String?
@@ -96,6 +95,8 @@ final class BookingRescheduleModel {
     private var slotLoadID = UUID()
     private var workflowPollGeneration = 0
     private var restored = false
+    private var pendingRecoveryIsBlocked = false
+    private var workflowRecoveryIsBlocked = false
 
     init(
         session: CurrentSession,
@@ -119,6 +120,10 @@ final class BookingRescheduleModel {
 
     var hasAmbiguousAttempt: Bool {
         pendingAttempt != nil || recoveryIsBlocked
+    }
+
+    var recoveryIsBlocked: Bool {
+        pendingRecoveryIsBlocked || workflowRecoveryIsBlocked
     }
 
     var canStartNewReschedule: Bool {
@@ -190,24 +195,27 @@ final class BookingRescheduleModel {
 
         do {
             pendingAttempt = try await dependencies.pending()
-            recoveryIsBlocked = false
+            pendingRecoveryIsBlocked = false
             if pendingAttempt != nil {
                 notice = Self.ambiguousNotice
             }
         } catch {
             pendingAttempt = nil
-            recoveryIsBlocked = true
+            pendingRecoveryIsBlocked = true
             notice = Self.blockedRecoveryNotice
         }
 
         do {
             latestResult = try await dependencies.latestResult()
+            workflowRecoveryIsBlocked = false
             if let result = latestResult {
                 transitionedBookingIDs.insert(result.originalBookingID)
                 await refreshWorkflowStatus()
             }
         } catch {
             latestResult = nil
+            workflowRecoveryIsBlocked = true
+            notice = Self.blockedRecoveryNotice
         }
     }
 
@@ -320,13 +328,13 @@ final class BookingRescheduleModel {
         } catch {
             do {
                 pendingAttempt = try await dependencies.pending()
-                recoveryIsBlocked = false
+                pendingRecoveryIsBlocked = false
                 notice = pendingAttempt == nil
                     ? "Mise couldn’t safely save this request. Nothing was sent."
                     : Self.ambiguousNotice
             } catch {
                 pendingAttempt = nil
-                recoveryIsBlocked = true
+                pendingRecoveryIsBlocked = true
                 notice = Self.blockedRecoveryNotice
             }
             return false
@@ -451,7 +459,8 @@ final class BookingRescheduleModel {
         do {
             let result = try await dependencies.submit(attempt)
             pendingAttempt = nil
-            recoveryIsBlocked = false
+            pendingRecoveryIsBlocked = false
+            workflowRecoveryIsBlocked = false
             latestResult = result
             workflowStatus = nil
             transitionedBookingIDs.insert(result.originalBookingID)
@@ -463,15 +472,15 @@ final class BookingRescheduleModel {
                 let discarded = (try? await dependencies.discard(attempt)) == true
                 if discarded {
                     pendingAttempt = nil
-                    recoveryIsBlocked = false
+                    pendingRecoveryIsBlocked = false
                     handleDefinitive(error)
                 } else {
                     do {
                         pendingAttempt = try await dependencies.pending()
-                        recoveryIsBlocked = false
+                        pendingRecoveryIsBlocked = false
                     } catch {
                         pendingAttempt = nil
-                        recoveryIsBlocked = true
+                        pendingRecoveryIsBlocked = true
                     }
                     if recoveryIsBlocked {
                         notice = Self.blockedRecoveryNotice
