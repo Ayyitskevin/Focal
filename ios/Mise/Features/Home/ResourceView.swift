@@ -22,11 +22,12 @@ struct ResourceView<Value: Codable & Sendable, Content: View, Empty: View>: View
 
     var body: some View {
         Group {
-            if model.state.requiresSubscriptionRecovery,
+            if model.requiresSubscriptionRecovery,
                let studioManageBillingURL
             {
                 SubscriptionRequiredView(
                     manageBillingURL: studioManageBillingURL,
+                    isRetrying: model.isRefreshing,
                     retry: { await model.refresh() }
                 )
             } else if let snapshot = model.state.snapshot {
@@ -112,6 +113,7 @@ struct ResourceView<Value: Codable & Sendable, Content: View, Empty: View>: View
 
 private struct SubscriptionRequiredView: View {
     let manageBillingURL: URL
+    let isRetrying: Bool
     let retry: @MainActor () async -> Void
 
     var body: some View {
@@ -128,10 +130,17 @@ private struct SubscriptionRequiredView: View {
             }
             .buttonStyle(.borderedProminent)
 
-            Button("Try again") {
+            Button {
                 Task { await retry() }
+            } label: {
+                if isRetrying {
+                    ProgressView()
+                } else {
+                    Text("Try again")
+                }
             }
             .buttonStyle(.bordered)
+            .disabled(isRetrying)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

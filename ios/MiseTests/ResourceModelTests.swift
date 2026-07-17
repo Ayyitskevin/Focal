@@ -22,7 +22,7 @@ final class ResourceModelTests: XCTestCase {
         }
         XCTAssertEqual(snapshot?.value, ["saved client"])
         XCTAssertEqual(failure, .general(message: "Offline for test"))
-        XCTAssertFalse(model.state.requiresSubscriptionRecovery)
+        XCTAssertFalse(model.requiresSubscriptionRecovery)
     }
 
     @MainActor
@@ -51,7 +51,7 @@ final class ResourceModelTests: XCTestCase {
         }
         XCTAssertEqual(snapshot?.value, ["stale client"])
         XCTAssertEqual(failure, .subscriptionRequired)
-        XCTAssertTrue(model.state.requiresSubscriptionRecovery)
+        XCTAssertTrue(model.requiresSubscriptionRecovery)
 
         await model.refresh()
 
@@ -59,6 +59,7 @@ final class ResourceModelTests: XCTestCase {
             return XCTFail("Expected retry to restore loaded content")
         }
         XCTAssertEqual(snapshot.value, ["live client"])
+        XCTAssertFalse(model.requiresSubscriptionRecovery)
     }
 }
 

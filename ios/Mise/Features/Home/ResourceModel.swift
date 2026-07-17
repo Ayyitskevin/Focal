@@ -38,11 +38,6 @@ enum ResourceLoadState<Value: Codable & Sendable>: Sendable {
         case let .loaded(value): value
         }
     }
-
-    var requiresSubscriptionRecovery: Bool {
-        guard case let .failed(_, failure) = self else { return false }
-        return failure == .subscriptionRequired
-    }
 }
 
 @MainActor
@@ -50,6 +45,7 @@ enum ResourceLoadState<Value: Codable & Sendable>: Sendable {
 final class ResourceModel<Value: Codable & Sendable> {
     private(set) var state: ResourceLoadState<Value> = .idle
     private(set) var isRefreshing = false
+    private(set) var requiresSubscriptionRecovery = false
     let staleAfter: TimeInterval
     private let cached: @Sendable () async throws -> ResourceSnapshot<Value>?
     private let remote: @Sendable () async throws -> ResourceSnapshot<Value>
@@ -87,7 +83,9 @@ final class ResourceModel<Value: Codable & Sendable> {
         state = .loading(previous)
         defer { isRefreshing = false }
         do {
-            state = .loaded(try await remote())
+            let snapshot = try await remote()
+            requiresSubscriptionRecovery = false
+            state = .loaded(snapshot)
         } catch is CancellationError {
             if let previous {
                 state = .loaded(previous)
@@ -96,7 +94,11 @@ final class ResourceModel<Value: Codable & Sendable> {
                 loaded = false
             }
         } catch {
-            state = .failed(previous, failure: ResourceLoadFailure(error))
+            let failure = ResourceLoadFailure(error)
+            if failure == .subscriptionRequired {
+                requiresSubscriptionRecovery = true
+            }
+            state = .failed(previous, failure: failure)
         }
     }
 }
