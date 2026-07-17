@@ -57,11 +57,12 @@ and avoiding it in the foundation keeps auth/session behavior auditable.
   real transition starts best-effort client-notification and calendar cleanup.
   Native booking rescheduling is implemented as a capability-gated flow: its
   destination must come from the source-aware slot feed, the exact session-bound
-  request and idempotency key are persisted before POST, ambiguous outcomes can
-  only replay that saved command, and provider-workflow status remains visible
-  after the booking moves. The reschedule backend and slot feed are on `main`;
-  the server capability stays default-off (`MISE_BOOKING_WORKFLOW_ENABLED`) until
-  the durable-workflow and session-identity reviews are approved.
+  request and idempotency key are persisted before POST in strict session-scoped
+  journals, ambiguous outcomes can only replay that saved command, and the
+  pending-to-workflow transition is committed atomically so provider-workflow
+  status remains recoverable after the booking moves. A refresh-time continuity
+  guard rejects a changed backend session ID. The server capability stays
+  default-off (`MISE_BOOKING_WORKFLOW_ENABLED`) pending human review.
 - Do not add access tokens, refresh tokens, PINs, Stripe secrets, or APNs keys to
   xcconfig files.
 

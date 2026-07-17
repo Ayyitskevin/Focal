@@ -187,8 +187,8 @@ final class OwnerMutationContractTests: XCTestCase {
         )
         let client = OwnerMutationContractClient([
             .inspect { request in
-                let saved = try await context.cache.read(
-                    "booking.reschedule.pending.v1",
+                let saved = try await context.cache.readCommand(
+                    "booking.reschedule.pending.v2.session-a",
                     as: PendingBookingRescheduleAttempt.self
                 )?.value
                 XCTAssertEqual(saved?.bookingID, 91)
@@ -209,8 +209,8 @@ final class OwnerMutationContractTests: XCTestCase {
         )
 
         let result = try await repository.submitBookingReschedule(attempt)
-        let pending = try await context.cache.read(
-            "booking.reschedule.pending.v1",
+        let pending = try await context.cache.readCommand(
+            "booking.reschedule.pending.v2.session-a",
             as: PendingBookingRescheduleAttempt.self
         )
         let cachedBookings = try await context.cache.read(
@@ -424,6 +424,34 @@ final class OwnerMutationContractTests: XCTestCase {
         XCTAssertEqual(evidence?.value, ["not-a-reschedule-attempt"])
     }
 
+    func testCorruptCommittedWorkflowHandleFailsLoudWithoutDeletingEvidence() async throws {
+        let context = makeCache()
+        defer { try? FileManager.default.removeItem(at: context.root) }
+        try await context.cache.writeCommandIfAbsent(
+            ["not-a-reschedule-result"],
+            key: "booking.reschedule.latest.v2.session-a",
+            etag: nil
+        )
+        let repository = OwnerRepository(
+            client: OwnerMutationContractClient([]),
+            cache: context.cache,
+            sessionID: "session-a"
+        )
+
+        do {
+            _ = try await repository.latestBookingRescheduleResult()
+            XCTFail("Expected a corrupt committed workflow handle to fail closed.")
+        } catch is DecodingError {
+            // The durable workflow handle must remain available for recovery.
+        }
+
+        let evidence = try await context.cache.readCommand(
+            "booking.reschedule.latest.v2.session-a",
+            as: [String].self
+        )
+        XCTAssertEqual(evidence?.value, ["not-a-reschedule-result"])
+    }
+
     func testConcurrentRepositoriesReuseOneAtomicPendingCommand() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -495,37 +523,99 @@ final class OwnerMutationContractTests: XCTestCase {
         XCTAssertEqual(requests[0].idempotencyKey, first.idempotencyKey)
     }
 
-    func testSessionMismatchRefusesAndRemovesStalePendingAttempt() async throws {
-        let context = makeCache()
-        defer { try? FileManager.default.removeItem(at: context.root) }
+    func testStaleSessionPurgeCannotDeleteAnotherSessionsPendingAttempt() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
         let client = OwnerMutationContractClient([])
         let firstRepository = OwnerRepository(
             client: client,
-            cache: context.cache,
+            cache: TenantJSONCache(cacheNamespace: "workspace_test", rootDirectory: root),
             sessionID: "session-a"
         )
-        _ = try await firstRepository.prepareBookingReschedule(
+        let first = try await firstRepository.prepareBookingReschedule(
             bookingID: 91,
             startAt: try Self.date("2026-07-16T13:00:00Z"),
             timeZone: "America/New_York"
         )
         let nextRepository = OwnerRepository(
             client: client,
+            cache: TenantJSONCache(cacheNamespace: "workspace_test", rootDirectory: root),
+            sessionID: "session-b"
+        )
+        let next = try await nextRepository.prepareBookingReschedule(
+            bookingID: 92,
+            startAt: try Self.date("2026-07-17T14:00:00Z"),
+            timeZone: "America/New_York"
+        )
+
+        await firstRepository.purgeCache()
+
+        let nextAfterStalePurge = try await nextRepository.pendingBookingRescheduleAttempt()
+        let auditCache = TenantJSONCache(
+            cacheNamespace: "workspace_test",
+            rootDirectory: root
+        )
+        let firstEvidence = try await auditCache.readCommand(
+            "booking.reschedule.pending.v2.session-a",
+            as: PendingBookingRescheduleAttempt.self
+        )?.value
+        let nextEvidence = try await auditCache.readCommand(
+            "booking.reschedule.pending.v2.session-b",
+            as: PendingBookingRescheduleAttempt.self
+        )?.value
+
+        XCTAssertEqual(firstEvidence, first)
+        XCTAssertEqual(nextAfterStalePurge, next)
+        XCTAssertEqual(nextEvidence, next)
+    }
+
+    func testForeignLegacyPendingRemainsForOwningSessionToMigrate() async throws {
+        let context = makeCache()
+        defer { try? FileManager.default.removeItem(at: context.root) }
+        let legacy = PendingBookingRescheduleAttempt(
+            sessionID: "session-a",
+            bookingID: 91,
+            startAt: try Self.date("2026-07-16T13:00:00Z"),
+            timeZone: "America/New_York",
+            idempotencyKey: UUID()
+        )
+        try await context.cache.write(
+            legacy,
+            key: "booking.reschedule.pending.v1",
+            etag: nil
+        )
+        let foreignRepository = OwnerRepository(
+            client: OwnerMutationContractClient([]),
             cache: context.cache,
             sessionID: "session-b"
         )
 
-        do {
-            _ = try await nextRepository.pendingBookingRescheduleAttempt()
-            XCTFail("Expected a stale session-bound attempt to be refused.")
-        } catch OwnerRepositoryError.bookingRescheduleSessionMismatch {
-            // The stale replay key must not cross into the new login session.
-        }
-        let pending = try await context.cache.read(
+        let foreignPending = try await foreignRepository.pendingBookingRescheduleAttempt()
+        let legacyAfterForeignRead = try await context.cache.readLegacyCommand(
+            "booking.reschedule.pending.v1",
+            as: PendingBookingRescheduleAttempt.self
+        )?.value
+        let owningRepository = OwnerRepository(
+            client: OwnerMutationContractClient([]),
+            cache: context.cache,
+            sessionID: "session-a"
+        )
+        let migrated = try await owningRepository.pendingBookingRescheduleAttempt()
+        let legacyAfterMigration = try await context.cache.readLegacyCommand(
             "booking.reschedule.pending.v1",
             as: PendingBookingRescheduleAttempt.self
         )
-        XCTAssertNil(pending)
+        let durable = try await context.cache.readCommand(
+            "booking.reschedule.pending.v2.session-a",
+            as: PendingBookingRescheduleAttempt.self
+        )?.value
+
+        XCTAssertNil(foreignPending)
+        XCTAssertEqual(legacyAfterForeignRead, legacy)
+        XCTAssertEqual(migrated, legacy)
+        XCTAssertNil(legacyAfterMigration)
+        XCTAssertEqual(durable, legacy)
     }
 
     func testDefinitiveRejectionCanDiscardOnlyTheMatchingAttempt() async throws {
