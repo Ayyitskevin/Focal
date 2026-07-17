@@ -266,16 +266,18 @@ def test_google_event_exclusion_requires_complete_freebusy_reconciliation(monkey
 
 
 def test_google_busy_event_listing_pages_and_normalizes_event_shapes(monkeypatch):
-    monkeypatch.setattr(config, "TIMEZONE", "UTC")
+    monkeypatch.setattr(config, "TIMEZONE", "America/New_York")
     start = dt.datetime(2026, 7, 15, tzinfo=dt.UTC)
     end = start + dt.timedelta(days=1)
     paths: list[str] = []
 
-    def api(method: str, path: str):
+    def api(method: str, path: str, *, timeout: float):
         assert method == "GET"
+        assert timeout == 5
         paths.append(path)
         if "pageToken=" not in path:
             return {
+                "timeZone": "UTC",
                 "items": [
                     {
                         "id": "timed",
@@ -292,6 +294,7 @@ def test_google_busy_event_listing_pages_and_normalizes_event_shapes(monkeypatch
                 "nextPageToken": "next token",
             }
         return {
+            "timeZone": "UTC",
             "items": [
                 {
                     "id": "all-day",
@@ -304,7 +307,7 @@ def test_google_busy_event_listing_pages_and_normalizes_event_shapes(monkeypatch
                     "start": {"dateTime": "2026-07-15T14:00:00Z"},
                     "end": {"dateTime": "2026-07-15T15:00:00Z"},
                 },
-            ]
+            ],
         }
 
     monkeypatch.setattr(gcal, "_api", api)

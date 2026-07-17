@@ -214,7 +214,13 @@ def _access_token() -> str:
     return access
 
 
-def _api(method: str, path: str, payload: dict | None = None) -> dict:
+def _api(
+    method: str,
+    path: str,
+    payload: dict | None = None,
+    *,
+    timeout: float = 15,
+) -> dict:
     data = json.dumps(payload).encode() if payload is not None else None
     req = urllib.request.Request(
         f"{API}{path}",
@@ -222,7 +228,7 @@ def _api(method: str, path: str, payload: dict | None = None) -> dict:
         method=method,
         headers={"Authorization": f"Bearer {_access_token()}", "Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         raw = resp.read()
         return json.loads(raw) if raw else {}
 
@@ -273,11 +279,11 @@ def _merge_busy(
     return merged
 
 
-def _event_instant(value: dict) -> dt.datetime:
+def _event_instant(value: dict, all_day_zone: ZoneInfo) -> dt.datetime:
     if value.get("dateTime"):
         return _parse_rfc3339(value["dateTime"])
     day = dt.date.fromisoformat(value["date"])
-    return dt.datetime.combine(day, dt.time(), ZoneInfo(config.TIMEZONE)).astimezone(_UTC)
+    return dt.datetime.combine(day, dt.time(), all_day_zone).astimezone(_UTC)
 
 
 def _busy_events(
@@ -288,26 +294,26 @@ def _busy_events(
     params = {
         "timeMin": _rfc3339(time_min),
         "timeMax": _rfc3339(time_max),
-        "timeZone": config.TIMEZONE,
         "singleEvents": "true",
         "showDeleted": "false",
         "maxResults": "2500",
-        "fields": "items(id,status,transparency,start,end),nextPageToken",
+        "fields": "items(id,status,transparency,start,end),nextPageToken,timeZone",
     }
     events: list[tuple[str, dt.datetime, dt.datetime]] = []
     seen_tokens: set[str] = set()
     try:
-        for _ in range(20):
+        for _ in range(4):
             path = f"/calendars/{_cal()}/events?{urllib.parse.urlencode(params)}"
-            page = _api("GET", path)
+            page = _api("GET", path, timeout=5)
+            all_day_zone = ZoneInfo(page["timeZone"])
             for item in page.get("items", []):
                 if item.get("status") == "cancelled" or item.get("transparency") == "transparent":
                     continue
                 event_id = item.get("id")
                 if not event_id or not item.get("start") or not item.get("end"):
                     continue
-                start = _event_instant(item["start"])
-                end = _event_instant(item["end"])
+                start = _event_instant(item["start"], all_day_zone)
+                end = _event_instant(item["end"], all_day_zone)
                 if end > start:
                     events.append((str(event_id), start, end))
             token = page.get("nextPageToken")
@@ -318,7 +324,7 @@ def _busy_events(
                 raise GcalError("events list repeated a page token")
             seen_tokens.add(token)
             params["pageToken"] = token
-        raise GcalError("events list exceeded 20 pages")
+        raise GcalError("events list exceeded 4 pages")
     except Exception as e:
         log.warning("calendar event list failed, retaining full freebusy: %s", e)
         return None
