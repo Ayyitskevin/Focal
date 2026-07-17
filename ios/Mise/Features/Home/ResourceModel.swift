@@ -1,11 +1,35 @@
 import Foundation
 import Observation
 
+enum ResourceLoadFailure: Equatable, Sendable {
+    case subscriptionRequired
+    case general(message: String)
+
+    init(_ error: Error) {
+        if let apiError = error as? APIError,
+           case .subscriptionRequired = apiError
+        {
+            self = .subscriptionRequired
+        } else {
+            self = .general(message: error.localizedDescription)
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .subscriptionRequired:
+            "This studio’s subscription needs attention."
+        case let .general(message):
+            message
+        }
+    }
+}
+
 enum ResourceLoadState<Value: Codable & Sendable>: Sendable {
     case idle
     case loading(ResourceSnapshot<Value>?)
     case loaded(ResourceSnapshot<Value>)
-    case failed(ResourceSnapshot<Value>?, message: String)
+    case failed(ResourceSnapshot<Value>?, failure: ResourceLoadFailure)
 
     var snapshot: ResourceSnapshot<Value>? {
         switch self {
@@ -13,6 +37,11 @@ enum ResourceLoadState<Value: Codable & Sendable>: Sendable {
         case let .loading(value), let .failed(value, _): value
         case let .loaded(value): value
         }
+    }
+
+    var requiresSubscriptionRecovery: Bool {
+        guard case let .failed(_, failure) = self else { return false }
+        return failure == .subscriptionRequired
     }
 }
 
@@ -67,7 +96,7 @@ final class ResourceModel<Value: Codable & Sendable> {
                 loaded = false
             }
         } catch {
-            state = .failed(previous, message: error.localizedDescription)
+            state = .failed(previous, failure: ResourceLoadFailure(error))
         }
     }
 }

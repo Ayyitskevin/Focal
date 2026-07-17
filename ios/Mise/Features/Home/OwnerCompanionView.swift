@@ -37,6 +37,7 @@ struct OwnerCompanionView: View {
     @State private var reschedule: BookingRescheduleModel
 
     let session: CurrentSession
+    let preferredManageBillingURL: URL?
     let repository: OwnerRepository
     let mediaLoader: AuthenticatedMediaLoader
     let isSigningOut: Bool
@@ -44,12 +45,14 @@ struct OwnerCompanionView: View {
 
     init(
         session: CurrentSession,
+        preferredManageBillingURL: URL?,
         repository: OwnerRepository,
         mediaLoader: AuthenticatedMediaLoader,
         isSigningOut: Bool,
         signOut: @escaping @MainActor () async -> Void
     ) {
         self.session = session
+        self.preferredManageBillingURL = preferredManageBillingURL
         self.repository = repository
         self.mediaLoader = mediaLoader
         self.isSigningOut = isSigningOut
@@ -102,41 +105,47 @@ struct OwnerCompanionView: View {
     }
 
     private var accountLinks: StudioAccountLinks {
-        StudioAccountLinks(workspaceOrigin: session.workspace.apiBaseURL)
+        StudioAccountLinks(
+            workspaceOrigin: session.workspace.apiBaseURL,
+            preferredManageBillingURL: preferredManageBillingURL
+        )
     }
 
     var body: some View {
-        if horizontalSizeClass == .regular {
-            NavigationSplitView {
-                List(OwnerDestination.allCases) { destination in
-                    Button {
-                        selection = destination
-                    } label: {
-                        HStack {
-                            Label(destination.title, systemImage: destination.icon)
-                            Spacer()
-                            if selection == destination {
-                                Image(systemName: "checkmark")
-                                    .accessibilityHidden(true)
+        Group {
+            if horizontalSizeClass == .regular {
+                NavigationSplitView {
+                    List(OwnerDestination.allCases) { destination in
+                        Button {
+                            selection = destination
+                        } label: {
+                            HStack {
+                                Label(destination.title, systemImage: destination.icon)
+                                Spacer()
+                                if selection == destination {
+                                    Image(systemName: "checkmark")
+                                        .accessibilityHidden(true)
+                                }
                             }
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(selection == destination ? .isSelected : [])
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(selection == destination ? .isSelected : [])
+                    .navigationTitle(session.workspace.displayName)
+                } detail: {
+                    ownerStack(selection)
                 }
-                .navigationTitle(session.workspace.displayName)
-            } detail: {
-                ownerStack(selection)
-            }
-        } else {
-            TabView(selection: $selection) {
-                ForEach(OwnerDestination.allCases) { destination in
-                    ownerStack(destination)
-                        .tabItem { Label(destination.title, systemImage: destination.icon) }
-                        .tag(destination)
+            } else {
+                TabView(selection: $selection) {
+                    ForEach(OwnerDestination.allCases) { destination in
+                        ownerStack(destination)
+                            .tabItem { Label(destination.title, systemImage: destination.icon) }
+                            .tag(destination)
+                    }
                 }
             }
         }
+        .environment(\.studioManageBillingURL, accountLinks.manageBilling)
     }
 
     private func ownerStack(_ destination: OwnerDestination) -> some View {

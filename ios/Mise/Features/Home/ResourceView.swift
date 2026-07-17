@@ -1,7 +1,20 @@
 import Foundation
 import SwiftUI
 
+private struct StudioManageBillingURLKey: EnvironmentKey {
+    static let defaultValue: URL? = nil
+}
+
+extension EnvironmentValues {
+    var studioManageBillingURL: URL? {
+        get { self[StudioManageBillingURLKey.self] }
+        set { self[StudioManageBillingURLKey.self] = newValue }
+    }
+}
+
 struct ResourceView<Value: Codable & Sendable, Content: View, Empty: View>: View {
+    @Environment(\.studioManageBillingURL) private var studioManageBillingURL
+
     let model: ResourceModel<Value>
     let isEmpty: (Value) -> Bool
     let content: (Value) -> Content
@@ -9,7 +22,14 @@ struct ResourceView<Value: Codable & Sendable, Content: View, Empty: View>: View
 
     var body: some View {
         Group {
-            if let snapshot = model.state.snapshot {
+            if model.state.requiresSubscriptionRecovery,
+               let studioManageBillingURL
+            {
+                SubscriptionRequiredView(
+                    manageBillingURL: studioManageBillingURL,
+                    retry: { await model.refresh() }
+                )
+            } else if let snapshot = model.state.snapshot {
                 VStack(spacing: 0) {
                     if let statusMessage {
                         Label(statusMessage, systemImage: statusIcon)
@@ -36,11 +56,11 @@ struct ResourceView<Value: Codable & Sendable, Content: View, Empty: View>: View
                 case .idle, .loading:
                     ProgressView("Loading…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                case let .failed(_, message):
+                case let .failed(_, failure):
                     ContentUnavailableView {
                         Label("Couldn’t load data", systemImage: "wifi.exclamationmark")
                     } description: {
-                        Text(message)
+                        Text(failure.message)
                     } actions: {
                         Button("Try Again") { Task { await model.refresh() } }
                             .buttonStyle(.borderedProminent)
@@ -58,8 +78,8 @@ struct ResourceView<Value: Codable & Sendable, Content: View, Empty: View>: View
         switch model.state {
         case .loading:
             return "Updating data saved \(relativeAge(of: snapshot.storedAt))…"
-        case let .failed(_, message):
-            return "Offline — showing data saved \(relativeAge(of: snapshot.storedAt)). \(message)"
+        case let .failed(_, failure):
+            return "Offline — showing data saved \(relativeAge(of: snapshot.storedAt)). \(failure.message)"
         case .loaded where snapshot.source == .cache:
             if snapshot.isStale(after: model.staleAfter) {
                 return "Saved \(relativeAge(of: snapshot.storedAt)); it may be out of date. Pull to refresh."
@@ -87,5 +107,32 @@ struct ResourceView<Value: Codable & Sendable, Content: View, Empty: View>: View
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .full
         return formatter.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+private struct SubscriptionRequiredView: View {
+    let manageBillingURL: URL
+    let retry: @MainActor () async -> Void
+
+    var body: some View {
+        ContentUnavailableView {
+            Label(
+                "Your studio’s subscription needs attention",
+                systemImage: "exclamationmark.triangle"
+            )
+        } description: {
+            Text("Manage billing on the web, then try loading your studio again.")
+        } actions: {
+            Link(destination: manageBillingURL) {
+                Label("Manage billing", systemImage: "arrow.up.right.square")
+            }
+            .buttonStyle(.borderedProminent)
+
+            Button("Try again") {
+                Task { await retry() }
+            }
+            .buttonStyle(.bordered)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
