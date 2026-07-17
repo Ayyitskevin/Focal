@@ -61,16 +61,36 @@ tombstones the slug, and trash-parks data per ADR 0051.
 ## Reviewer access (game-plan item 12 — required before submission)
 
 App Review will demand working credentials for a sign-in-only app (Guideline 2.1).
-Plan (not yet provisioned):
 
-- A comped, long-lived reviewer tenant on the hosted platform
-  (`plan_status='active'`, e.g. `review.<root-domain>`) seeded with both
-  `app/saas_demo.py` presets, so it never trial-expires mid-review.
+**Provisioning — `scripts/seed_demo_tenant.py`** (run once against the hosted
+control DB on staging/prod; idempotent, touches only the demo tenant):
+
+```sh
+MISE_SAAS_MODE=true MISE_SAAS_ROOT_DOMAIN=<root-domain> \
+MISE_SAAS_CONTROL_DB_PATH=/data/saas-control.db \
+MISE_SAAS_TENANT_DATA_DIR=/data/tenants \
+MISE_SECRET_KEY=... MISE_ADMIN_PASSWORD=... \
+MISE_DEMO_TENANT_PASSWORD='<reviewer sign-in password>' \
+python -m scripts.seed_demo_tenant
+```
+
+It creates a comped, long-lived reviewer tenant (default slug `demo-tour`),
+marks it `plan_status='active'` so the trial sweep never 402s it mid-review
+(no schema flag — an `active` tenant is exempt), and seeds a realistic studio
+from an `app/saas_demo.py` preset (`MISE_DEMO_TENANT_PRESET=wedding|fnb`, default
+`wedding`) plus an event type and one upcoming booking so Calendar/Bookings are
+populated. Re-running repairs a lapsed demo back to `active` without duplicating
+data.
+
 - Review notes to include: the studio address to enter at sign-in
-  (`review.<root-domain>` or its full URL), owner email + password, and one
-  gallery/portal guest credential to show the client experience.
+  (`<slug>.<root-domain>` or its full URL), owner email
+  (`MISE_DEMO_TENANT_EMAIL`, default `reviewer@demo.mise.local`) + the password
+  you set, and — to show the client experience — one gallery guest credential
+  (the seeded gallery's slug + PIN, read from the tenant DB after seeding).
 - Note for reviewers: subscriptions are purchased on the web, not in the app;
   the app sells nothing (ADR 0070).
+- Pick the preset to match the T10 niche decision once recorded; until then the
+  script defaults to the recommended `wedding` story.
 
 ## Guideline verification (game-plan item 13 — do at submission week)
 
