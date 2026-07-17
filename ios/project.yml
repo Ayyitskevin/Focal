@@ -42,6 +42,10 @@ targets:
           UIApplicationSupportsMultipleScenes: true
         NSFaceIDUsageDescription: "Use Face ID to unlock your Mise studio."
         MiseServerBaseURL: "$(MISE_SERVER_BASE_URL)"
+        # Standard HTTPS only (no proprietary cryptography) — the exempt answer,
+        # given once here so App Store Connect never blocks a build on the
+        # export-compliance question.
+        ITSAppUsesNonExemptEncryption: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ayyitskevin.mise
@@ -49,6 +53,7 @@ targets:
         CODE_SIGN_STYLE: Automatic
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     scheme:
       testTargets:
         - MiseTests
