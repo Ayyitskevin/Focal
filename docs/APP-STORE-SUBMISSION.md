@@ -70,17 +70,22 @@ MISE_SAAS_MODE=true MISE_SAAS_ROOT_DOMAIN=<root-domain> \
 MISE_SAAS_CONTROL_DB_PATH=/data/saas-control.db \
 MISE_SAAS_TENANT_DATA_DIR=/data/tenants \
 MISE_SECRET_KEY=... MISE_ADMIN_PASSWORD=... \
+MISE_DEMO_TENANT_PRESET=wedding \
 MISE_DEMO_TENANT_PASSWORD='<reviewer sign-in password>' \
 python -m scripts.seed_demo_tenant
 ```
 
-It creates a comped, long-lived reviewer tenant (default slug `demo-tour`),
-marks it `plan_status='active'` so the trial sweep never 402s it mid-review
-(no schema flag — an `active` tenant is exempt), and seeds a realistic studio
-from an `app/saas_demo.py` preset (`MISE_DEMO_TENANT_PRESET=wedding|fnb`, default
-`wedding`) plus an event type and one upcoming booking so Calendar/Bookings are
-populated. Re-running repairs a lapsed demo back to `active` without duplicating
-data.
+It creates (or safely reuses) a reviewer tenant identified by
+`signup_source='reviewer-demo'` — and **refuses** a slug that already belongs to a
+real studio, so it can never reactivate one. It grants non-expiring access by
+keeping the tenant `trialing` with a far-future `trial_ends_at`: full access
+(`tenant_has_access` = `trial_ends_at >= now`) but counted as trial *pipeline*,
+**never as paid MRR** (only `active` tenants book `active_mrr_cents`). It seeds a
+realistic studio from an `app/saas_demo.py` preset (`MISE_DEMO_TENANT_PRESET` is
+**required** to be `wedding` or `fnb` — `neutral` has no seed yet, see T10) plus an
+owner task and a freshly-dated upcoming booking, refreshed every run so the demo
+never decays past a stale booking date. Re-running rotates the advertised
+credentials and converges the studio without duplicating data.
 
 - Review notes to include: the studio address to enter at sign-in
   (`<slug>.<root-domain>` or its full URL), owner email
@@ -89,8 +94,15 @@ data.
   (the seeded gallery's slug + PIN, read from the tenant DB after seeding).
 - Note for reviewers: subscriptions are purchased on the web, not in the app;
   the app sells nothing (ADR 0070).
-- Pick the preset to match the T10 niche decision once recorded; until then the
-  script defaults to the recommended `wedding` story.
+- Pick `MISE_DEMO_TENANT_PRESET` to match the T10 niche decision. The script
+  requires an explicit `wedding` or `fnb` and refuses `neutral`/unset, so a demo
+  is never seeded with a niche before the decision is recorded.
+
+**Still open before T3 can be called complete** (tracked in the PR): representative
+gallery photos are uploaded manually at demo-prep time (a seed can't invent real
+images); and a hosted owner-login acceptance test through `/api/v1` is the
+remaining automated gate beyond these unit/direct-DB tests. Manual TestFlight
+sign-in remains the deployment-time proof.
 
 ## Guideline verification (game-plan item 13 — do at submission week)
 

@@ -1,9 +1,10 @@
 """Reviewer demo-studio seed script (Conductor plan T3).
 
-The App Store / TestFlight reviewer needs a studio that stays populated and never
-lapses. These tests pin that the seed script is hosted-only, marks the tenant
-'active' (so the trial sweep never 402s it mid-review), seeds a realistic studio
-including an upcoming booking, and is idempotent.
+Pins the safety and correctness properties the Stage-1 review of #178 required:
+the seed grants non-expiring access WITHOUT fabricating paid MRR, refuses to touch
+a real tenant that happens to share the slug, keeps a future booking convergently
+(so the demo never decays), and validates the niche preset instead of silently
+defaulting.
 """
 
 import importlib.util
@@ -35,84 +36,108 @@ def hosted(tmp_path, monkeypatch):
     saas.migrate_control()
 
 
-def _run(preset="wedding", slug="demo-tour"):
+def _run(preset="wedding", slug="demo-tour", password="review-me-please"):
     return _load_seeder().seed_demo_tenant(
         slug=slug,
         studio_name="Mise Demo Studio",
         owner_email="reviewer@demo.mise.local",
-        password="review-me-please",
+        password=password,
         preset=preset,
     )
 
 
-def test_seed_creates_active_tenant_with_populated_studio(hosted):
-    summary = _run()
-    assert summary["tenant_created"] is True
-    assert summary["plan_status"] == "active"
+def _no_active_tenants() -> bool:
+    with saas.control_connect() as con:
+        return (
+            con.execute("SELECT COUNT(*) FROM tenants WHERE plan_status='active'").fetchone()[0]
+            == 0
+        )
 
+
+def test_grants_nonexpiring_access_without_fabricating_paid_mrr(hosted):
+    _run()
     tenant = saas.tenant_by_slug("demo-tour")
-    assert tenant is not None
-    # 'active' is the exemption that keeps the trial sweep from 402-ing the demo.
-    assert tenant["plan_status"] == "active"
+    # Non-expiring: a trialing tenant with a far-future end has full access forever.
+    assert tenant["plan_status"] == "trialing"
+    assert tenant["trial_ends_at"].startswith("2099")
+    assert saas.tenant_has_access(tenant) is True
+    # Revenue truth: MRR counts only 'active' tenants — the demo must not be one.
+    assert _no_active_tenants()
 
     with saas.tenant_runtime(tenant):
         from app import db
 
         client = db.one("SELECT id FROM clients WHERE email=?", ("demo+wedding@mise.local",))
         assert client is not None
-        assert db.one("SELECT id FROM projects WHERE client_id=?", (client["id"],)) is not None
         assert db.one("SELECT COUNT(*) AS n FROM invoices")["n"] >= 1
-        assert db.one("SELECT id FROM event_types WHERE slug='demo-consult'") is not None
+        assert db.one("SELECT COUNT(*) AS n FROM tasks WHERE done=0")["n"] >= 1
         booking = db.one("SELECT status, start_utc FROM bookings ORDER BY id LIMIT 1")
-        assert booking is not None
-        assert booking["status"] == "confirmed"
-        assert booking["start_utc"] > "2026"  # a real future timestamp, not empty
+        assert booking is not None and booking["status"] == "confirmed"
+        assert booking["start_utc"] > "2026"
 
 
-def test_seed_is_idempotent(hosted):
-    first = _run()
-    second = _run()
-    assert first["tenant_created"] is True
-    assert second["tenant_created"] is False  # reused, not duplicated
-    assert second["booking_seeded"] is False  # no second booking piled on
+def test_refuses_a_slug_owned_by_a_real_tenant(hosted):
+    # A genuine studio already lives at this slug.
+    real = saas.create_tenant(
+        "demo-tour",
+        "Real Studio",
+        "real-owner@example.test",
+        "realpassword",
+        signup_source="direct",
+    )
+    saas.update_tenant_billing(real["id"], plan_status="canceled")
 
-    # Exactly one tenant, one demo client, one booking after two runs.
+    with pytest.raises(SystemExit):
+        _run()
+
+    # It must be untouched: not reactivated, not renamed, creds not overwritten.
+    after = saas.tenant_by_slug("demo-tour")
+    assert after["owner_email"] == "real-owner@example.test"
+    assert after["plan_status"] == "canceled"
+    assert (after.get("signup_source") or "") != "reviewer-demo"
+
+
+def test_booking_is_refreshed_convergently(hosted):
+    _run()
     tenant = saas.tenant_by_slug("demo-tour")
     with saas.tenant_runtime(tenant):
         from app import db
 
-        assert db.one("SELECT COUNT(*) AS n FROM bookings")["n"] == 1
-        assert (
-            db.one("SELECT COUNT(*) AS n FROM clients WHERE email=?", ("demo+wedding@mise.local",))[
-                "n"
-            ]
-            == 1
-        )
+        # Simulate the demo having aged: its booking drifted into the past.
+        db.run("UPDATE bookings SET start_utc='2020-01-01 15:00:00'")
+
+    _run()  # rerun must restore a future booking, not leave the agenda empty
+    with saas.tenant_runtime(tenant):
+        from app import db
+
+        rows = db.all_("SELECT start_utc FROM bookings")
+        assert len(rows) == 1  # convergent, not piled up
+        assert rows[0]["start_utc"] > "2026"
 
 
-def test_seed_repairs_a_lapsed_demo_to_active(hosted):
-    _run()
+def test_rerun_rotates_credentials_and_stays_active_trial(hosted):
+    first = _run(password="review-me-please")
+    second = _run(password="a-new-review-password")
+    assert first["tenant_created"] is True
+    assert second["tenant_created"] is False
     tenant = saas.tenant_by_slug("demo-tour")
-    # Simulate the demo having drifted into a terminal billing state.
-    saas.update_tenant_billing(tenant["id"], plan_status="canceled")
-    assert saas.tenant_by_slug("demo-tour")["plan_status"] == "canceled"
-
-    _run()  # re-running the seed must restore 'active'
-    assert saas.tenant_by_slug("demo-tour")["plan_status"] == "active"
+    # The most recently advertised password must verify.
+    assert saas.passwords.verify_password("a-new-review-password", tenant["admin_password_hash"])
+    assert tenant["plan_status"] == "trialing"
 
 
-def test_seed_refuses_single_tenant_mode(hosted, monkeypatch):
+@pytest.mark.parametrize("bad", ["neutral", "", "WEDDING", "unknown"])
+def test_rejects_unsupported_preset(hosted, bad):
+    with pytest.raises(SystemExit):
+        _run(preset=bad)
+
+
+def test_refuses_single_tenant_mode(hosted, monkeypatch):
     monkeypatch.setattr(config, "SAAS_MODE", False)
     with pytest.raises(SystemExit):
         _run()
 
 
-def test_seed_rejects_short_password(hosted):
+def test_rejects_short_password(hosted):
     with pytest.raises(SystemExit):
-        _load_seeder().seed_demo_tenant(
-            slug="demo-tour",
-            studio_name="Mise Demo Studio",
-            owner_email="reviewer@demo.mise.local",
-            password="short",
-            preset="wedding",
-        )
+        _run(password="short")
