@@ -48,6 +48,10 @@ final class OwnerMutationContractTests: XCTestCase {
         XCTAssertEqual(endpoint.headers, ["Content-Type": "application/json"])
         XCTAssertEqual(endpoint.idempotencyKey, key)
         XCTAssertEqual(
+            body,
+            Data(#"{"start_at":"2026-07-16T11:00:00Z","time_zone":"America/New_York"}"#.utf8)
+        )
+        XCTAssertEqual(
             object,
             [
                 "start_at": "2026-07-16T11:00:00Z",

@@ -56,11 +56,13 @@ struct APIEndpoint<Response: Decodable & Sendable>: Sendable {
         idempotencyKey: UUID? = nil,
         etag: String? = nil
     ) throws -> APIEndpoint<Response> {
-        APIEndpoint(
+        let encoder = MiseJSON.encoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return APIEndpoint(
             method: method,
             path: path,
             headers: ["Content-Type": "application/json"],
-            body: try MiseJSON.encoder().encode(body),
+            body: try encoder.encode(body),
             authentication: authentication,
             idempotencyKey: idempotencyKey,
             etag: etag
