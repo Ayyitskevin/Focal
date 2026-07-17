@@ -123,12 +123,16 @@ private struct SubscriptionRequiredView: View {
                 systemImage: "exclamationmark.triangle"
             )
         } description: {
-            Text("Manage billing on the web, then try loading your studio again.")
+            Text(
+                "Update billing on the web to restore access. "
+                    + "Your studio data is still there."
+            )
         } actions: {
             Link(destination: manageBillingURL) {
                 Label("Manage billing", systemImage: "arrow.up.right.square")
             }
             .buttonStyle(.borderedProminent)
+            .accessibilityHint("Opens your studio’s billing page in the browser")
 
             Button {
                 Task { await retry() }
