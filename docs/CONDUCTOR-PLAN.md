@@ -73,6 +73,24 @@ failure, which read as "everything is failing." Rules to prevent recurrence:
 - **R-PR-1.** One ticket = one branch = one PR, using the repo template
   (What/Why/Verified/Rollback/Risk). A PR that needs a sibling PR merged first
   says so in its opening line.
+- **R-PR-2. Claim a ticket before starting it** (from the 2026-07-17 T1 collision:
+  two agents built the 402 screen in parallel — `claude/t1-billing-402` and
+  `codex/ios-subscription-required` — because neither branch name revealed the
+  claim, wasting a CI run and forcing #173 closed for #174). The claim is the
+  branch name, visible to everyone the instant it's pushed:
+  1. **Pre-flight.** Before writing code for `Tn`, check for an existing claim:
+     `git ls-remote --heads origin '*t<n>-*'` **and** scan open PRs for `T<n>` in
+     the title/body. If either exists, that ticket is taken — pick another.
+  2. **Branch name is the claim:** `<agent>/t<n>-<slug>` (e.g.
+     `claude/t3-demo-studio`). Push the branch (even empty/WIP) early to stake it;
+     a ticket-prefixed name is what makes `ls-remote` find it.
+  3. **First push wins.** If you discover a collision after starting, the
+     later-pushed branch yields: close your PR in favor of the earlier one,
+     porting any better ideas via review comment (as #174 did with #173's
+     sticky-retry). Don't race to merge.
+  4. Mark the ticket **claimed** in the board (§3) in the same first push, and
+     keep board edits confined to your ticket's row so two agents never edit the
+     same board line (this PR deliberately touches only §2 for that reason).
 
 ## 3. Board (as of 2026-07-17 evening)
 
