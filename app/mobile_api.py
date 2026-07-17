@@ -288,6 +288,15 @@ def _tenant_descriptor(request: Request) -> TenantDescriptor:
     auth_methods = ["shared_access"]
     if metadata["studio_password"]:
         auth_methods.insert(0, "studio_password")
+    # Funnel links (ADR 0070): public web URLs only, so the companion app never
+    # hardcodes admin paths and never renders a purchase UI. Hosted-only — a
+    # self-hosted studio has no platform signup and no $20 subscription panel.
+    signup_url = None
+    manage_billing_url = None
+    if config.SAAS_MODE:
+        if config.SAAS_MARKETING_HOST:
+            signup_url = f"https://{config.SAAS_MARKETING_HOST}/pricing"
+        manage_billing_url = f"{metadata['origin']}/admin/billing"
     return TenantDescriptor(
         cache_namespace=metadata["cache_namespace"],
         slug=metadata["slug"],
@@ -297,6 +306,8 @@ def _tenant_descriptor(request: Request) -> TenantDescriptor:
         time_zone=config.TIMEZONE,
         currency_code="USD",
         auth_methods=auth_methods,
+        signup_url=signup_url,
+        manage_billing_url=manage_billing_url,
     )
 
 

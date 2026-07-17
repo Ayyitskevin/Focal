@@ -69,8 +69,15 @@ Public, non-enumerating descriptor on the tenant host:
       "brand_accent_hex": "#2F5C45",
       "time_zone": "America/New_York",
       "currency_code": "USD",
-      "auth_methods": ["studio_password", "shared_access"]
+      "auth_methods": ["studio_password", "shared_access"],
+      "signup_url": "https://mise.example/pricing",
+      "manage_billing_url": "https://north-star.mise.example/admin/billing"
     }
+
+`signup_url` and `manage_billing_url` are hosted-only funnel links (null when
+self-hosted): where a new studio signs up, and where this studio's owner manages
+the subscription. The app opens both in the system browser and never renders a
+purchase UI (ADR 0070) — they exist so the client never hardcodes web-admin paths.
 
 Do not return tenant filesystem paths, plan internals, owner email, or tenant ID
 that a root endpoint could use to select a database.

@@ -78,6 +78,9 @@ def test_tenant_discovery_and_openapi_are_scoped_native_contracts(mobile_client)
         "time_zone": config.TIMEZONE,
         "currency_code": "USD",
         "auth_methods": ["studio_password", "shared_access"],
+        # Self-hosted studios have no platform signup or hosted billing panel.
+        "signup_url": None,
+        "manage_billing_url": None,
     }
 
     schema_response = mobile_client.get("/api/v1/openapi.json")
@@ -414,6 +417,11 @@ def test_billing_locked_owner_can_recover_session_but_feature_data_stays_blocked
     client.close()
 
     assert descriptor.status_code == 200
+    # Hosted descriptors carry the funnel links the app uses instead of
+    # hardcoding web-admin paths (ADR 0070): platform signup + this studio's
+    # billing panel — exactly what a billing-locked owner needs to recover.
+    assert descriptor.json()["signup_url"] == "https://mise.test/pricing"
+    assert descriptor.json()["manage_billing_url"] == "https://locked.mise.test/admin/billing"
     assert login.status_code == 200
     assert current.status_code == 200
     assert blocked.status_code == 402

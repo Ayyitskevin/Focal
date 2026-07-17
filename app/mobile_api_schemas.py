@@ -114,6 +114,12 @@ class TenantDescriptor(MobileAPIModel):
     time_zone: BoundedString
     currency_code: str = Field(..., min_length=3, max_length=3)
     auth_methods: list[BoundedString] = Field(default_factory=list, max_length=16)
+    # Funnel links so the free companion app never hardcodes web-admin paths:
+    # where a new studio signs up, and where THIS studio's owner manages the
+    # hosted subscription (both open in the system browser, never in-app —
+    # ADR 0070 keeps every purchase on the web). Null when self-hosted.
+    signup_url: AnyHttpUrl | None = None
+    manage_billing_url: AnyHttpUrl | None = None
 
     @field_validator("brand_accent_hex")
     @classmethod

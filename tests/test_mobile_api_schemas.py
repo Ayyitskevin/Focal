@@ -67,6 +67,8 @@ def test_tenant_descriptor_uses_the_swift_snake_case_wire_shape():
         time_zone="America/New_York",
         currency_code="usd",
         auth_methods=["studio_password", "shared_access"],
+        signup_url="https://mise.example/pricing",
+        manage_billing_url="https://north-star.mise.example/admin/billing",
     )
 
     payload = descriptor.model_dump(mode="json")
@@ -79,9 +81,13 @@ def test_tenant_descriptor_uses_the_swift_snake_case_wire_shape():
         "time_zone",
         "currency_code",
         "auth_methods",
+        "signup_url",
+        "manage_billing_url",
     }
     assert payload["currency_code"] == "USD"
     assert payload["canonical_base_url"].rstrip("/") == "https://north-star.mise.example"
+    assert payload["signup_url"] == "https://mise.example/pricing"
+    assert payload["manage_billing_url"] == "https://north-star.mise.example/admin/billing"
 
 
 @pytest.mark.parametrize(
