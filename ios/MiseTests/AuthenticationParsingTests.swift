@@ -194,7 +194,9 @@ final class AuthenticationParsingTests: XCTestCase {
             brandAccentHex: "#2F5C45",
             timeZone: "America/New_York",
             currencyCode: "USD",
-            authMethods: ["studio_password", "shared_access"]
+            authMethods: ["studio_password", "shared_access"],
+            signupURL: nil,
+            manageBillingURL: nil
         )
     }
 

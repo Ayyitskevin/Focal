@@ -180,6 +180,57 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(result.heroAssetIDs, [4, 8])
     }
 
+    func testTenantDescriptorDecodesHostedFunnelLinks() throws {
+        let data = Data(
+            """
+            {
+              "cache_namespace": "tenant_42",
+              "slug": "north-star",
+              "studio_name": "North Star Photo",
+              "canonical_base_url": "https://north-star.mise.example",
+              "brand_accent_hex": "#2F5C45",
+              "time_zone": "America/New_York",
+              "currency_code": "USD",
+              "auth_methods": ["studio_password", "shared_access"],
+              "signup_url": "https://mise.example/pricing",
+              "manage_billing_url": "https://north-star.mise.example/admin/billing"
+            }
+            """.utf8
+        )
+
+        let descriptor = try MiseJSON.decoder().decode(TenantDescriptor.self, from: data)
+
+        XCTAssertEqual(descriptor.signupURL, URL(string: "https://mise.example/pricing"))
+        XCTAssertEqual(
+            descriptor.manageBillingURL,
+            URL(string: "https://north-star.mise.example/admin/billing")
+        )
+    }
+
+    func testTenantDescriptorFunnelLinksAreNilWhenSelfHosted() throws {
+        // A self-hosted descriptor omits the funnel links entirely — the app must
+        // decode it without error and leave both nil.
+        let data = Data(
+            """
+            {
+              "cache_namespace": "workspace_42",
+              "slug": null,
+              "studio_name": "Self Hosted Studio",
+              "canonical_base_url": "https://studio.example",
+              "brand_accent_hex": null,
+              "time_zone": "UTC",
+              "currency_code": "USD",
+              "auth_methods": ["studio_password", "shared_access"]
+            }
+            """.utf8
+        )
+
+        let descriptor = try MiseJSON.decoder().decode(TenantDescriptor.self, from: data)
+
+        XCTAssertNil(descriptor.signupURL)
+        XCTAssertNil(descriptor.manageBillingURL)
+    }
+
     func testRequestAcronymsEncodeToDocumentedKeys() throws {
         let request = ContractSignRequest(
             signerName: "Alex Rivera",

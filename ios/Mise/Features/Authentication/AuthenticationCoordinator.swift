@@ -40,6 +40,14 @@ final class AuthenticationCoordinator {
         return Self.authenticationModes(for: descriptor)
     }
 
+    /// Where a prospective studio signs up: the platform's pricing page on the
+    /// build-time platform root. Used before any tenant is resolved, so it can't
+    /// come from a tenant descriptor (ADR 0070; game-plan item 4). Opened in the
+    /// system browser — the app never hosts signup or purchase itself.
+    var platformSignupURL: URL {
+        environment.configuration.serverBaseURL.appending(path: "pricing")
+    }
+
     private let environment: AppEnvironment
     private let addressParser: WorkspaceAddressParser
     private let sharedAccessParser: SharedAccessTargetParser
