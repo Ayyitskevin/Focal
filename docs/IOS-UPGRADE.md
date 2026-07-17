@@ -3,18 +3,17 @@
 Companion to `docs/MISE-REVIEW.md`. Audit first (verified against `ios/` at
 `origin/main` @ `b641388`), then the ordered plan.
 
-Delivery update (2026-07-13): the macOS iOS gate, shared helpers, owner commercial
-spine, resource rename, and document deep links have landed. Milestone 4a backend
-task completion and booking cancellation are merged, and their native wiring is in
-draft PR #161. Atomic booking reschedule and its durable S6e client-calendar
-workflow are implemented as stacked red-light backend drafts. Its source-aware
-slot feed is implemented in the following S6f draft; native reschedule and server
-activation remain held for human review. The workflow preserves legacy
+Delivery update (2026-07-17): the macOS iOS gate, shared helpers, owner commercial
+spine, resource rename, document deep links, and native task completion and booking
+cancellation have landed. The atomic booking-reschedule command and its durable S6e
+client-calendar workflow are also merged. This recovery lands the source-aware slot
+feed that PR #163 merged into an already-merged feature branch instead of `main`.
+Native reschedule remains in a separate red-light recovery pending human review;
+the server capability remains default-off. The workflow preserves legacy
 calendar UIDs, tenant-scopes new ones, supersedes stale queued effects through the
 shared public/admin/mobile lifecycle guard, retires expired leases even while
 delivery is disarmed, audits authorized manual retry, and uses existing-only
-hosted recovery. The audit below is preserved
-as the 2026-07-12 starting snapshot.
+hosted recovery. The audit below is preserved as the 2026-07-12 starting snapshot.
 
 ## Audit — what the app actually is
 

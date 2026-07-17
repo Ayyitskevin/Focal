@@ -1,6 +1,6 @@
 # Mise for iOS — architecture and delivery plan
 
-Status: Milestones 1–3 implemented; Milestone 4a backend mutations in progress
+Status: Milestones 1–3, the M4a backend, native task/cancel, and slot feed are merged; native reschedule remains human-gated and inactive
 Design source: the "Mise Mobile" design handoff (owner + client, iPhone/iPad,
 light/dark) is the visual reference for screens, copy tone, and tokens
 Minimum OS: iOS 17 / iPadOS 17
@@ -306,17 +306,18 @@ of reusing the current bearer token.
 
 ### Milestone 4 — safe mutations
 
-- owner task completion and booking cancellation implemented and wired in the
-  draft native slice
+- owner task completion and booking cancellation are implemented and merged in
+  both the backend and native owner companion
 - atomic booking reschedule plus the S6e durable client-calendar workflow are
-  implemented in stacked red-light backend drafts: old CANCEL gates replacement
+  merged but remain default-off: old CANCEL gates replacement
   REQUEST, completed effects survive retries, and status/manual retry are
   owner-only. Persisted tenant-scoped calendar identity, canonical lifecycle
   supersession across mobile/public/admin, post-lock retry authorization/audit,
   expired-lease lifecycle recovery while delivery is disarmed, and existing-only
-  retained-tenant recovery close the crash/race boundaries;
-  native reschedule wiring and deliberate server activation remain queued after
-  human review
+  retained-tenant recovery close the crash/race boundaries
+- the source-aware availability read is merged; native reschedule wiring remains
+  in a separate human-gated recovery after its stacked PR missed `main`, and
+  deliberate server activation remains a later decision
 - CRM/project edits and proposal decisions remain planned
 - idempotency, optimistic queues where safe, audit coverage
 - native e-sign only after legal/security review

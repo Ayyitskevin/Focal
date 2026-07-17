@@ -6,6 +6,13 @@ contracts, or deploy per CLAUDE.md → reviewed draft PR only, never
 self-applied. Sources: `docs/MISE-REVIEW.md` (review), `docs/IOS-UPGRADE.md`
 (plan), `docs/SESSION-HANDOFF.md` (topology detail).
 
+> **Current status (2026-07-17):** S6a/S6b, native task/cancel wiring, and the
+> S6c/S6e booking-reschedule backend are merged. The source-aware slot feed is
+> restored by the current mainline recovery. Native reschedule was orphaned when
+> PR #164 merged into an already-merged feature branch; it remains a separate
+> red-light recovery pending human review and deliberate capability activation.
+> The decomposition below is preserved as the execution record from the review.
+
 ## Opus lane — judgment-heavy, decide before coding
 
 ### O1. AI-sidecar consolidation plan (the architecture-directive item)
