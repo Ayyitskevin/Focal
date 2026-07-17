@@ -7,6 +7,11 @@ model), ADR 0066/0067 (native auth + client delivery), ADR 0070 (distribution)
 risk class, and a lane. Grounded in the 2026-07-17 three-lane audit (iOS App Store
 readiness · tenant API/funnel · billing state); evidence cited inline as `file:line`.
 
+> **Execution has moved to [`CONDUCTOR-PLAN.md`](CONDUCTOR-PLAN.md)** (same evening):
+> it carries the live board, the binding post-incident process rules, and the
+> remaining work as tickets T1–T10. This document stays as the strategy/evidence
+> layer; do not add new work items here.
+
 ## North star
 
 Mise ships as a **hosted micro-SaaS at $20/month per studio** (instance-per-customer,
