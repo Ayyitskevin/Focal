@@ -250,10 +250,13 @@ booking's `time_zone` as its client-facing display context. The source's current
 start is omitted because the command rejects an unchanged booking. Empty
 availability is `200` with `slots: []`.
 
-This response is advisory and never reserves a slot. Google free/busy filtering
-may make it more restrictive than the transactional booking rule. The eventual
-`POST /reschedule` always re-derives database availability while holding its
-writer lock, so stale or forged submissions still return
+This response is advisory and never reserves a slot. When a source booking owns
+a mirrored Google event, the preview excludes that event only after an
+identity-aware event list reconciles with canonical Google free/busy. If the
+identity query fails or does not reconcile, the full free/busy result is kept and
+the preview may be more restrictive than the transactional booking rule. The
+eventual `POST /reschedule` always re-derives database availability while holding
+its writer lock, so stale or forged submissions still return
 `409 booking.slot_unavailable`. Responses use `Cache-Control: no-store`.
 Unknown event types or source bookings are `404`. Stable source-state conflicts
 are `409 booking.event_unavailable`, `booking.not_reschedulable`, or

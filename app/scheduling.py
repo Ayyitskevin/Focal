@@ -230,12 +230,15 @@ def slot_starts_for_day(
     day: dt.date,
     *,
     exclude_id: int | None = None,
+    exclude_google_event_id: str | None = None,
 ) -> list[dt.datetime]:
     """Return server-computed UTC slot starts for one business-local day.
 
     ``exclude_id`` is used by reschedule previews so the confirmed source is
-    released from both overlap and daily-cap accounting. This is still an
-    advisory read: ``book_in_transaction`` re-derives the open set while
+    released from both overlap and daily-cap accounting. When its mirrored
+    Google event is known, ``exclude_google_event_id`` releases that identity
+    only after the event list reconciles with canonical FreeBusy. This is still
+    an advisory read: ``book_in_transaction`` re-derives the open set while
     holding the writer lock before it commits a booking transition.
     """
     tz = _biz_tz()
@@ -245,7 +248,14 @@ def slot_starts_for_day(
         return []
     day_start = dt.datetime.combine(day, dt.time(), tz).astimezone(_UTC)
     day_end = dt.datetime.combine(day + dt.timedelta(days=1), dt.time(), tz).astimezone(_UTC)
-    busy = gcal.free_busy(day_start, day_end)
+    if exclude_google_event_id:
+        busy = gcal.free_busy_excluding_event(
+            day_start,
+            day_end,
+            exclude_google_event_id,
+        )
+    else:
+        busy = gcal.free_busy(day_start, day_end)
     con = db.connect()
     try:
         return _slots_utc(

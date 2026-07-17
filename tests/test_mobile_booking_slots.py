@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from app import config, db, mobile_auth, ratelimit, scheduling
+from app import config, db, gcal, mobile_auth, ratelimit, scheduling
 from app.main import app
 
 pytestmark = pytest.mark.unit
@@ -95,13 +95,14 @@ def _seed_booking(
     *,
     start: str = "2026-07-15 10:00:00",
     status: str = "confirmed",
+    google_event_id: str | None = None,
 ) -> int:
     parsed = dt.datetime.strptime(start, "%Y-%m-%d %H:%M:%S")
     end = (parsed + dt.timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
     return db.run(
         """INSERT INTO bookings
-           (token,event_type_id,name,email,start_utc,end_utc,tz,status)
-           VALUES (?,?,?,?,?,?,?,?)""",
+           (token,event_type_id,name,email,start_utc,end_utc,tz,status,google_event_id)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
         (
             f"bk-{uuid4().hex}",
             event_id,
@@ -111,6 +112,7 @@ def _seed_booking(
             end,
             "America/New_York",
             status,
+            google_event_id,
         ),
     )
 
@@ -204,6 +206,116 @@ def test_google_busy_interval_filters_the_advisory_feed(owner, monkeypatch):
         "2026-07-15T09:00:00Z",
         "2026-07-15T11:00:00Z",
     ]
+
+
+def test_google_source_event_is_released_without_releasing_external_busy(owner, monkeypatch):
+    event_id = _seed_event(slot_step_min=30)
+    source_id = _seed_booking(event_id, google_event_id="google-source")
+    calls: list[tuple[dt.datetime, dt.datetime, str]] = []
+
+    def excluding(start: dt.datetime, end: dt.datetime, event_id: str):
+        calls.append((start, end, event_id))
+        return [
+            (
+                dt.datetime(2026, 7, 15, 10, 30, tzinfo=dt.UTC),
+                dt.datetime(2026, 7, 15, 11, 30, tzinfo=dt.UTC),
+            )
+        ]
+
+    monkeypatch.setattr(gcal, "free_busy_excluding_event", excluding)
+
+    response = _slots(owner, event_id, "2026-07-15", source_id)
+
+    assert response.status_code == 200
+    assert [slot["start_at"] for slot in response.json()["slots"]] == [
+        "2026-07-15T09:00:00Z",
+        "2026-07-15T09:30:00Z",
+    ]
+    assert calls == [
+        (
+            dt.datetime(2026, 7, 15, 0, 0, tzinfo=dt.UTC),
+            dt.datetime(2026, 7, 16, 0, 0, tzinfo=dt.UTC),
+            "google-source",
+        )
+    ]
+
+
+def test_google_event_exclusion_requires_complete_freebusy_reconciliation(monkeypatch):
+    start = dt.datetime(2026, 7, 15, tzinfo=dt.UTC)
+    end = start + dt.timedelta(days=1)
+    source = (start + dt.timedelta(hours=10), start + dt.timedelta(hours=11))
+    external = (
+        start + dt.timedelta(hours=10, minutes=30),
+        start + dt.timedelta(hours=11, minutes=30),
+    )
+    canonical = [(source[0], external[1])]
+    monkeypatch.setattr(gcal, "free_busy", lambda *_: canonical)
+    monkeypatch.setattr(
+        gcal,
+        "_busy_events",
+        lambda *_: [
+            ("google-source", *source),
+            ("external", *external),
+        ],
+    )
+
+    assert gcal.free_busy_excluding_event(start, end, "google-source") == [external]
+
+    monkeypatch.setattr(gcal, "_busy_events", lambda *_: [("google-source", *source)])
+    assert gcal.free_busy_excluding_event(start, end, "google-source") == canonical
+
+
+def test_google_busy_event_listing_pages_and_normalizes_event_shapes(monkeypatch):
+    monkeypatch.setattr(config, "TIMEZONE", "UTC")
+    start = dt.datetime(2026, 7, 15, tzinfo=dt.UTC)
+    end = start + dt.timedelta(days=1)
+    paths: list[str] = []
+
+    def api(method: str, path: str):
+        assert method == "GET"
+        paths.append(path)
+        if "pageToken=" not in path:
+            return {
+                "items": [
+                    {
+                        "id": "timed",
+                        "start": {"dateTime": "2026-07-15T10:00:00Z"},
+                        "end": {"dateTime": "2026-07-15T11:00:00Z"},
+                    },
+                    {
+                        "id": "available",
+                        "transparency": "transparent",
+                        "start": {"dateTime": "2026-07-15T12:00:00Z"},
+                        "end": {"dateTime": "2026-07-15T13:00:00Z"},
+                    },
+                ],
+                "nextPageToken": "next token",
+            }
+        return {
+            "items": [
+                {
+                    "id": "all-day",
+                    "start": {"date": "2026-07-15"},
+                    "end": {"date": "2026-07-16"},
+                },
+                {
+                    "id": "deleted",
+                    "status": "cancelled",
+                    "start": {"dateTime": "2026-07-15T14:00:00Z"},
+                    "end": {"dateTime": "2026-07-15T15:00:00Z"},
+                },
+            ]
+        }
+
+    monkeypatch.setattr(gcal, "_api", api)
+
+    assert gcal._busy_events(start, end) == [
+        ("timed", start + dt.timedelta(hours=10), start + dt.timedelta(hours=11)),
+        ("all-day", start, end),
+    ]
+    assert len(paths) == 2
+    assert "singleEvents=true" in paths[0]
+    assert "pageToken=next+token" in paths[1]
 
 
 def test_source_and_event_state_fail_closed(owner):

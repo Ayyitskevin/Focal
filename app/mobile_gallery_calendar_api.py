@@ -929,7 +929,7 @@ _RESCHEDULE_SOURCE_BY_ID = """SELECT id, event_type_id, name, email, phone, note
                                      notion_session_id
                                 FROM bookings WHERE id=?"""
 
-_SLOT_SOURCE_BY_ID = """SELECT id, event_type_id, start_utc, status
+_SLOT_SOURCE_BY_ID = """SELECT id, event_type_id, start_utc, status, google_event_id
                            FROM bookings WHERE id=?"""
 
 
@@ -967,6 +967,7 @@ def list_event_type_slots(
         )
 
     source_start: dt.datetime | None = None
+    source_google_event_id: str | None = None
     if reschedule_booking_id is not None:
         source = db.one(_SLOT_SOURCE_BY_ID, (reschedule_booking_id,))
         if source is None:
@@ -988,6 +989,7 @@ def list_event_type_slots(
                 "Only a confirmed booking can be rescheduled.",
             )
         source_start = _sqlite_utc(str(source["start_utc"]))
+        source_google_event_id = source["google_event_id"]
 
     starts = sorted(
         set(
@@ -995,6 +997,7 @@ def list_event_type_slots(
                 event_type,
                 day,
                 exclude_id=reschedule_booking_id,
+                exclude_google_event_id=source_google_event_id,
             )
         )
     )

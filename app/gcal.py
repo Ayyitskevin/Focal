@@ -24,6 +24,7 @@ import logging
 import urllib.error
 import urllib.parse
 import urllib.request
+from zoneinfo import ZoneInfo
 
 from . import config, db, features, urls
 
@@ -250,6 +251,107 @@ def free_busy(time_min: dt.datetime, time_max: dt.datetime):
     except Exception as e:
         log.warning("freebusy failed, treating as no conflicts: %s", e)
         return None
+
+
+def _merge_busy(
+    intervals: list[tuple[dt.datetime, dt.datetime]],
+    time_min: dt.datetime,
+    time_max: dt.datetime,
+) -> list[tuple[dt.datetime, dt.datetime]]:
+    """Clip and coalesce intervals so Events.list can be compared to FreeBusy."""
+    clipped = sorted(
+        (max(start, time_min), min(end, time_max))
+        for start, end in intervals
+        if start < time_max and end > time_min and end > start
+    )
+    merged: list[tuple[dt.datetime, dt.datetime]] = []
+    for start, end in clipped:
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _event_instant(value: dict) -> dt.datetime:
+    if value.get("dateTime"):
+        return _parse_rfc3339(value["dateTime"])
+    day = dt.date.fromisoformat(value["date"])
+    return dt.datetime.combine(day, dt.time(), ZoneInfo(config.TIMEZONE)).astimezone(_UTC)
+
+
+def _busy_events(
+    time_min: dt.datetime,
+    time_max: dt.datetime,
+) -> list[tuple[str, dt.datetime, dt.datetime]] | None:
+    """Blocking event identities for a range, or None when the list is incomplete."""
+    params = {
+        "timeMin": _rfc3339(time_min),
+        "timeMax": _rfc3339(time_max),
+        "timeZone": config.TIMEZONE,
+        "singleEvents": "true",
+        "showDeleted": "false",
+        "maxResults": "2500",
+        "fields": "items(id,status,transparency,start,end),nextPageToken",
+    }
+    events: list[tuple[str, dt.datetime, dt.datetime]] = []
+    seen_tokens: set[str] = set()
+    try:
+        for _ in range(20):
+            path = f"/calendars/{_cal()}/events?{urllib.parse.urlencode(params)}"
+            page = _api("GET", path)
+            for item in page.get("items", []):
+                if item.get("status") == "cancelled" or item.get("transparency") == "transparent":
+                    continue
+                event_id = item.get("id")
+                if not event_id or not item.get("start") or not item.get("end"):
+                    continue
+                start = _event_instant(item["start"])
+                end = _event_instant(item["end"])
+                if end > start:
+                    events.append((str(event_id), start, end))
+            token = page.get("nextPageToken")
+            if not token:
+                return events
+            token = str(token)
+            if token in seen_tokens:
+                raise GcalError("events list repeated a page token")
+            seen_tokens.add(token)
+            params["pageToken"] = token
+        raise GcalError("events list exceeded 20 pages")
+    except Exception as e:
+        log.warning("calendar event list failed, retaining full freebusy: %s", e)
+        return None
+
+
+def free_busy_excluding_event(
+    time_min: dt.datetime,
+    time_max: dt.datetime,
+    event_id: str,
+) -> list[tuple[dt.datetime, dt.datetime]] | None:
+    """Return canonical busy time without one identified mirrored booking event.
+
+    Events.list supplies identity while FreeBusy remains the completeness oracle.
+    The exclusion is applied only when both APIs describe the same busy union; an
+    incomplete or semantically different event list keeps the canonical FreeBusy
+    result intact, conservatively hiding slots instead of exposing a conflict.
+    """
+    busy = free_busy(time_min, time_max)
+    if busy is None or not event_id:
+        return busy
+    events = _busy_events(time_min, time_max)
+    if events is None:
+        return busy
+    canonical = _merge_busy(busy, time_min, time_max)
+    listed = _merge_busy([(start, end) for _, start, end in events], time_min, time_max)
+    if listed != canonical:
+        log.warning("calendar event list did not reconcile with freebusy; retaining full freebusy")
+        return busy
+    return _merge_busy(
+        [(start, end) for candidate_id, start, end in events if candidate_id != event_id],
+        time_min,
+        time_max,
+    )
 
 
 # ── event sync (booking lifecycle) ───────────────────────────────────────────
