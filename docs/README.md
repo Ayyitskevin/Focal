@@ -16,7 +16,8 @@ below describe *intended* hosted state, not something currently serving customer
 - [`MISE-SOLO-STUDIO-OS-RUNBOOK.md`](MISE-SOLO-STUDIO-OS-RUNBOOK.md) — operator runbook for it.
 
 ## Launch & hosting plans  _(status: intent — not deployed)_
-- [`APP-STORE-GAMEPLAN.md`](APP-STORE-GAMEPLAN.md) — the App Store / micro-SaaS execution plan (phased, fleet-executable; decision base ADR 0070).
+- [`CONDUCTOR-PLAN.md`](CONDUCTOR-PLAN.md) — **start here for execution**: mission review, binding process rules from the 2026-07-17 red-main postmortem, live board, and ticket-by-ticket work orders (T1–T10) for the Opus/Sonnet/Kevin lanes.
+- [`APP-STORE-GAMEPLAN.md`](APP-STORE-GAMEPLAN.md) — the strategy layer under the conductor plan: phased App Store / micro-SaaS plan with audit evidence (decision base ADR 0070).
 - [`GO-LIVE.md`](GO-LIVE.md) — day-of go-live sequence.
 - [`BETA-LAUNCH.md`](BETA-LAUNCH.md) — hosted beta launch plan.
 - [`LAUNCH-KIT.md`](LAUNCH-KIT.md) · [`LAUNCH-PLAYBOOK.md`](LAUNCH-PLAYBOOK.md) — $20 hosted launch assets & phases.
