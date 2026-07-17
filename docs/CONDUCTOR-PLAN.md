@@ -99,9 +99,9 @@ failure, which read as "everything is failing." Rules to prevent recurrence:
      route: #173 was earlier but only handled Home's 402; #174 covered every
      `ResourceView`, so #173 was closed with the reason recorded and #174 became
      authoritative — keeping #173's sticky-retry idea.)
-  4. **Board updates happen at merge, in your ticket's own row** (§3) — never on a
-     feature branch pre-merge (invisible on `main` until then) and never on another
-     ticket's row. This PR touches only §2 for exactly that reason.
+  4. **At merge, add or update a dedicated `Tn` board row** (§3); touch no other
+     ticket's row. Do this only at merge — a feature-branch board edit is invisible
+     on `main` until then. (This PR touches only §2 for exactly that reason.)
 
 ## 3. Board (as of 2026-07-17 evening)
 
