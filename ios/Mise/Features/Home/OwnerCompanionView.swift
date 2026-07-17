@@ -101,6 +101,10 @@ struct OwnerCompanionView: View {
         ))
     }
 
+    private var accountLinks: StudioAccountLinks {
+        StudioAccountLinks(workspaceOrigin: session.workspace.apiBaseURL)
+    }
+
     var body: some View {
         if horizontalSizeClass == .regular {
             NavigationSplitView {
@@ -142,6 +146,17 @@ struct OwnerCompanionView: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
                             LabeledContent("Studio", value: session.workspace.displayName)
+                            // Export/delete stay password-confirmed web flows
+                            // (ADR 0051); the app links out so a signed-in owner
+                            // can always reach account deletion from inside it.
+                            Section {
+                                Link(destination: accountLinks.exportStudio) {
+                                    Label("Export studio data", systemImage: "arrow.down.doc")
+                                }
+                                Link(destination: accountLinks.deleteStudio) {
+                                    Label("Delete studio account", systemImage: "trash")
+                                }
+                            }
                             Button("Sign out", role: .destructive) {
                                 Task { await signOut() }
                             }

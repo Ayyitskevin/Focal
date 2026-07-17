@@ -24,6 +24,7 @@ below describe *intended* hosted state, not something currently serving customer
 - [`RELEASE-NOTES.md`](RELEASE-NOTES.md) — v1.0-beta release notes.
 - [`SUPPORT-PLAYBOOK.md`](SUPPORT-PLAYBOOK.md) — beta support playbook.
 - [`IOS-UPGRADE.md`](IOS-UPGRADE.md) — iOS upgrade plan.
+- [`APP-STORE-SUBMISSION.md`](APP-STORE-SUBMISSION.md) — App Store submission pack (privacy labels, reviewer access, archive checklist).
 
 ## Fleet / consolidation planning
 - [`MISE-CONSOLIDATION-ROADMAP.md`](MISE-CONSOLIDATION-ROADMAP.md) · [`REPO-CONSOLIDATION-MATRIX.md`](REPO-CONSOLIDATION-MATRIX.md) — how Mise consolidates with sibling repos.
