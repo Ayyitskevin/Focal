@@ -229,4 +229,11 @@ struct TenantDescriptor: Codable, Hashable, Sendable {
     let timeZone: String
     let currencyCode: String
     let authMethods: [String]
+    /// Hosted-only funnel links (null when self-hosted): where a new studio
+    /// signs up, and where this studio's owner manages the subscription. Opened
+    /// in the system browser — the app never renders a purchase UI (ADR 0070).
+    /// Optional, so the synthesized decoder maps them if present and leaves them
+    /// nil otherwise (the MiseJSON decoder handles the `_url` → `URL` mapping).
+    let signupURL: URL?
+    let manageBillingURL: URL?
 }

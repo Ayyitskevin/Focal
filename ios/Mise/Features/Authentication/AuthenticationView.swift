@@ -125,6 +125,15 @@ struct AuthenticationView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
+
+            // New to Mise? The app never hosts signup — it opens the platform's
+            // pricing page in the browser (ADR 0070; game-plan item 4).
+            Link(destination: model.platformSignupURL) {
+                Text("New to Mise? Start a studio")
+                    .font(.footnote.weight(.medium))
+                    .frame(maxWidth: .infinity, minHeight: 32)
+            }
+            .accessibilityHint("Opens the Mise pricing page to create a new studio")
         }
         .onAppear {
             if model.workspaceInput.isEmpty {
