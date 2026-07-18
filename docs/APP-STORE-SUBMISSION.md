@@ -58,7 +58,7 @@ server-authoritative, password-confirmed web flows (ADR 0051:
 `/admin/export-studio`, `/admin/delete-studio`). Deletion cancels billing,
 tombstones the slug, and trash-parks data per ADR 0051.
 
-## Reviewer access (game-plan item 12 — required before submission)
+## Reviewer access (Conductor T3; game-plan item 12 is superseded)
 
 App Review will demand working credentials for a sign-in-only app (Guideline 2.1).
 

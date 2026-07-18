@@ -17,7 +17,7 @@ below describe *intended* hosted state, not something currently serving customer
 ## Product
 - [`MISE-SOLO-STUDIO-OS.md`](MISE-SOLO-STUDIO-OS.md) — the "solo studio OS" product concept.
 - [`MISE-SOLO-STUDIO-OS-RUNBOOK.md`](MISE-SOLO-STUDIO-OS-RUNBOOK.md) — operator runbook for it.
-- [`NICHE-STORY-DECISION.md`](NICHE-STORY-DECISION.md) — T10 decision packet comparing wedding-first, F&B-first, and neutral launch stories; Kevin's selection unblocks the reviewer demo and store copy.
+- [`NICHE-STORY-DECISION.md`](NICHE-STORY-DECISION.md) — T10 decision packet comparing wedding-first, F&B-first, and neutral launch stories; Kevin's selection feeds reviewer-demo content and store copy, while [issue #185](https://github.com/Ayyitskevin/mise/issues/185) independently holds T3's operator identity and lifecycle design.
 
 ## Launch & hosting plans  _(status: intent — not deployed)_
 - [`CONDUCTOR-PLAN.md`](CONDUCTOR-PLAN.md) — **start here for execution**: mission review, binding process rules from the 2026-07-17 red-main postmortem, live board, and ticket-by-ticket work orders (T1–T10) for the Opus/Sonnet/Kevin lanes.
