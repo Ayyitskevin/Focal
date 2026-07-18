@@ -1,44 +1,27 @@
 import SwiftUI
 
-/// Client Bookings tab: the client's own sessions. Only capabilities that
-/// resolve to a real client (workspace, portal) have bookings to show;
-/// gallery and single-document links get a gentle explanation instead.
+/// Client Bookings tab: the client's own sessions. ClientAccessPolicy gates
+/// this view before it reaches the hierarchy, so only workspace and portal
+/// principals can attach its ResourceView and start loading.
 struct ClientBookingsView: View {
     let model: ResourceModel<[Booking]>
-    let accessKind: PrincipalKind
     let timeZoneIdentifier: String
 
-    private var hasBookingAuthority: Bool {
-        accessKind == .workspaceGuest || accessKind == .portalGuest
-    }
-
     var body: some View {
-        Group {
-            if hasBookingAuthority {
-                ResourceView(
-                    model: model,
-                    isEmpty: { $0.isEmpty },
-                    content: list,
-                    empty: {
-                        ContentUnavailableView(
-                            "No sessions booked",
-                            systemImage: "calendar",
-                            description: Text(
-                                "When the studio books your next session, it will appear here."
-                            )
-                        )
-                    }
-                )
-            } else {
+        ResourceView(
+            model: model,
+            isEmpty: { $0.isEmpty },
+            content: list,
+            empty: {
                 ContentUnavailableView(
-                    "Bookings aren’t part of this link",
-                    systemImage: "calendar.badge.exclamationmark",
+                    "No sessions booked",
+                    systemImage: "calendar",
                     description: Text(
-                        "This access link covers your \(accessKind == .galleryGuest ? "gallery" : "document"). Ask the studio for your project workspace link to see bookings."
+                        "When the studio books your next session, it will appear here."
                     )
                 )
             }
-        }
+        )
         .navigationTitle("Bookings")
     }
 
