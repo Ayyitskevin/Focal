@@ -40,13 +40,12 @@ already fits), with the commercial spine positioned as "for studios that also
 shoot commercial." Ticket T10 packages this as a decision for Kevin; nothing else
 blocks on it except final store copy and demo-studio seed content.
 
-**Where we actually are.** The hard engineering is done and green: multi-tenant
-`/api/v1` with tenant-bound sessions, the complete revenue path (trial → Stripe →
-dunning → cancel/export/delete), the owner + client iOS apps with the native
-command surface, the packaging layer (icon, privacy manifest, account deletion,
-submission pack), and the funnel links end-to-end. Launch is blocked on **ops and
-human decisions, not code** — accounts, a deploy, signing identity, a demo studio,
-and store copy.
+**Where we actually are.** The previously scoped core and packaging work is green:
+multi-tenant `/api/v1` with tenant-bound sessions, the revenue path, owner + client
+iOS surfaces, packaging, and funnel links. Launch is not an ops-only remainder.
+T3 now requires a human-approved reviewer-demo design and dedicated replacement
+code after issue #185 proved the merged provisioner unsafe; hosted acceptance,
+signing, store decisions, and operations remain separate gates.
 
 ## 2. Process rules (from the 2026-07-17 red-main incident — binding)
 
@@ -243,9 +242,12 @@ graph LR
   T6 --> T7 --> T8 --> T9
 ```
 
-T1, T2, T10 are startable now (T1 the moment #171 merges). T3–T5 are pre-submission
-work that needs no deploy. T6–T9 are the human runway. Nothing here requires the
-booking-workflow flag; native reschedule ships dormant and activates after T2.
+T1, T2, and T10 are startable now (T1 the moment #171 merges). T4–T5 are
+pre-submission documentation work. T3 may not proceed past design until Kevin
+approves its red-path replacement; its final acceptance depends on the hosted
+owner/API and TestFlight evidence supplied by the T6–T8 runway. Nothing here
+requires the booking-workflow flag; native reschedule ships dormant and activates
+after T2.
 
 ## 6. Definition of done — v1.0 on the App Store
 

@@ -1,7 +1,9 @@
 # Niche story decision packet
 
-> **Status:** Kevin decision required · **Prepared:** 2026-07-17 · **Unblocks:**
-> Conductor T3 (reviewer demo) and T4 (store metadata + screenshots)
+> **Status:** Kevin decision required · **Prepared:** 2026-07-17 · **Feeds:**
+> Conductor T3 (reviewer-demo content) and T4 (store metadata + screenshots).
+> T3 remains independently held by
+> [issue #185](https://github.com/Ayyitskevin/mise/issues/185).
 
 This decision selects Mise's **public acquisition story**. It does not remove
 features or reverse the commercial-spine ADRs.
@@ -63,10 +65,13 @@ and [CDC marriage trends](https://www.cdc.gov/nchs/data/dvs/marriage-divorce/nat
 | **F&B-first** | Best fit with companies, PO/net terms, usage rights, AR chase, closeout, and the existing tenant site. Debt: contradicts the current repo identity and narrows the first-run story; the F&B preset is less complete today. | Lead with company CRM, content-day production, licensing, retainers, AR, and delivery closeout. Subtitle candidate: **“Commercial Photo Studio OS.”** Remove wedding-first claims rather than leaving a mixed lead. | Seed one restaurant/company and content day with accepted paperwork, usage-aware invoice, booking, tasks, deliverables, AR/closeout state, gallery, and portal. Replace one generic shot with Commercial/AR or closeout. |
 | **Neutral solo studio** | Broadest promise and least niche commitment. Debt: weakest differentiation, understates the specialized code, and has no coherent neutral demo preset today. | Lead with CRM, galleries, booking, invoices, and portals. Subtitle candidate: **“CRM & Galleries for Studios.”** Remove F&B/wedding pairings; “neutral” cannot mean alternating between two niches. | Create one new brand-portrait story with a single project through every screen. Do not seed both existing presets and call that neutral. Use the same six functional shots as wedding-first with generic copy. |
 
-Whichever option wins, T3 must seed more than `app/saas_demo.py` does today: it
-needs bookings, tasks, and actual gallery assets. Reuse
-`bootstrap.ensure_public_showcase` as a mechanism, not as literal content; its
-current tags, case study, and testimonials are F&B-specific.
+Whichever option wins, the T3 replacement needs bookings, tasks, and actual
+gallery assets, all with stable demo-owned identities. **Do not reuse
+`bootstrap.ensure_public_showcase` for that convergence:** it can relabel unowned
+ready assets and the first gallery, which violates T3's preserve-manual-data
+boundary. [Issue #185](https://github.com/Ayyitskevin/mise/issues/185) keeps the
+seed mechanism intentionally unspecified until Kevin approves the operator-only
+identity and owned-record design.
 
 The downstream marketing pass should reconcile the root `README`,
 `templates/saas/{home,demo,pricing}.html`, `docs/{LAUNCH-KIT,BETA-LAUNCH}.md`,

@@ -43,8 +43,10 @@ until they cancel. Nothing in that sentence requires a human operator in the loo
 
 ## Current verified state (2026-07-17 audit)
 
-**The hard product engineering is done; the App Store packaging layer has not been
-started, and launch is blocked on ops, not code.**
+**The 2026-07-17 audit found the core product engineering green, but launch is not
+an ops-only remainder. Later review identified human-gated design and code holds,
+most immediately the reviewer-demo boundary in issue #185, alongside packaging and
+operations. The live Conductor plan and issue tracker override this dated snapshot.**
 
 What the audit **confirmed working** (merged to `main`):
 
@@ -151,12 +153,17 @@ Kevin (human-only). Risk: 🟢 green-light · 🔴 red-light (PR + human merge).
     `com.ayyitskevin.mise`), `DEVELOPMENT_TEAM` in `project.yml`, version bump
     (G4). Then one archive on a Mac to validate signing end-to-end. Fleet
     executes the `project.yml` edits once decided.
-12. **Reviewer demo studio.** [Opus spec, Kevin provisions] 🔴 (touches hosted
-    provisioning). A comped long-lived reviewer tenant (`plan_status='active'`,
-    e.g. `review.<root>`) seeded with both `saas_demo` presets; owner + gallery/
-    portal credentials documented in `docs/APP-STORE-SUBMISSION.md` review notes
-    (G6). Done: fresh reviewer signs in and sees a populated studio that never
-    trial-expires. Verify: scripted seed run against staging.
+12. **Reviewer demo studio — SUPERSEDED / HOLD.** [Kevin designs and merges] 🔴
+    **Do not provision an ordinary paid/trial tenant and do not run
+    `scripts/seed_demo_tenant.py` against hosted state.** Issue
+    [#185](https://github.com/Ayyitskevin/mise/issues/185) proves the former design
+    could adopt public-signup state, distort billing metrics, delete durable
+    workflow rows, and rotate live sessions. Conductor T3 is the current authority:
+    its replacement needs durable operator-only identity, complete billing and
+    lifecycle exclusion, owned-record convergence, stable credentials, hosted API
+    acceptance, and manual TestFlight evidence. Until Kevin approves that design
+    and its dedicated PR, no reviewer account exists and App Store submission stays
+    held.
 13. **Guideline verification pass.** [Opus] 🟢 docs-only. Verify CURRENT App Store
     Review Guidelines for: web-subscription companion apps (3.1.x multiplatform
     services), account deletion (5.1.1(v)), demo access (2.1), privacy labels.
@@ -190,8 +197,9 @@ Kevin (human-only). Risk: 🟢 green-light · 🔴 red-light (PR + human merge).
 
 ## Sequencing
 
-- Phases 1–3 are **fleet-executable today**, in parallel, with no hosted deploy:
-  everything verifies via the test suite + the iOS CI gate.
+- Most Phase 1–3 implementation can proceed without a hosted deploy. Item 12 is
+  different: design and local tests may advance, but its acceptance requires the
+  human-approved T3 replacement plus hosted owner/API and TestFlight evidence.
 - Phase 2 item 3 precedes items 4–5 (they consume its URLs, though both can fall
   back to the build-time platform root).
 - Phase 4 is strictly ordered and human-gated; item 14 unblocks all of it.
