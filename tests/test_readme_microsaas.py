@@ -1,29 +1,76 @@
+import re
 from pathlib import Path
 
 
-def test_readme_keeps_flat_hosted_positioning():
+def test_readme_keeps_truthful_pre_release_positioning():
     text = Path("README.md").read_text()
 
     required = [
-        "Exactly **$20/month**",
-        "No paid tiers",
-        "14-day trial",
-        "python scripts/hosted-preflight.py",
-        "/admin/saas",
+        "exploratory and pre-release",
+        "not deployed",
+        "no live users",
+        "capable companion",
+        "one flat **$20/month** plan",
+        "product hypothesis",
+        "scripts/reviewer_demo.py",
         "/demo",
-        "docs/LAUNCH-KIT.md",
-        "docs/BETA-LAUNCH.md",
-        "scripts/launch-hosted-production.sh",
-        "utm_source",
-        "operator growth analytics",
-        "trial nudge",
-        "/admin/saas/export.csv",
-        "MISE_SAAS_ANNOUNCEMENT",
-        "MISE_SAAS_MODE=true",
-        "2000",
+        "AGPL-3.0-only",
+        "issues/182",
+        "issues/185",
     ]
     for phrase in required:
         assert phrase in text
+    assert "iOS-first client & studio management" not in text
+
+
+def test_reviewer_and_governance_docs_are_discoverable():
+    readme = Path("README.md").read_text()
+    docs_index = Path("docs/README.md").read_text()
+
+    for path in (
+        "LICENSE",
+        "CONTRIBUTING.md",
+        "SECURITY.md",
+        "docs/ARCHITECTURE.md",
+        "docs/REVIEWER-GUIDE.md",
+        "docs/AI-DEVELOPMENT.md",
+    ):
+        assert Path(path).is_file()
+
+    assert "GNU AFFERO GENERAL PUBLIC LICENSE" in Path("LICENSE").read_text()
+    assert "REVIEWER-GUIDE.md" in readme
+    assert "AI-DEVELOPMENT.md" in readme
+    assert "ARCHITECTURE.md" in docs_index
+
+
+def test_readme_local_links_resolve():
+    text = Path("README.md").read_text()
+    targets = re.findall(r"!?\[[^]]*\]\(([^)]+)\)", text)
+
+    for raw_target in targets:
+        target = raw_target.split("#", 1)[0]
+        if not target or target.startswith(("http://", "https://", "mailto:")):
+            continue
+        assert Path(target).exists(), f"README local link does not exist: {raw_target}"
+
+
+def test_peer_review_docs_local_links_resolve():
+    documents = (
+        Path("CONTRIBUTING.md"),
+        Path("SECURITY.md"),
+        Path("docs/ARCHITECTURE.md"),
+        Path("docs/REVIEWER-GUIDE.md"),
+        Path("docs/AI-DEVELOPMENT.md"),
+    )
+
+    for document in documents:
+        targets = re.findall(r"!?\[[^]]*\]\(([^)]+)\)", document.read_text())
+        for raw_target in targets:
+            target = raw_target.split("#", 1)[0]
+            if not target or target.startswith(("http://", "https://", "mailto:")):
+                continue
+            resolved = document.parent / target
+            assert resolved.exists(), f"{document} local link does not exist: {raw_target}"
 
 
 def test_launch_kit_keeps_public_launch_assets():

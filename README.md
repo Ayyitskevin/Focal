@@ -1,242 +1,166 @@
 # Mise
 
-A pocket-sized studio OS for wedding photographers. iOS-first client & studio management: CRM pipeline, proposals-to-payments, gallery proofing, and booking — in one warm, boutique-grade app.
+[![Python CI](https://github.com/Ayyitskevin/mise/actions/workflows/ci.yml/badge.svg)](https://github.com/Ayyitskevin/mise/actions/workflows/ci.yml)
+[![iOS](https://github.com/Ayyitskevin/mise/actions/workflows/ios.yml/badge.svg)](https://github.com/Ayyitskevin/mise/actions/workflows/ios.yml)
+[![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0--only-2f634d.svg)](LICENSE)
 
-> **Status: product-incubation sandbox — not deployed, no live users.** This repo is an
-> AI-agent exploration of the Mise product. The live photography site is a **separate**
-> repo, [`Ayyitskevin/kleephotography`](https://github.com/Ayyitskevin/kleephotography).
+![Mise — hosted client studio for solo creatives](static/og-card.png)
 
-Mise combines the parts solo creatives usually stitch together from Pixieset,
-HoneyBook, Dubsado, ShootProof, and spreadsheets:
+Mise is an open-source product-incubation sandbox for a solo photography studio:
+a FastAPI + HTMX web application, an isolated hosted-SaaS mode, and a native
+SwiftUI companion. The implemented web product brings CRM, galleries, booking,
+client paperwork, payments, and workflow reminders into one deliberately small
+system.
 
-- PIN-gated galleries, favorites, comments, proofing, and downloads
-- proposals, contracts, Stripe invoices, and receipts
-- client portals, package intake pages, lead forms, and booking paperwork
-- Studio OS automation for reminders, tasks, packages, and project timelines
-- F&B, wedding, and portrait starter presets so the first login is not blank
+> **Project status:** exploratory and pre-release. This repository is not deployed
+> and has no live users. The iOS app is a capable companion, not yet the complete
+> “pocket studio OS” described by the long-term product direction. Launch and App
+> Store claims remain held until the open correctness, policy, and product-scope
+> issues are resolved.
 
-The hosted promise is simple:
+## What exists today
 
-> Professional client studio, hosted and maintained for you, only $20/month.
+| Surface | Current reality |
+| --- | --- |
+| Web studio | Implemented modular monolith with CRM, galleries, proposals, contracts, invoices, booking, automation, and public client surfaces. |
+| Self-hosted mode | Default runtime: one studio, one SQLite database, local media, optional integrations. |
+| Hosted mode | Implemented tenant routing, per-studio SQLite/media isolation, trials, Stripe subscription state, operator tooling, and lifecycle jobs; not deployed. |
+| iOS | Native owner/client companion with tenant discovery, scoped auth, read-heavy studio views, gallery/client flows, and a narrow set of guarded commands. It is not full web parity. |
+| AI features | Optional sidecar-backed capabilities, dormant unless explicitly configured, with human-review requirements at the adapter boundary. |
+| Distribution | No public service, TestFlight release, or App Store submission. The launch tracker records the current holds. |
 
-Exactly **$20/month**, every feature included. **No paid tiers**, no add-ons, and no
-per-seat upsell — one flat price, and every studio gets the whole toolkit.
+The hosted concept is one flat **$20/month** plan with no feature tiers. That is a
+product hypothesis in this sandbox, not a currently available commercial offer.
 
-## Why $20 Is A Bargain
+## Review Mise safely in ten minutes
 
-| What solo creatives need | Usually bought as | Included in Mise |
+The reviewer launcher exposes the public product tour using a disposable temporary
+data directory. It ignores every inherited `MISE_*` variable, loads no local
+`.env`, binds only to loopback, and deletes its state when stopped.
+
+```bash
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt -r requirements-dev.txt
+.venv/bin/python scripts/reviewer_demo.py
+```
+
+Open [http://localhost:8400/demo](http://localhost:8400/demo), then visit
+`/pricing` and `/healthz`. Press `Ctrl+C` to stop and remove the temporary state.
+
+This is a static, unauthenticated product tour. It does **not** create a tenant,
+exercise Stripe, contact external services, or provision App Review credentials.
+Do not run `scripts/seed_demo_tenant.py`; [issue #185](https://github.com/Ayyitskevin/mise/issues/185)
+documents why that separate hosted-state provisioner is held.
+
+| Onboarding | Gallery | Invoice |
 | --- | --- | --- |
-| Private galleries and proofing | gallery delivery platform | yes |
-| Proposals, contracts, invoices | client CRM | yes |
-| Package inquiry pages | website plugin/form stack | yes |
-| Workflow reminders | automation tool or spreadsheet | yes |
-| Hosted maintenance | developer/server time | yes |
-| Niche starting point | paid templates/course | yes |
+| ![Mise onboarding](static/demo/onboarding.webp) | ![Mise gallery](static/demo/gallery.webp) | ![Mise invoice](static/demo/invoice.webp) |
 
-One customer can run the full inquiry -> booking -> paperwork -> payment ->
-delivery loop without graduating into a more expensive tier.
+For a structured code tour and review prompts, use the
+[reviewer guide](docs/REVIEWER-GUIDE.md).
 
-## Quickstart (Self-Hosted)
+## Architecture at a glance
 
-From a fresh clone to a running studio in three commands:
+Mise is a modular monolith with two explicit delivery boundaries:
+
+- browser routes use signed, tenant-bound cookies and server-rendered HTMX;
+- `/api/v1` uses scoped opaque sessions for the native app and never reuses the
+  browser or machine-token boundary.
+
+Hosted requests resolve the tenant from the host before entering a tenant runtime.
+Each studio receives its own SQLite database and media root; the platform control
+database stores tenant, domain, and subscription metadata. Optional AI/media
+workers sit behind narrow HTTP adapters and remain disabled without configuration.
+
+See [Architecture](docs/ARCHITECTURE.md), the
+[iOS architecture](docs/IOS-ARCHITECTURE.md), the
+[mobile API contract](docs/IOS-API-V1.md), and the 70 checked-in
+[architecture decisions](docs/adr/).
+
+## Run the self-hosted web app
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env   # set MISE_SECRET_KEY and MISE_ADMIN_PASSWORD
+cp .env.example .env
+# Set MISE_SECRET_KEY and MISE_ADMIN_PASSWORD in .env.
 python -m uvicorn app.main:app --port 8400
 ```
 
-Open `http://localhost:8400/admin/login` (a LAN IP or server address works
-too) and sign in with your `MISE_ADMIN_PASSWORD`. Then your first gallery:
+Open `http://localhost:8400/admin/login`. Self-hosted mode is the default and uses
+one SQLite database under `MISE_DATA_DIR`. Optional Stripe, email, calendar,
+Notion, and AI sidecars stay dormant until their environment variables are set.
 
-1. **Studio → Automation** — install a niche preset (F&B, wedding, or
-   portrait) so packages, lead forms, and workflow reminders aren't blank.
-2. **Galleries → New gallery** — name it, upload photos (thumbnails and web
-   sizes derive automatically).
-3. **Publish with a 4-digit PIN** and send the client their `/g/<slug>` link
-   and PIN. That's the whole delivery loop.
-
-For production, run the Docker stack (`docker compose up --build`) — it adds
-Caddy TLS ingress and daily backups; set `MISE_BASE_URL` to your public URL so
-emailed links and copy-link buttons carry the right address. Full deploy notes:
-[docs/SAAS-DEPLOYMENT.md](docs/SAAS-DEPLOYMENT.md) and the operator runbook.
-
-## Hosted SaaS Mode
-
-Hosted mode is dormant by default. Self-hosted installs keep the original
-single-database behavior unless `MISE_SAAS_MODE=true`.
-
-Hosted mode adds:
-
-- tenant resolution by subdomain or verified custom domain
-- isolated SQLite database and media tree per studio
-- 14-day trial and Stripe subscription billing for the flat $20 plan
-- root-host operator console at `/admin/saas`
-- public demo tour at `/demo`
-- launch readiness checks with `python scripts/hosted-preflight.py`
-- onboarding checklist, demo data, and niche preset packs
-- signup source tracking from tagged trial links such as
-  `/pricing?utm_source=newsletter&utm_campaign=beta`
-- operator growth analytics for activation, active rate, launch score, trial
-  risk, and acquisition sources
-- manual trial nudge drafts for setup help, trial rescue, conversion, and
-  billing recovery follow-up
-- platform lifecycle email: trial reminder, one-shot win-back after a lapse,
-  and dunning (decline notice + grace-ending warning) — all one-shot, all
-  owner-facing, nothing client-facing
-- a weekly operator digest email with the console's headline (sent to
-  `MISE_SAAS_SUPPORT_EMAIL`, falling back to the Gmail sender)
-- in-app Help & feedback per studio, landing in an operator triage queue
-  (new/done) alongside exit reasons captured on studio deletion
-- waitlist capture on the invite gate, with its own CSV
-- tenant CSV export from `/admin/saas/export.csv` and waitlist CSV from
-  `/admin/saas/waitlist.csv`
-- optional tenant-admin announcement banner with `MISE_SAAS_ANNOUNCEMENT`
-
-Production billing uses:
-
-- `MISE_STRIPE_SECRET_KEY`
-- `MISE_SAAS_STRIPE_PRICE_ID` for the exactly $20/month recurring Stripe Price
-- `MISE_SAAS_STRIPE_WEBHOOK_SECRET` for `/webhooks/stripe/saas`
-
-The price is locked in code at `2000` cents. Do not make it configurable unless
-the product model changes.
-
-## One-Command Local SaaS Launch
-
-```bash
-cp .env.example .env
-# edit .env with hosted values
-docker compose up --build
-```
-
-Minimum hosted env:
-
-```bash
-MISE_SECRET_KEY=change-me
-MISE_ADMIN_PASSWORD=change-me
-MISE_BASE_URL=https://mise.example.com
-MISE_COOKIE_SECURE=true
-MISE_SAAS_MODE=true
-MISE_SAAS_ROOT_DOMAIN=mise.example.com
-MISE_SAAS_MARKETING_HOST=mise.example.com
-MISE_SAAS_CONTROL_DB_PATH=/data/saas-control.db
-MISE_SAAS_TENANT_DATA_DIR=/data/tenants
-MISE_SAAS_TRIAL_DAYS=14
-MISE_STRIPE_SECRET_KEY=sk_live_xxx
-MISE_SAAS_STRIPE_PRICE_ID=price_xxx
-MISE_SAAS_STRIPE_WEBHOOK_SECRET=whsec_xxx
-MISE_SAAS_SUPPORT_EMAIL=you@example.com  # weekly digest + public support contact
-# Optional: the Stripe API version the code is pinned to. Defaults to the tested
-# contract, so a stripe-python upgrade can't silently change API behavior. Bump it
-# deliberately (after a Stripe test-mode rehearsal), not as a side effect of a
-# dependency update.
-# MISE_STRIPE_API_VERSION=2026-05-27.dahlia
-```
-
-Run readiness checks before launch:
-
-```bash
-python scripts/hosted-preflight.py
-python scripts/smoke-saas-hosted.py
-```
-
-For a trial user the first ten minutes look like: open `/pricing`, start the
-14-day trial (invite code required while the beta gate is on), get the welcome
-email with your studio's own subdomain, sign in, and follow the onboarding
-checklist — install a preset, publish a lead path, add a project, publish a
-delivery surface. The checklist is derived from real studio state, so it
-completes itself as you work.
-
-Detailed deployment notes live in [docs/SAAS-DEPLOYMENT.md](docs/SAAS-DEPLOYMENT.md).
-Launch copy, the 5-post X thread, and the 7-day launch checklist live in
-[docs/LAUNCH-KIT.md](docs/LAUNCH-KIT.md).
-The beta invite email and security checklist live in
-[docs/BETA-LAUNCH.md](docs/BETA-LAUNCH.md).
-
-## Operator Workflow
-
-On the root hosted domain, `/admin/login` uses `MISE_ADMIN_PASSWORD` and opens
-`/admin/saas`. Tenant subdomains still use each tenant's hashed admin password.
-
-The operator console shows:
-
-- tenant count, active/trialing/support counts, and readiness state
-- the beta gate badge: invite code armed vs public open signup
-- acquisition source breakdown from `utm_source`, `utm_campaign`, and referrer
-- launch score and at-risk trial counts for retention follow-up (including
-  the login pulse — studios that have gone quiet are flagged)
-- activation rate, active rate, average launch score, and top source
-- trial nudge mail drafts for high-leverage retention follow-up
-- the studio feedback triage queue (new/done) and the waitlist panel
-- CSV export for beta cohorts, revenue, launch health, and acquisition source
-- per-tenant billing status and Stripe IDs
-- custom-domain pending/verified state
-- isolated data path and tenant DB presence
-- manual support actions: billing status, domain verification, trial
-  extension (1–30 days), and per-studio operator notes
-
-This keeps support simple enough for one founder.
-
-Tenant admins can also see a lightweight hosted announcement banner when
-`MISE_SAAS_ANNOUNCEMENT` is set. Use it for launch notes, new presets, or beta
-office hours. It only appears inside tenant admin, never as a public gallery or
-package-page footer.
-
-## Self-Hosted Mode
-
-The original self-hosted product remains the default:
-
-- `MISE_SAAS_MODE=false`
-- one SQLite database at `MISE_DATA_DIR/mise.db`
-- admin password from `MISE_ADMIN_PASSWORD`
-- no hosted billing or tenant routing
-
-Do not deploy SaaS conversion work to `flow:/opt/mise` or
-`kleephotography.com` unless explicitly requested.
+For a containerized local deployment, use `docker compose up --build`. The hosted
+deployment design is documented in [docs/SAAS-DEPLOYMENT.md](docs/SAAS-DEPLOYMENT.md),
+but its launch checklist is intentionally not a claim that a service is live.
 
 ## Development
 
-The CI gate, locally:
+Python 3.12 is the supported runtime. The repository gates deliberately partition
+the complete Python suite:
 
 ```bash
-python -m pytest -m unit -q     # fast hermetic suite (includes the hosted product)
+source .venv/bin/activate
+python -m pytest tests/ -m unit
+MISE_DATA_DIR=$(mktemp -d) MISE_SECRET_KEY=test MISE_ADMIN_PASSWORD=pw \
+  MISE_ENV_FILE=/nonexistent python -m pytest tests/ -m "not unit"
 ruff check .
 ruff format --check .
 ```
 
-Full smoke (needs ffmpeg for the video-pipeline tests):
+The non-unit partition needs `ffmpeg` for video-pipeline coverage. iOS changes run
+through the macOS `build-test` workflow; local setup is in [ios/README.md](ios/README.md).
 
-```bash
-MISE_DATA_DIR=$(mktemp -d) MISE_SECRET_KEY=test MISE_ADMIN_PASSWORD=pw \
-  python -m pytest tests/test_smoke.py -q
-```
+## Repository map
 
-CI also runs `pip-audit` against the pinned dependency tree; a finding there
-means "bump the pin" (see `docs/SECURITY.md`).
+| Path | Purpose |
+| --- | --- |
+| `app/` | FastAPI composition, domain modules, hosted tenancy, jobs, API boundaries |
+| `app/admin/` | Owner/operator HTML routes |
+| `app/public/` | Client galleries, portals, documents, payments, booking, marketing |
+| `ios/` | SwiftUI application, repositories, networking, session security, tests |
+| `migrations/` | Forward and rollback SQL history for tenant databases |
+| `templates/`, `static/` | Server-rendered interface and committed review assets |
+| `tests/` | Unit, contract, authorization, tenancy, billing, and end-to-end coverage |
+| `docs/adr/` | Architecture decision record history |
+| `docs/` | Canonical architecture, security, launch, operations, and historical reviews |
 
-## Launch Copy
+## Engineering constraints worth reviewing
 
-Mise is a hosted client studio for solo photographers and videographers:
-professional galleries, booking paperwork, payments, portals, and workflow
-reminders for exactly $20/month.
+- Tenant choice comes from the request host, never a caller-supplied tenant ID.
+- Money webhooks are signature-verified, replay-guarded, and amount-reconciled.
+- Native retryable commands use idempotency keys and explicit workflow state.
+- Secrets and optional integrations fail dormant rather than open.
+- AI adapters require human review and do not persist directly.
+- Schema, money, auth, legal, and deploy changes are human-gated by
+  [AGENTS.md](AGENTS.md).
 
-No tiers. No setup. Hosted and maintained for you.
+The [security policy](SECURITY.md) explains private reporting; the operational
+[security playbook](docs/SECURITY.md) documents the implemented model.
 
-Public launch assets:
+## Known holds
 
-- landing-page offer and value proof in this README
-- one-command hosted deployment shape in `docs/SAAS-DEPLOYMENT.md`
-- production launch helper in `scripts/launch-hosted-production.sh`
-- 5-post X launch thread in `docs/LAUNCH-KIT.md`
-- prioritized 7-day launch checklist in `docs/LAUNCH-KIT.md`
-- beta invitation email in `docs/BETA-LAUNCH.md`
+Mise keeps unresolved risk visible rather than presenting a green CI badge as
+launch approval. The most material open decisions and defects are tracked in:
 
-Beta acquisition links can be tagged without any external analytics service:
+- [#182 — native companion versus pocket studio OS scope](https://github.com/Ayyitskevin/mise/issues/182)
+- [#181 — missing tenant storage must fail loud](https://github.com/Ayyitskevin/mise/issues/181)
+- [#180 — App Store purchase/IAP strategy](https://github.com/Ayyitskevin/mise/issues/180)
+- [#179 — privacy manifest and label accuracy](https://github.com/Ayyitskevin/mise/issues/179)
+- [#185 — safe reviewer-account replacement](https://github.com/Ayyitskevin/mise/issues/185)
 
-```text
-https://mise.example.com/pricing?utm_source=newsletter&utm_campaign=beta
-https://mise.example.com/pricing?utm_source=x&utm_campaign=launch-thread
-```
+The issue tracker contains narrower native correctness work beneath those holds.
 
-Those values are stored on the tenant record and summarized in `/admin/saas`.
+## Contributing and AI transparency
+
+Start with [CONTRIBUTING.md](CONTRIBUTING.md). This repository is openly
+AI-assisted; [docs/AI-DEVELOPMENT.md](docs/AI-DEVELOPMENT.md) describes the
+authorship, evidence, disclosure, privacy, and human-approval standard used for
+agent contributions.
+
+## License
+
+Mise is licensed under the
+[GNU Affero General Public License v3.0 only](LICENSE) (`AGPL-3.0-only`). Network
+operators who modify Mise are responsible for the corresponding-source obligations
+in the license, including section 13.
