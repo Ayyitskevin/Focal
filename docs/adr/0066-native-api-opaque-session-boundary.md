@@ -37,12 +37,23 @@ identifier may become routing authority.
   Credential changes revoke the affected family.
 - Model only the authority Mise has today: `studio_owner`, `gallery_guest`,
   `portal_guest`, `workspace_guest`, and `document_guest`. Every guest carries exact
-  resource scopes. A portal is not a client account; a workspace does not implicitly
-  unlock its gallery.
+  resource scopes. A portal is not a client account, and a workspace remains its own
+  principal rather than becoming a gallery guest.
 - Store a hash of the app installation id plus bounded display-only device metadata.
   Session-list responses never expose the raw id or hash. The iOS client keeps the
   complete session in a ThisDeviceOnly Keychain item scoped to the server origin and
   uses Face ID / Touch ID only as a local re-entry lock.
+
+### Later delivery clarification
+
+[ADR 0067](0067-native-client-delivery-slice.md#client-destination-authority) later
+allowlists capability-shaped native reads derived from the authenticated principal
+kind and bound resource. A portal guest may read published galleries and bookings for
+its client; a workspace guest may read its attached published gallery, exact project
+documents, and client bookings. Those derived reads do not mint `gallery_guest`
+visitor, favorite, or original-download authority, merge principals, or create a
+durable client account. This clarification does not change this ADR's opaque-session,
+tenant-binding, or live-revalidation decisions.
 
 ## Consequences
 

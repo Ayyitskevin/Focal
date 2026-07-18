@@ -94,12 +94,23 @@ must never select a database.
 
 ### Shared client access
 
-The initial client principals intentionally mirror current authority:
+The signed-in `PrincipalKind` is the native destination authority. The exact matrix
+lives in [ADR 0067](adr/0067-native-client-delivery-slice.md#client-destination-authority);
+do not infer destination availability from `Principal.scopes`, cached content, payload
+shape, or whether an API response is empty. API routes still enforce their exact scopes
+and bound resources:
 
-- `gallery_guest`: one gallery and one server-side visitor
-- `portal_guest`: one portal; it does not automatically unlock linked galleries
-- `workspace_guest`: one published workspace and its non-draft document links
-- `document_guest`: one proposal, contract, or invoice capability
+- `gallery_guest`: Home and the exact gallery; no Documents or Bookings.
+- `portal_guest`: Home, published galleries for the portal's client, and that
+  client's bookings; no project document collections.
+- `workspace_guest`: Home, the workspace project's attached published gallery,
+  non-draft document collections, and bookings for that project's client.
+- `document_guest`: Home and one proposal, contract, or invoice preview from
+  `/client/home`; no Gallery, project document collections, or Bookings.
+
+Portal and workspace gallery reads do not mint `gallery_guest` visitor, favorite,
+or original-download authority. These remain independent capabilities, not a durable
+`client_account`, and none widens into a sibling project or client.
 
 Use separate unlock/exchange endpoints and reuse the existing constant-time PIN
 comparison plus durable lockout history. A future authenticated `client_account`
@@ -160,11 +171,21 @@ The root UI changes with the principal, not just with screen visibility.
 
 ### Shared client access
 
-- Home: the exact unlocked portal/workspace/document capability.
-- Galleries: native grid, section progress, favorite, comment, lightbox, download.
-- Documents: proposals, contracts, invoices, receipts.
-- Bookings: available slots and existing booking management when in scope.
-- Settings: notification preferences, cache/download management, privacy, sign out.
+All four known guest principals share Home, Gallery, Documents, and Bookings
+destinations. Availability follows the
+[ADR 0067 matrix](adr/0067-native-client-delivery-slice.md#client-destination-authority):
+
+- Home summarizes the exact guest capability.
+- Gallery reads are limited to the exact gallery, portal client, or workspace project
+  derived from the principal. Only a gallery guest has a visitor identity and may
+  favorite or retrieve originals; comments and background downloads remain deferred.
+- Documents means the workspace project's non-draft proposal, contract, and invoice
+  collections, or the document guest's single `/client/home` preview.
+- Bookings is available only to portal and workspace guests and remains scoped to the
+  client derived from that principal.
+
+Account, privacy, and sign-out controls belong to the surrounding session shell rather
+than a fifth client capability destination.
 
 Use `NavigationSplitView` for iPad and compact navigation/tab presentation on
 iPhone. Keep route values typed so APNs and universal links resolve through the

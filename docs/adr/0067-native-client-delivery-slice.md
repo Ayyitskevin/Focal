@@ -22,6 +22,24 @@ media route existed.
 
 ## Decision
 
+### Client destination authority
+
+The signed-in `PrincipalKind` selects the native destination capability; every API
+route still re-derives authority from that principal and its bound resource. Scopes,
+cached content, payload shape, and empty responses do not widen this matrix.
+
+| Principal | Home | Gallery reads | Project document collections | Bookings |
+| --- | --- | --- | --- | --- |
+| `gallery_guest` | yes | one unlocked gallery | no | no |
+| `portal_guest` | yes | published galleries for its client | no | yes |
+| `workspace_guest` | yes | its project's published gallery | its exact project's non-draft documents | yes |
+| `document_guest` | yes | no | one document preview from `/client/home`; no project collections | no |
+| `studio_owner` / unknown | not a client principal | no | no | no |
+
+Portal and workspace gallery reads remain read surfaces derived from their own
+capabilities. They do not create a gallery visitor, authorize favorites or original
+downloads, merge principals, or create a durable client account.
+
 - **Map the design's client app onto the existing principals rather than
   inventing a client account.** One `ClientCompanionView` serves all four
   guest kinds; each tab renders exactly what the unlocked capability
