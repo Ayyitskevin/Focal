@@ -155,20 +155,30 @@ Deliverable: an ADR ("booking-workflow activation") recording the three findings
 + the flag-flip procedure + rollback (flip back; effects table is inert when off).
 The flag itself flips only by Kevin after the ADR merges.
 
-### T3 — Reviewer demo studio [Sonnet build · 🟢 code, 🔴 if it touches signup gates]
+### T3 — Reviewer demo studio [BLOCKED · Kevin design + merge]
 
 Gap G6: App Review needs a working studio without an invite code or expiring trial.
-Steps:
-1. New `scripts/seed_demo_tenant.py` (hosted mode): creates tenant slug `demo-tour`
-   with fixed reviewer credentials from env (never committed), seeds showcase data
-   by reusing `app/saas_demo.py` seeding + `bootstrap.ensure_public_showcase`
-   patterns (galleries, a project with proposal/contract/invoice, bookings, tasks).
-2. Add an operator-console path (not public web) to mark a tenant `demo` so the
-   trial sweep skips it (a `tenants.demo` flag is a control-DB migration → 🔴 PR).
-3. Document credentials workflow in `docs/APP-STORE-SUBMISSION.md` §Reviewer access.
-Acceptance: fresh run against a staging host yields a signable-in studio with
-populated screens on the app; trial never lapses on it.
-Verification: hosted pytest covering the seed script; manual sign-in from TestFlight.
+The provisioner merged in #178 is retired and `scripts/seed_demo_tenant.py` now
+fails closed. **Do not run it against local, staging, or production hosted state.**
+[Issue #185](https://github.com/Ayyitskevin/mise/issues/185) proves why public
+`signup_source` attribution, a far-future ordinary trial, destructive booking
+replacement, and unconditional password rehashing do not meet this ticket.
+
+Replacement steps:
+1. Kevin approves a durable operator-only demo identity and billing/lifecycle
+   isolation design. Any control-DB migration remains 🔴.
+2. A dedicated reviewed PR implements owned-record convergence without adopting a
+   public-signup tenant, changing unrelated rows, breaking workflow references, or
+   rotating unchanged credentials.
+3. Hosted acceptance proves owner sign-in and populated `/api/v1` surfaces; manual
+   TestFlight evidence proves the reviewer journey with representative media.
+4. Only then restore exact provisioning and credential-rotation instructions in
+   `docs/APP-STORE-SUBMISSION.md`.
+
+Acceptance: the demo is excluded from revenue, trial pipeline, lifecycle/dunning,
+trial-risk, and checkout; a repeat run preserves manual data and active sessions
+when credentials are unchanged; a fresh reviewer can sign in and traverse the
+populated app. Until every condition is green, T3 and submission remain held.
 
 ### T4 — Store metadata + screenshots pack [Sonnet draft, Kevin approves · 🟢]
 

@@ -62,47 +62,26 @@ tombstones the slug, and trash-parks data per ADR 0051.
 
 App Review will demand working credentials for a sign-in-only app (Guideline 2.1).
 
-**Provisioning — `scripts/seed_demo_tenant.py`** (run once against the hosted
-control DB on staging/prod; idempotent, touches only the demo tenant):
+> **BLOCKED — do not run `scripts/seed_demo_tenant.py` against any hosted state.**
+> The command is intentionally disabled and exits before reading configuration or
+> opening a database. [Issue #185](https://github.com/Ayyitskevin/mise/issues/185)
+> records the proven unsafe behavior in the retired implementation and owns the
+> replacement contract.
 
-```sh
-MISE_SAAS_MODE=true MISE_SAAS_ROOT_DOMAIN=<root-domain> \
-MISE_SAAS_CONTROL_DB_PATH=/data/saas-control.db \
-MISE_SAAS_TENANT_DATA_DIR=/data/tenants \
-MISE_SECRET_KEY=... MISE_ADMIN_PASSWORD=... \
-MISE_DEMO_TENANT_PRESET=wedding \
-MISE_DEMO_TENANT_PASSWORD='<reviewer sign-in password>' \
-python -m scripts.seed_demo_tenant
-```
+No App Review credentials are currently provisioned. T3 remains incomplete, and
+App Store submission remains on hold. The replacement must use durable,
+operator-only demo identity rather than public attribution; exclude the demo from
+billing, growth, lifecycle, and checkout paths; preserve manually created and
+workflow-referenced records; avoid rotating unchanged credentials; and pass a
+hosted owner-login plus populated `/api/v1` acceptance test. Any control-database,
+billing, or authentication changes require Kevin's explicit design and merge
+approval.
 
-It creates (or safely reuses) a reviewer tenant identified by
-`signup_source='reviewer-demo'` — and **refuses** a slug that already belongs to a
-real studio, so it can never reactivate one. It grants non-expiring access by
-keeping the tenant `trialing` with a far-future `trial_ends_at`: full access
-(`tenant_has_access` = `trial_ends_at >= now`) but counted as trial *pipeline*,
-**never as paid MRR** (only `active` tenants book `active_mrr_cents`). It seeds a
-realistic studio from an `app/saas_demo.py` preset (`MISE_DEMO_TENANT_PRESET` is
-**required** to be `wedding` or `fnb` — `neutral` has no seed yet, see T10) plus an
-owner task and a freshly-dated upcoming booking, refreshed every run so the demo
-never decays past a stale booking date. Re-running rotates the advertised
-credentials and converges the studio without duplicating data.
-
-- Review notes to include: the studio address to enter at sign-in
-  (`<slug>.<root-domain>` or its full URL), owner email
-  (`MISE_DEMO_TENANT_EMAIL`, default `reviewer@demo.mise.local`) + the password
-  you set, and — to show the client experience — one gallery guest credential
-  (the seeded gallery's slug + PIN, read from the tenant DB after seeding).
-- Note for reviewers: subscriptions are purchased on the web, not in the app;
-  the app sells nothing (ADR 0070).
-- Pick `MISE_DEMO_TENANT_PRESET` to match the T10 niche decision. The script
-  requires an explicit `wedding` or `fnb` and refuses `neutral`/unset, so a demo
-  is never seeded with a niche before the decision is recorded.
-
-**Still open before T3 can be called complete** (tracked in the PR): representative
-gallery photos are uploaded manually at demo-prep time (a seed can't invent real
-images); and a hosted owner-login acceptance test through `/api/v1` is the
-remaining automated gate beyond these unit/direct-DB tests. Manual TestFlight
-sign-in remains the deployment-time proof.
+Once that replacement is reviewed and merged, this section must document the exact
+provisioning command, studio address, owner credentials workflow, gallery guest
+credential workflow, expiry/billing isolation, reset procedure, and manual
+TestFlight evidence. Until then, `/demo` is only the unauthenticated static product
+tour; it is not a reviewer account.
 
 ## Guideline verification (game-plan item 13 — do at submission week)
 
