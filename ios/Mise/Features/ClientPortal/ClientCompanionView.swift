@@ -1,6 +1,6 @@
 import SwiftUI
 
-enum ClientDestination: String, CaseIterable, Identifiable {
+enum ClientDestination: String, CaseIterable, Hashable, Identifiable, Sendable {
     case home
     case gallery
     case documents
@@ -42,6 +42,7 @@ struct ClientCompanionView: View {
     let session: CurrentSession
     let repository: ClientRepository
     let mediaLoader: AuthenticatedMediaLoader
+    let policy: ClientAccessPolicy
     let isSigningOut: Bool
     let signOut: @MainActor () async -> Void
 
@@ -55,6 +56,7 @@ struct ClientCompanionView: View {
         self.session = session
         self.repository = repository
         self.mediaLoader = mediaLoader
+        policy = ClientAccessPolicy(principalKind: session.principal.kind)
         self.isSigningOut = isSigningOut
         self.signOut = signOut
         _home = State(initialValue: ResourceModel(
@@ -117,11 +119,15 @@ struct ClientCompanionView: View {
             // The Documents stack gets a path so a Home next-step can deep-link
             // straight to a proposal/contract/invoice, not just switch tabs.
             NavigationStack(path: $documentsPath) {
-                screen(destination)
+                ClientDestinationGate(policy: policy, destination: destination) {
+                    screen(destination)
+                }
                     .navigationDestination(for: DocumentRef.self) { ref in
                         ClientDocumentDetailLoader(
                             ref: ref,
-                            projectID: home.state.snapshot?.value.projectID ?? nil,
+                            projectID: policy.documentMode == .projectCollections
+                                ? home.state.snapshot?.value.projectID
+                                : nil,
                             repository: repository
                         )
                     }
@@ -129,7 +135,9 @@ struct ClientCompanionView: View {
             }
         } else {
             NavigationStack {
-                screen(destination)
+                ClientDestinationGate(policy: policy, destination: destination) {
+                    screen(destination)
+                }
                     .toolbar { accountToolbar }
             }
         }
@@ -152,9 +160,15 @@ struct ClientCompanionView: View {
         }
     }
 
-    private func openDocument(_ ref: DocumentRef) {
-        documentsPath.append(ref)
-        selection = .documents
+    private func navigate(_ route: ClientNavigationRoute) {
+        guard policy.allows(route.target) else { return }
+        switch route {
+        case let .destination(destination):
+            selection = destination
+        case let .document(ref):
+            documentsPath.append(ref)
+            selection = .documents
+        }
     }
 
     @ViewBuilder
@@ -163,8 +177,8 @@ struct ClientCompanionView: View {
         case .home:
             ClientHomeView(
                 model: home,
-                navigate: { selection = $0 },
-                openDocument: openDocument
+                policy: policy,
+                navigate: navigate
             )
         case .gallery:
             ClientGalleriesView(
@@ -173,11 +187,10 @@ struct ClientCompanionView: View {
                 mediaLoader: mediaLoader
             )
         case .documents:
-            ClientDocumentsView(home: home, repository: repository)
+            ClientDocumentsView(home: home, repository: repository, policy: policy)
         case .bookings:
             ClientBookingsView(
                 model: bookings,
-                accessKind: session.principal.kind,
                 timeZoneIdentifier: session.workspace.timeZone
             )
         }

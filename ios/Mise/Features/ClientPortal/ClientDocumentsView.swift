@@ -11,6 +11,7 @@ import SwiftUI
 struct ClientDocumentsView: View {
     let home: ResourceModel<ClientHomeSummary>
     let repository: ClientRepository
+    let policy: ClientAccessPolicy
 
     var body: some View {
         ResourceView(
@@ -24,18 +25,35 @@ struct ClientDocumentsView: View {
 
     @ViewBuilder
     private func content(_ summary: ClientHomeSummary) -> some View {
-        if let projectID = summary.projectID {
-            ProjectDocumentsList(projectID: projectID, repository: repository)
-        } else if let document = summary.document {
-            SingleDocumentView(document: document)
-        } else {
-            ContentUnavailableView(
-                "No documents here",
-                systemImage: "doc.text",
-                description: Text(
-                    "This access link covers your gallery. Documents arrive through their own link from the studio."
+        switch policy.documentMode {
+        case .projectCollections:
+            if let projectID = summary.projectID, projectID > 0 {
+                ProjectDocumentsList(projectID: projectID, repository: repository)
+            } else {
+                ContentUnavailableView(
+                    "No documents here",
+                    systemImage: "doc.text",
+                    description: Text("This workspace has no documents available.")
                 )
-            )
+            }
+        case .singlePreview:
+            if let document = summary.document {
+                SingleDocumentView(document: document)
+            } else {
+                ContentUnavailableView(
+                    "Document unavailable",
+                    systemImage: "doc.text",
+                    description: Text("This document link no longer has a shared document.")
+                )
+            }
+        case .unavailable:
+            if let unavailable = policy.unavailableContent(for: .documents) {
+                ContentUnavailableView(
+                    unavailable.heading,
+                    systemImage: unavailable.systemImage,
+                    description: Text(unavailable.description)
+                )
+            }
         }
     }
 }

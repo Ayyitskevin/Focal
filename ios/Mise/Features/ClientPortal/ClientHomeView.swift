@@ -1,11 +1,18 @@
 import SwiftUI
 
+private struct RoutedClientNextStep: Identifiable {
+    let step: NextStepAction
+    let route: ClientNavigationRoute
+
+    var id: String { step.id }
+}
+
 /// Client Home: a warm studio welcome plus dynamically generated next steps —
 /// only what currently needs the client's attention, straight from the server.
 struct ClientHomeView: View {
     let model: ResourceModel<ClientHomeSummary>
-    let navigate: (ClientDestination) -> Void
-    let openDocument: (DocumentRef) -> Void
+    let policy: ClientAccessPolicy
+    let navigate: (ClientNavigationRoute) -> Void
 
     var body: some View {
         ResourceView(
@@ -18,24 +25,24 @@ struct ClientHomeView: View {
     }
 
     private func content(_ summary: ClientHomeSummary) -> some View {
-        List {
+        let routedSteps = summary.nextSteps.compactMap { step in
+            policy.route(for: step).map { RoutedClientNextStep(step: step, route: $0) }
+        }
+
+        return List {
             Section {
                 introCard(summary)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
             }
 
-            if !summary.nextSteps.isEmpty {
+            if !routedSteps.isEmpty {
                 Section("Next steps") {
-                    ForEach(summary.nextSteps) { step in
+                    ForEach(routedSteps) { routedStep in
                         Button {
-                            if let ref = step.documentRef {
-                                openDocument(ref)
-                            } else {
-                                navigate(destination(for: step))
-                            }
+                            navigate(routedStep.route)
                         } label: {
-                            nextStepRow(step)
+                            nextStepRow(routedStep.step, route: routedStep.route)
                         }
                         .buttonStyle(.plain)
                     }
@@ -52,10 +59,12 @@ struct ClientHomeView: View {
                 }
             }
 
-            if let document = summary.document {
+            if let document = summary.document,
+               let route = policy.route(to: .documents)
+            {
                 Section("Your document") {
                     Button {
-                        navigate(.documents)
+                        navigate(route)
                     } label: {
                         documentRow(document)
                     }
@@ -72,7 +81,7 @@ struct ClientHomeView: View {
                 .font(.system(size: 11, weight: .bold))
                 .tracking(0.5)
                 .foregroundStyle(MiseDesign.terra)
-            Text(welcomeLine(summary))
+            Text(policy.welcomeLine(clientDisplayName: summary.clientDisplayName))
                 .miseDisplayFont(.title3)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -81,25 +90,10 @@ struct ClientHomeView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func welcomeLine(_ summary: ClientHomeSummary) -> String {
-        if let name = summary.clientDisplayName, !name.isEmpty {
-            return "It’s lovely to see you, \(firstName(of: name)) — everything for your project lives here."
-        }
-        switch summary.principalKind {
-        case .gallery:
-            return "Your photographs are ready whenever you are."
-        case .document:
-            return "Your document is ready whenever you are."
-        default:
-            return "Everything the studio has shared with you lives here."
-        }
-    }
-
-    private func firstName(of name: String) -> String {
-        name.split(separator: " ").first.map(String.init) ?? name
-    }
-
-    private func nextStepRow(_ step: NextStepAction) -> some View {
+    private func nextStepRow(
+        _ step: NextStepAction,
+        route: ClientNavigationRoute
+    ) -> some View {
         HStack(spacing: 14) {
             Image(systemName: icon(for: step.kind))
                 .font(.body)
@@ -119,7 +113,7 @@ struct ClientHomeView: View {
         }
         .padding(.vertical, 3)
         .accessibilityElement(children: .combine)
-        .accessibilityHint("Opens \(destination(for: step).title)")
+        .accessibilityHint("Opens \(route.target.title)")
     }
 
     private func documentRow(_ document: ClientDocumentPreview) -> some View {
@@ -147,13 +141,6 @@ struct ClientHomeView: View {
         }
         .padding(.vertical, 3)
         .accessibilityElement(children: .combine)
-    }
-
-    private func destination(for step: NextStepAction) -> ClientDestination {
-        switch step.kind {
-        case .gallery: .gallery
-        default: .documents
-        }
     }
 
     private func icon(for kind: NextStepKind) -> String {

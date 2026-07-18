@@ -94,7 +94,16 @@ private struct SignedInShell: View {
                 isSigningOut: isSigningOut,
                 signOut: signOut
             )
-        } else if session.principal.kind != .studioOwner,
+        } else if session.principal.kind == .studioOwner {
+            ContentUnavailableView {
+                Label("Studio data unavailable", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text("Sign out and reconnect to this studio.")
+            } actions: {
+                Button("Sign out", role: .destructive) { Task { await signOut() } }
+                    .disabled(isSigningOut)
+            }
+        } else if clientPolicy.grantsClientAccess,
                   let repository = clientRepository,
                   let mediaLoader
         {
@@ -105,15 +114,31 @@ private struct SignedInShell: View {
                 isSigningOut: isSigningOut,
                 signOut: signOut
             )
-        } else {
+        } else if clientPolicy.grantsClientAccess {
             ContentUnavailableView {
-                Label("Studio data unavailable", systemImage: "exclamationmark.triangle")
+                Label("Client data unavailable", systemImage: "exclamationmark.triangle")
             } description: {
                 Text("Sign out and reconnect to this studio.")
             } actions: {
                 Button("Sign out", role: .destructive) { Task { await signOut() } }
                     .disabled(isSigningOut)
             }
+        } else {
+            ContentUnavailableView {
+                Label(
+                    "Client access unavailable.",
+                    systemImage: "person.crop.circle.badge.exclamationmark"
+                )
+            } description: {
+                Text("This session does not grant client access.")
+            } actions: {
+                Button("Sign out", role: .destructive) { Task { await signOut() } }
+                    .disabled(isSigningOut)
+            }
         }
+    }
+
+    private var clientPolicy: ClientAccessPolicy {
+        ClientAccessPolicy(principalKind: session.principal.kind)
     }
 }
