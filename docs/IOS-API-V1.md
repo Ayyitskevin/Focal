@@ -146,9 +146,13 @@ reschedule otherwise; the command independently rechecks the gate.
 | `POST /api/v1/client-auth/workspace/unlock` | workspace slug/PIN exchange |
 | `POST /api/v1/client-auth/document/exchange` | one document capability exchange |
 
-Each shared-access response uses an exact principal kind and narrow scope. A portal
-exchange must not unlock its galleries; a workspace exchange must not become a
-client-wide session.
+Each shared-access response uses an exact principal kind and narrow scope. The
+[ADR 0067 destination matrix](adr/0067-native-client-delivery-slice.md#client-destination-authority)
+allows a portal guest to read published galleries and bookings for its client and a
+workspace guest to read its exact project's attached published gallery, non-draft
+documents, and client bookings. Those derived reads do not mint `gallery_guest`
+visitor, favorite, or original-download authority; a workspace exchange still does
+not become a client-wide session.
 
 ## Initial read endpoints
 
