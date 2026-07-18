@@ -61,16 +61,48 @@ tombstones the slug, and trash-parks data per ADR 0051.
 ## Reviewer access (game-plan item 12 — required before submission)
 
 App Review will demand working credentials for a sign-in-only app (Guideline 2.1).
-Plan (not yet provisioned):
 
-- A comped, long-lived reviewer tenant on the hosted platform
-  (`plan_status='active'`, e.g. `review.<root-domain>`) seeded with both
-  `app/saas_demo.py` presets, so it never trial-expires mid-review.
+**Provisioning — `scripts/seed_demo_tenant.py`** (run once against the hosted
+control DB on staging/prod; idempotent, touches only the demo tenant):
+
+```sh
+MISE_SAAS_MODE=true MISE_SAAS_ROOT_DOMAIN=<root-domain> \
+MISE_SAAS_CONTROL_DB_PATH=/data/saas-control.db \
+MISE_SAAS_TENANT_DATA_DIR=/data/tenants \
+MISE_SECRET_KEY=... MISE_ADMIN_PASSWORD=... \
+MISE_DEMO_TENANT_PRESET=wedding \
+MISE_DEMO_TENANT_PASSWORD='<reviewer sign-in password>' \
+python -m scripts.seed_demo_tenant
+```
+
+It creates (or safely reuses) a reviewer tenant identified by
+`signup_source='reviewer-demo'` — and **refuses** a slug that already belongs to a
+real studio, so it can never reactivate one. It grants non-expiring access by
+keeping the tenant `trialing` with a far-future `trial_ends_at`: full access
+(`tenant_has_access` = `trial_ends_at >= now`) but counted as trial *pipeline*,
+**never as paid MRR** (only `active` tenants book `active_mrr_cents`). It seeds a
+realistic studio from an `app/saas_demo.py` preset (`MISE_DEMO_TENANT_PRESET` is
+**required** to be `wedding` or `fnb` — `neutral` has no seed yet, see T10) plus an
+owner task and a freshly-dated upcoming booking, refreshed every run so the demo
+never decays past a stale booking date. Re-running rotates the advertised
+credentials and converges the studio without duplicating data.
+
 - Review notes to include: the studio address to enter at sign-in
-  (`review.<root-domain>` or its full URL), owner email + password, and one
-  gallery/portal guest credential to show the client experience.
+  (`<slug>.<root-domain>` or its full URL), owner email
+  (`MISE_DEMO_TENANT_EMAIL`, default `reviewer@demo.mise.local`) + the password
+  you set, and — to show the client experience — one gallery guest credential
+  (the seeded gallery's slug + PIN, read from the tenant DB after seeding).
 - Note for reviewers: subscriptions are purchased on the web, not in the app;
   the app sells nothing (ADR 0070).
+- Pick `MISE_DEMO_TENANT_PRESET` to match the T10 niche decision. The script
+  requires an explicit `wedding` or `fnb` and refuses `neutral`/unset, so a demo
+  is never seeded with a niche before the decision is recorded.
+
+**Still open before T3 can be called complete** (tracked in the PR): representative
+gallery photos are uploaded manually at demo-prep time (a seed can't invent real
+images); and a hosted owner-login acceptance test through `/api/v1` is the
+remaining automated gate beyond these unit/direct-DB tests. Manual TestFlight
+sign-in remains the deployment-time proof.
 
 ## Guideline verification (game-plan item 13 — do at submission week)
 
