@@ -6,6 +6,9 @@ sandbox — **not deployed, no live users** (see the root `README.md`). The laun
 below describe *intended* hosted state, not something currently serving customers.
 
 ## Architecture & decisions (canonical reference)
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — reviewer-facing system map: runtime boundaries, tenancy, data, web/native delivery, AI adapters, and verification strategy.
+- [`REVIEWER-GUIDE.md`](REVIEWER-GUIDE.md) — safe disposable tour, fifteen-minute code path, review seams, and current non-claims.
+- [`AI-DEVELOPMENT.md`](AI-DEVELOPMENT.md) — AI authorship, disclosure, evidence, privacy, human approval, and product-AI separation.
 - [`adr/`](adr/) — 70 Architecture Decision Records; the durable "why" behind the design. `SECURITY.md` cites specific ADRs, so they're load-bearing.
 - [`SECURITY.md`](SECURITY.md) — security playbook (auth, sessions, CSP, secrets).
 - [`IOS-ARCHITECTURE.md`](IOS-ARCHITECTURE.md) — iOS app architecture and delivery plan.
