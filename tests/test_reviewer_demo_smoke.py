@@ -52,9 +52,9 @@ def test_reviewer_tour_serves_then_cleans_up_on_terminate(tmp_path):
             pricing = client.get(f"http://127.0.0.1:{port}/pricing", timeout=2)
 
         assert health.json()["service"] == "mise"
-        assert "Restaurant content day" in demo.text
+        assert "Commercial content day" in demo.text
         assert "Wedding story collection" in demo.text
-        assert "No paid tiers" in pricing.text
+        assert "Gallery delivery" in pricing.text
     finally:
         process.terminate()
         try:
