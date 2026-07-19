@@ -3,6 +3,7 @@ import SwiftUI
 struct GalleryDetailView: View {
     let gallery: GallerySummary
     let mediaLoader: AuthenticatedMediaLoader
+    private let repository: OwnerRepository
     @State private var model: ResourceModel<GalleryDetail>
     @State private var favorites: GalleryFavorites
 
@@ -13,6 +14,7 @@ struct GalleryDetailView: View {
     ) {
         self.gallery = gallery
         self.mediaLoader = mediaLoader
+        self.repository = repository
         _model = State(initialValue: ResourceModel(
             staleAfter: 60 * 60,
             cached: { try await repository.cachedGallery(id: gallery.id) },
