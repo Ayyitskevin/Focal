@@ -1,6 +1,6 @@
 # Reviewer guide
 
-This guide is for a software peer evaluating Mise without needing private state,
+This guide is for a software peer evaluating Focal without needing private state,
 vendor accounts, a signing identity, or product-history context.
 
 ## Fifteen-minute path
@@ -18,7 +18,7 @@ only to `127.0.0.1`, removes all inherited `MISE_*` configuration, ignores `.env
 uses a temporary data directory, and deletes that directory after `Ctrl+C`.
 
 The tour is intentionally static. Do **not** run `scripts/seed_demo_tenant.py` or
-point any command at hosted state; [issue #185](https://github.com/Ayyitskevin/mise/issues/185)
+point any command at hosted state; [issue #185](https://github.com/Ayyitskevin/Focal/issues/185)
 holds that separate reviewer-account path.
 
 ### 2. Orient in the architecture
@@ -77,13 +77,13 @@ separate macOS `build-test` workflow because Linux cannot run the Xcode gate.
 Do not review the repository as if it claims production or App Store readiness.
 The most material open items are:
 
-- [#182](https://github.com/Ayyitskevin/mise/issues/182): native product scope is
+- [#182](https://github.com/Ayyitskevin/Focal/issues/182): native product scope is
   narrower than the pocket-OS direction;
-- [#180](https://github.com/Ayyitskevin/mise/issues/180): App Store purchase/IAP
+- [#180](https://github.com/Ayyitskevin/Focal/issues/180): App Store purchase/IAP
   distribution strategy is undecided;
-- [#179](https://github.com/Ayyitskevin/mise/issues/179): privacy manifest and
+- [#179](https://github.com/Ayyitskevin/Focal/issues/179): privacy manifest and
   label evidence are incomplete;
-- [#185](https://github.com/Ayyitskevin/mise/issues/185): the reviewer-account
+- [#185](https://github.com/Ayyitskevin/Focal/issues/185): the reviewer-account
   provisioner needs a new durable identity and lifecycle design.
 
 The narrower issue tracker contains additional native correctness findings. These
