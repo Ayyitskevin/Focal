@@ -1,9 +1,9 @@
 # docs/ — index
 
 A map of this folder so a reader (human or agent) can tell what's canonical reference vs.
-forward-looking plan vs. point-in-time artifact. **Context:** Mise is a product-incubation
-sandbox — **not deployed, no live users** (see the root `README.md`). The launch/go-live docs
-below describe *intended* hosted state, not something currently serving customers.
+forward-looking plan vs. point-in-time artifact. **Current context:** Focal is in active
+development and private-beta preparation. Self-hosted mode is the canonical review path;
+hosted and App Store plans below are not current launch claims.
 
 ## Architecture & decisions (canonical reference)
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — reviewer-facing system map: runtime boundaries, tenancy, data, web/native delivery, AI adapters, and verification strategy.
@@ -15,11 +15,16 @@ below describe *intended* hosted state, not something currently serving customer
 - [`IOS-API-V1.md`](IOS-API-V1.md) — mobile API v1 contract.
 
 ## Product
+- [`FOCAL-IDENTITY.md`](FOCAL-IDENTITY.md) — canonical product name, status, boundaries, and compatibility-preserving naming migration.
 - [`MISE-SOLO-STUDIO-OS.md`](MISE-SOLO-STUDIO-OS.md) — the "solo studio OS" product concept.
 - [`MISE-SOLO-STUDIO-OS-RUNBOOK.md`](MISE-SOLO-STUDIO-OS-RUNBOOK.md) — operator runbook for it.
-- [`NICHE-STORY-DECISION.md`](NICHE-STORY-DECISION.md) — T10 decision packet comparing wedding-first, F&B-first, and neutral launch stories; Kevin's selection feeds reviewer-demo content and store copy, while [issue #185](https://github.com/Ayyitskevin/mise/issues/185) independently holds T3's operator identity and lifecycle design.
+- [`NICHE-STORY-DECISION.md`](NICHE-STORY-DECISION.md) — T10 decision packet comparing wedding-first, F&B-first, and neutral launch stories; Kevin's selection feeds reviewer-demo content and store copy, while [issue #185](https://github.com/Ayyitskevin/Focal/issues/185) independently holds T3's operator identity and lifecycle design.
 
-## Launch & hosting plans  _(status: intent — not deployed)_
+## Launch & hosting plans  _(status: historical intent — not deployed)_
+
+The hosted `$20/month` launch materials are retained as historical planning artifacts.
+They are not a current price, public offer, or claim that Focal is generally available.
+
 - [`CONDUCTOR-PLAN.md`](CONDUCTOR-PLAN.md) — **start here for execution**: mission review, binding process rules from the 2026-07-17 red-main postmortem, live board, and ticket-by-ticket work orders (T1–T10) for the Opus/Sonnet/Kevin lanes.
 - [`APP-STORE-GAMEPLAN.md`](APP-STORE-GAMEPLAN.md) — the strategy layer under the conductor plan: phased App Store / micro-SaaS plan with audit evidence (decision base ADR 0070).
 - [`GO-LIVE.md`](GO-LIVE.md) — day-of go-live sequence.
@@ -32,7 +37,7 @@ below describe *intended* hosted state, not something currently serving customer
 - [`APP-STORE-SUBMISSION.md`](APP-STORE-SUBMISSION.md) — App Store submission pack (privacy labels, reviewer access, archive checklist).
 
 ## Fleet / consolidation planning
-- [`MISE-CONSOLIDATION-ROADMAP.md`](MISE-CONSOLIDATION-ROADMAP.md) · [`REPO-CONSOLIDATION-MATRIX.md`](REPO-CONSOLIDATION-MATRIX.md) — how Mise consolidates with sibling repos.
+- [`MISE-CONSOLIDATION-ROADMAP.md`](MISE-CONSOLIDATION-ROADMAP.md) · [`REPO-CONSOLIDATION-MATRIX.md`](REPO-CONSOLIDATION-MATRIX.md) — how Focal consolidates with sibling repos.
 - [`SIBLING-IMPROVEMENT-PLAN.md`](SIBLING-IMPROVEMENT-PLAN.md) · [`WORKER-CONTRACT.md`](WORKER-CONTRACT.md) · [`sibling-briefs/`](sibling-briefs/) — making each repo a useful "OS worker."
 - [`NOTION-MODERNIZATION.md`](NOTION-MODERNIZATION.md) — Notion API modernization runbook.
 
