@@ -1,25 +1,27 @@
 {% extends "base.html" %}
 {% block robots %}<meta name="robots" content="index, follow">{% endblock %}
-{% block title %}{{ doc_title }} · Mise{% endblock %}
+{% block title %}{{ doc_title }} · Focal{% endblock %}
 {% block head %}
 {% include "saas/_analytics.html" %}
-<meta name="description" content="{{ doc_title }} for Mise, the hosted client studio for solo photographers and videographers.">
+<meta name="description" content="{{ doc_title }} for Focal, the hosted client studio for solo photographers and videographers.">
 {% endblock %}
 {% block content %}
 <main class="legal-wrap" style="max-width:52rem;margin:0 auto;padding:2.5rem 1.25rem;line-height:1.6">
-  <p><a class="pr-back" href="/">Mise</a></p>
+  <p><a class="pr-back" href="/">Focal</a></p>
   <h1>{{ doc_title }}</h1>
-  <p class="muted">Last updated 2 July 2026.</p>
+  <p class="muted">Last updated 19 July 2026.</p>
+  <p><strong>Availability note:</strong> Focal is currently in private beta. These pages
+     describe the hosted beta design, not a generally available public service.</p>
 
   {% if doc == "terms" %}
-  <p>These terms cover the <strong>Mise</strong> hosted service ("Mise", "we"). By starting a
-     trial or using a hosted studio you agree to them. If you self-host Mise, these hosted terms
+  <p>These terms cover the <strong>Focal</strong> hosted service ("Focal", "we"). By starting a
+     trial or using a hosted studio you agree to them. If you self-host Focal, these hosted terms
      don't apply — you run your own instance under its open-source licence.</p>
 
-  <h2>The plan</h2>
-  <p>Mise is one flat plan: <strong>$20/month</strong> after a 14-day free trial. No tiers, no
-     setup fee, no per-seat charge. You can cancel anytime from your billing page; cancellation
-     stops future charges and we don't bill partial months back.</p>
+  <h2>Beta access</h2>
+  <p>Focal hosted access is invitation-only while the product is in private beta. Any
+     pricing, trial length, and availability terms are stated in the invitation or the
+     current order flow. The product is not generally available.</p>
 
   <h2>Your studio, your data</h2>
   <p>Each studio runs in its <strong>own isolated database and file store</strong> — not shared
@@ -29,7 +31,7 @@
      a short recoverable copy in case of mistakes, then remove it.</p>
 
   <h2>Acceptable use</h2>
-  <p>Don't use Mise to store unlawful content, infringe others' rights, or attempt to access
+  <p>Don't use Focal to store unlawful content, infringe others' rights, or attempt to access
      another studio's data. Each studio is isolated by design; probing that isolation is a
      breach of these terms. We may suspend a studio that puts the service or other customers at
      risk, and will tell you why.</p>
@@ -37,10 +39,10 @@
   <h2>Payments</h2>
   <p>Billing is handled by <strong>Stripe</strong>; we don't store your card number. Client
      payments you collect through your own connected payment account are between you and your
-     clients — Mise is not a party to them and never charges your clients on its own account.</p>
+     clients — Focal is not a party to them and never charges your clients on its own account.</p>
 
   <h2>Availability &amp; liability</h2>
-  <p>We work to keep Mise available and backed up, but it's provided "as is" without warranty.
+  <p>We work to keep Focal available and backed up, but it's provided "as is" without warranty.
      To the extent the law allows, our liability is limited to the fees you paid in the prior
      three months. You're responsible for keeping your own export archives for anything you
      can't afford to lose.</p>
@@ -50,7 +52,7 @@
      effect. Continued use after that means you accept the update.</p>
 
   {% elif doc == "privacy" %}
-  <p>This policy explains what the <strong>Mise</strong> hosted service collects and how it's
+  <p>This policy explains what the <strong>Focal</strong> hosted service collects and how it's
      used. Self-hosted installs are governed by whoever runs them, not this policy.</p>
 
   <h2>What we hold</h2>
@@ -85,7 +87,7 @@
      {% if support_email %}<a href="mailto:{{ support_email }}">{{ support_email }}</a>{% else %}the support address below{% endif %}.</p>
 
   {% else %}
-  <p>Support for the <strong>Mise</strong> hosted service.</p>
+  <p>Support for the <strong>Focal</strong> hosted private beta.</p>
 
   <h2>Get in touch</h2>
   {% if support_email %}
