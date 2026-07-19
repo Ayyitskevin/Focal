@@ -22,6 +22,7 @@ from . import (
     alerts,
     booking_workflow,
     config,
+    db,
     mobile_auth,
     mobile_client_api,
     mobile_commercial_api,
@@ -82,6 +83,10 @@ async def contain_unhandled_errors(request: Request, call_next):
     try:
         return await call_next(request)
     except Exception as exc:  # noqa: BLE001 - this is the API's final containment boundary
+        # The parent tenant runtime owns this typed storage incident and converts
+        # it into the shared correlated 503. Do not flatten a deletion race here.
+        if isinstance(exc, db.ExistingDatabaseUnavailable):
+            raise
         request_id = getattr(request.state, "request_id", None)
         log.error(
             "unhandled mobile API error: %s %s type=%s request_id=%s",

@@ -73,6 +73,16 @@ _RESERVED_SLUGS = {
 }
 
 
+class TenantStorageUnavailable(RuntimeError):
+    """A retained tenant's database is missing or cannot be opened safely."""
+
+    def __init__(self, tenant: dict):
+        self.tenant_id = tenant.get("id")
+        self.slug = tenant.get("slug") or "unknown"
+        self.studio_name = tenant.get("studio_name") or "This studio"
+        super().__init__("tenant storage unavailable")
+
+
 def _stripe():
     import stripe
 
@@ -370,20 +380,21 @@ def list_tenants(*, billable_only: bool = False) -> list[dict]:
 
 
 def tenant_launch_status(tenant: dict) -> dict:
-    if not tenant_db_path(tenant["slug"]).exists():
-        return {
-            "score": 0,
-            "complete": False,
-            "headline": "Tenant database missing",
-            "detail": "Create or repair the tenant database before judging launch readiness.",
-            "tone": "block",
-        }
     try:
         with tenant_runtime(tenant):
             from . import onboarding as onboarding_state
 
             setup = onboarding_state.setup_status()
             launch = onboarding_state.launch_plan(setup)
+    except TenantStorageUnavailable as exc:
+        report_tenant_storage_unavailable(exc, operation="launch readiness check")
+        return {
+            "score": 0,
+            "complete": False,
+            "headline": "Tenant storage unavailable",
+            "detail": "Restore the verified tenant database before relying on this studio's launch score.",
+            "tone": "block",
+        }
     except sqlite3.Error as exc:
         log.warning("tenant %s launch status unavailable: %s", tenant["slug"], exc)
         return {
@@ -929,8 +940,8 @@ def create_tenant(
     signup_referrer = sanitize_attribution(signup_referrer, max_len=160)
     started = _now()
     ends = started + timedelta(days=config.SAAS_TRIAL_DAYS)
-    try:
-        with control_connect() as con:
+    with control_connect() as con:
+        try:
             cur = con.execute(
                 """INSERT INTO tenants
                    (slug, studio_name, owner_email, admin_password_hash,
@@ -949,11 +960,14 @@ def create_tenant(
                     signup_referrer,
                 ),
             )
-            tenant_id = cur.lastrowid
-    except sqlite3.IntegrityError:
-        raise ValueError("That studio URL is already taken.") from None
+        except sqlite3.IntegrityError:
+            raise ValueError("That studio URL is already taken.") from None
+        tenant_id = cur.lastrowid
+        # The control row and first tenant migration become visible together.
+        # A failed provision rolls the row back; a retry at this sole creation
+        # boundary can idempotently complete any partial tenant tree.
+        _provision_tenant_database({"slug": slug})
     tenant = tenant_by_id(tenant_id)
-    ensure_tenant_database(tenant)
     log.info("tenant %s created for %s", slug, owner_email)
     return tenant
 
@@ -1166,42 +1180,42 @@ def build_studio_export(tenant: dict) -> Path:
     function unlinks it itself if the build fails.
     """
     slug = tenant["slug"]
-    data_dir = tenant_data_path(slug)
-    ensure_tenant_database(tenant)
-    scratch_dir = data_dir / "tmp"
-    scratch_dir.mkdir(parents=True, exist_ok=True)
-    tmp = tempfile.NamedTemporaryFile(
-        prefix=f"mise-export-{slug}-", suffix=".zip", dir=scratch_dir, delete=False
-    )
-    tmp.close()
-    tmp_zip = Path(tmp.name)
-    live_db_names = {"mise.db", "mise.db-wal", "mise.db-shm"}
-    skip_roots = {"tmp", "zips"}  # scratch: never studio data, and where this zip lives
-    try:
-        with tempfile.TemporaryDirectory() as snap_dir:
-            snapshot = Path(snap_dir) / "mise.db"
-            src = sqlite3.connect(tenant_db_path(slug))
-            try:
-                dst = sqlite3.connect(snapshot)
+    with tenant_runtime_existing(tenant):
+        data_dir = tenant_data_path(slug)
+        scratch_dir = data_dir / "tmp"
+        scratch_dir.mkdir(parents=True, exist_ok=True)
+        tmp = tempfile.NamedTemporaryFile(
+            prefix=f"mise-export-{slug}-", suffix=".zip", dir=scratch_dir, delete=False
+        )
+        tmp.close()
+        tmp_zip = Path(tmp.name)
+        live_db_names = {"mise.db", "mise.db-wal", "mise.db-shm"}
+        skip_roots = {"tmp", "zips"}  # scratch: never studio data, and where this zip lives
+        try:
+            with tempfile.TemporaryDirectory() as snap_dir:
+                snapshot = Path(snap_dir) / "mise.db"
+                src = db.connect(tenant_db_path(slug))
                 try:
-                    src.backup(dst)
+                    dst = sqlite3.connect(snapshot)
+                    try:
+                        src.backup(dst)
+                    finally:
+                        dst.close()
                 finally:
-                    dst.close()
-            finally:
-                src.close()
-            with zipfile.ZipFile(tmp_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-                zf.write(snapshot, "mise.db")
-                for path in sorted(data_dir.rglob("*")):
-                    if not path.is_file():
-                        continue
-                    rel = path.relative_to(data_dir)
-                    if str(rel) in live_db_names or rel.parts[0] in skip_roots:
-                        continue
-                    zf.write(path, str(rel))
-    except BaseException:
-        tmp_zip.unlink(missing_ok=True)
-        raise
-    return tmp_zip
+                    src.close()
+                with zipfile.ZipFile(tmp_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+                    zf.write(snapshot, "mise.db")
+                    for path in sorted(data_dir.rglob("*")):
+                        if not path.is_file():
+                            continue
+                        rel = path.relative_to(data_dir)
+                        if str(rel) in live_db_names or rel.parts[0] in skip_roots:
+                            continue
+                        zf.write(path, str(rel))
+        except BaseException:
+            tmp_zip.unlink(missing_ok=True)
+            raise
+        return tmp_zip
 
 
 def delete_tenant_studio(tenant: dict) -> None:
@@ -1310,7 +1324,9 @@ def mark_custom_domain_verified(tenant: dict, host: str) -> dict:
     return updated or tenant
 
 
-def ensure_tenant_database(tenant: dict | None) -> None:
+def _provision_tenant_database(tenant: dict | None) -> None:
+    """Create and migrate storage only for the new-tenant provisioning boundary."""
+
     if not tenant:
         return
     slug = tenant["slug"]
@@ -1332,42 +1348,54 @@ def ensure_tenant_database(tenant: dict | None) -> None:
 
 @contextmanager
 def tenant_runtime(tenant_or_slug):
+    """Enter an existing tenant and lazily migrate its existing database."""
+
     tenant = tenant_by_slug(tenant_or_slug) if isinstance(tenant_or_slug, str) else tenant_or_slug
     if not tenant:
         raise RuntimeError("tenant not found")
-    ensure_tenant_database(tenant)
-    tenant_token = _TENANT_CTX.set(dict(tenant))
-    db_token = db.set_request_db_path(tenant_db_path(tenant["slug"]))
-    dir_tokens = config.set_runtime_dirs(tenant_data_path(tenant["slug"]))
-    try:
+    with tenant_runtime_existing(tenant):
+        path_key = str(tenant_db_path(tenant["slug"]))
+        if path_key not in _MIGRATED_TENANT_DBS:
+            try:
+                db.migrate(tenant_db_path(tenant["slug"]))
+            except db.ExistingDatabaseUnavailable as exc:
+                raise TenantStorageUnavailable(tenant) from exc
+            _MIGRATED_TENANT_DBS.add(path_key)
         yield tenant
-    finally:
-        config.reset_runtime_dirs(dir_tokens)
-        db.reset_request_db_path(db_token)
-        _TENANT_CTX.reset(tenant_token)
 
 
 @contextmanager
 def tenant_runtime_existing(tenant: dict):
     """Enter a retained tenant without provisioning storage or a new DB.
 
-    Used by recovery/cleanup workers after immutable-id revalidation. The DB
-    layer opens with SQLite ``mode=rw``, so deletion between the path check and
-    the first query fails loud instead of recreating an empty tenant database.
+    The DB layer opens with SQLite mode=rw and validates the connection before
+    yielding. A deletion race later in the body is translated to the same typed
+    failure rather than recreating an empty tenant database.
     """
     if not tenant:
         raise RuntimeError("tenant not found")
     path = tenant_db_path(tenant["slug"])
-    if not path.is_file():
-        raise FileNotFoundError(path)
     tenant_token = _TENANT_CTX.set(dict(tenant))
     db_token = db.set_request_db_path(path)
     existing_token = db.set_existing_only()
+    failure_token = db.set_existing_failure_boundary()
     dir_tokens = config.set_runtime_dirs(tenant_data_path(tenant["slug"]))
     try:
-        yield tenant
+        try:
+            con = db.connect()
+        except db.ExistingDatabaseUnavailable as exc:
+            raise TenantStorageUnavailable(tenant) from exc
+        else:
+            con.close()
+        try:
+            yield tenant
+        except db.ExistingDatabaseUnavailable as exc:
+            raise TenantStorageUnavailable(tenant) from exc
+        if failure := db.existing_database_failure():
+            raise TenantStorageUnavailable(tenant) from failure
     finally:
         config.reset_runtime_dirs(dir_tokens)
+        db.reset_existing_failure_boundary(failure_token)
         db.reset_existing_only(existing_token)
         db.reset_request_db_path(db_token)
         _TENANT_CTX.reset(tenant_token)
@@ -1543,6 +1571,76 @@ def _api_problem(request: Request, status: int, code: str, title: str, detail: s
     )
 
 
+def report_tenant_storage_unavailable(
+    error: TenantStorageUnavailable,
+    *,
+    operation: str,
+    reference: str | None = None,
+) -> str:
+    """Log and throttle-alert one retained-tenant storage incident safely."""
+
+    reference = reference or f"op_{secrets.token_hex(8)}"
+    log.error(
+        "tenant storage unavailable tenant_id=%s slug=%s operation=%s reference=%s",
+        error.tenant_id,
+        error.slug,
+        operation,
+        reference,
+    )
+    from . import alerts
+
+    alerts.ops_alert(
+        f"tenant-storage:{error.tenant_id}",
+        f"Tenant storage unavailable: tenant id={error.tenant_id} slug={error.slug} "
+        f"operation={operation} reference={reference}. Stop writes for this tenant, "
+        "investigate its storage, and never provision a replacement. Restore from "
+        "a verified backup if the database is missing or corrupt.",
+    )
+    return reference
+
+
+def tenant_storage_unavailable_response(
+    request: Request, error: TenantStorageUnavailable
+) -> Response:
+    """Return one correlated, non-leaking 503 for a tenant storage incident."""
+
+    request_id = getattr(request.state, "request_id", None) or f"req_{secrets.token_hex(12)}"
+    request.state.request_id = request_id
+    report_tenant_storage_unavailable(
+        error,
+        # Paths can contain bearer tokens (booking/gallery/manage links). Keep the
+        # incident correlation useful without copying raw URLs into logs or alerts.
+        operation=f"{request.method} tenant request",
+        reference=request_id,
+    )
+    path = request.url.path
+    if path == "/api/v1" or path.startswith("/api/v1/"):
+        response = _api_problem(
+            request,
+            503,
+            "tenant.storage_unavailable",
+            "Studio temporarily unavailable",
+            "This studio's data is temporarily unavailable. Please try again later.",
+        )
+    elif "text/html" in request.headers.get("accept", ""):
+        response = templates.TemplateResponse(
+            request,
+            "saas/tenant_storage_unavailable.html",
+            {"studio_name": error.studio_name, "request_id": request_id},
+            status_code=503,
+        )
+    else:
+        response = JSONResponse(
+            {
+                "detail": "studio data temporarily unavailable",
+                "request_id": request_id,
+            },
+            status_code=503,
+        )
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
 async def tenant_middleware(request: Request, call_next):
     if not config.SAAS_MODE:
         return await call_next(request)
@@ -1554,9 +1652,8 @@ async def tenant_middleware(request: Request, call_next):
         return RedirectResponse("/pricing", status_code=303)
 
     tenant = tenant_by_slug(slug)
-    # A deleted studio's tombstone slug must be as gone as a never-registered one:
-    # serving it would re-provision an empty data dir via ensure_tenant_database and
-    # let the old password log in to the husk (ADR 0051).
+    # A deleted studio's tombstone slug must be as gone as a never-registered one;
+    # the old password must never authenticate against a reused address (ADR 0051).
     if not tenant or tenant.get("deleted_at"):
         if path == "/api/v1" or path.startswith("/api/v1/"):
             return _api_problem(
@@ -1576,33 +1673,36 @@ async def tenant_middleware(request: Request, call_next):
         return JSONResponse({"detail": "unknown tenant"}, status_code=404)
 
     tenant = mark_custom_domain_verified(tenant, request.headers.get("host", ""))
-    with tenant_runtime(tenant):
-        request.state.tenant = dict(tenant)
-        request.state.saas_billing = tenant_billing_context(tenant)
-        if not tenant_has_access(tenant) and not _billing_allowed_path(path):
-            if path.startswith("/admin"):
-                return RedirectResponse("/admin/billing?expired=1", status_code=303)
-            # A client following the studio's gallery/invoice link gets a branded,
-            # neutral page (never the raw "subscription required" JSON, which both
-            # dumps a blob and blames the studio's billing). Non-browser callers keep
-            # the JSON 402 contract — mirror the unknown-tenant handling above.
-            if path == "/api/v1" or path.startswith("/api/v1/"):
-                return _api_problem(
-                    request,
-                    402,
-                    "tenant.subscription_required",
-                    "Studio unavailable",
-                    "This studio is temporarily unavailable.",
-                )
-            if "text/html" in request.headers.get("accept", ""):
-                return templates.TemplateResponse(
-                    request,
-                    "saas/studio_unavailable.html",
-                    {"studio_name": tenant.get("studio_name") or "This studio"},
-                    status_code=402,
-                )
-            return JSONResponse({"detail": "subscription required"}, status_code=402)
-        return await call_next(request)
+    try:
+        with tenant_runtime(tenant):
+            request.state.tenant = dict(tenant)
+            request.state.saas_billing = tenant_billing_context(tenant)
+            if not tenant_has_access(tenant) and not _billing_allowed_path(path):
+                if path.startswith("/admin"):
+                    return RedirectResponse("/admin/billing?expired=1", status_code=303)
+                # A client following the studio's gallery/invoice link gets a branded,
+                # neutral page (never the raw "subscription required" JSON, which both
+                # dumps a blob and blames the studio's billing). Non-browser callers keep
+                # the JSON 402 contract — mirror the unknown-tenant handling above.
+                if path == "/api/v1" or path.startswith("/api/v1/"):
+                    return _api_problem(
+                        request,
+                        402,
+                        "tenant.subscription_required",
+                        "Studio unavailable",
+                        "This studio is temporarily unavailable.",
+                    )
+                if "text/html" in request.headers.get("accept", ""):
+                    return templates.TemplateResponse(
+                        request,
+                        "saas/studio_unavailable.html",
+                        {"studio_name": tenant.get("studio_name") or "This studio"},
+                        status_code=402,
+                    )
+                return JSONResponse({"detail": "subscription required"}, status_code=402)
+            return await call_next(request)
+    except TenantStorageUnavailable as exc:
+        return tenant_storage_unavailable_response(request, exc)
 
 
 def _pricing_context(

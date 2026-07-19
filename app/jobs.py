@@ -247,31 +247,43 @@ def _claim(job_id: int) -> "db.sqlite3.Row | None":
 
 
 def _execute(job_id: int, tenant_slug: str | None = None) -> None:
-    with _job_runtime(tenant_slug):
-        job = _claim(job_id)
-        if not job:
-            return
-        payload = json.loads(job["payload"])
-        try:
-            HANDLERS[job["kind"]](payload)
-            db.run(
-                "UPDATE jobs SET status='done', error=NULL, updated_at=datetime('now') WHERE id=?",
-                (job_id,),
-            )
-            log.info("job %s %s done", job_id, job["kind"])
-        except Exception as e:
-            status = "queued" if job["attempts"] < MAX_ATTEMPTS else "failed"
-            db.run(
-                "UPDATE jobs SET status=?, error=?, updated_at=datetime('now') WHERE id=?",
-                (status, str(e)[:500], job_id),
-            )
-            log.exception(
-                "job %s %s attempt %s -> %s", job_id, job["kind"], job["attempts"], status
-            )
-            if status == "failed" and "asset_id" in payload:
-                db.run("UPDATE assets SET status='failed' WHERE id=?", (payload["asset_id"],))
-            if status == "queued" and _pool:
-                _pool.submit(_execute, job_id, tenant_slug)
+    try:
+        with _job_runtime(tenant_slug):
+            job = _claim(job_id)
+            if not job:
+                return
+            payload = json.loads(job["payload"])
+            try:
+                HANDLERS[job["kind"]](payload)
+                db.run(
+                    "UPDATE jobs SET status='done', error=NULL, "
+                    "updated_at=datetime('now') WHERE id=?",
+                    (job_id,),
+                )
+                log.info("job %s %s done", job_id, job["kind"])
+            except db.ExistingDatabaseUnavailable:
+                raise
+            except Exception as e:
+                status = "queued" if job["attempts"] < MAX_ATTEMPTS else "failed"
+                db.run(
+                    "UPDATE jobs SET status=?, error=?, updated_at=datetime('now') WHERE id=?",
+                    (status, str(e)[:500], job_id),
+                )
+                log.exception(
+                    "job %s %s attempt %s -> %s", job_id, job["kind"], job["attempts"], status
+                )
+                if status == "failed" and "asset_id" in payload:
+                    db.run("UPDATE assets SET status='failed' WHERE id=?", (payload["asset_id"],))
+                if status == "queued" and _pool:
+                    _pool.submit(_execute, job_id, tenant_slug)
+    except Exception as exc:
+        if config.SAAS_MODE and tenant_slug:
+            from . import saas
+
+            if isinstance(exc, saas.TenantStorageUnavailable):
+                saas.report_tenant_storage_unavailable(exc, operation="job execution")
+                return
+        raise
 
 
 def retry(job_id: int) -> bool:
@@ -309,9 +321,13 @@ def start() -> None:
 
         total = 0
         for tenant in saas.list_tenants(billable_only=True):
-            with saas.tenant_runtime(tenant):
-                db.run("UPDATE jobs SET status='queued' WHERE status='running'")
-                backlog = db.all_("SELECT id FROM jobs WHERE status='queued' ORDER BY id")
+            try:
+                with saas.tenant_runtime(tenant):
+                    db.run("UPDATE jobs SET status='queued' WHERE status='running'")
+                    backlog = db.all_("SELECT id FROM jobs WHERE status='queued' ORDER BY id")
+            except saas.TenantStorageUnavailable as exc:
+                saas.report_tenant_storage_unavailable(exc, operation="job startup")
+                continue
             for row in backlog:
                 _pool.submit(_execute, row["id"], tenant["slug"])
             total += len(backlog)

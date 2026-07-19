@@ -403,12 +403,21 @@ update the relevant section and add/observe the matching ADR.*
 ## 10. Hosted backups & restore (ADR 0057)
 
 The compose `backup` sidecar runs `scripts/hosted-backup.py --loop`: every
-`MISE_BACKUP_INTERVAL_HOURS` (default 24) it takes a **consistent, integrity-checked,
-gzipped snapshot of every tenant database and the control DB** into
-`/data/backups/<stamp>/`, prunes snapshots older than `MISE_BACKUP_RETENTION_DAYS`
-(default 14), and stamps `/data/backups/.last-hosted-backup`. The hourly ops sweep
-alerts on Telegram when that marker is missing or older than
-`MISE_BACKUP_STALE_HOURS` — silence is not evidence; the marker asserts the positive.
+`MISE_BACKUP_INTERVAL_HOURS` (default 24) it first takes a consistent control-DB
+snapshot into `/data/backups/<stamp>/`, reads the retained-tenant roster from that
+**archived control snapshot**, and attempts an integrity-checked, gzipped snapshot
+for each retained tenant database. It prunes snapshots older than
+`MISE_BACKUP_RETENTION_DAYS` (default 14) and stamps
+`/data/backups/.last-hosted-backup` after the control snapshot and tenant attempts.
+A fresh heartbeat proves the pass ran; it does **not** prove every tenant snapshot
+succeeded.
+
+If a retained tenant DB is missing, invalid, corrupt, or fails during snapshot, the
+pass continues for healthy tenants and writes its slug to
+`/data/backups/.last-hosted-backup-failures`. The hourly ops sweep emits
+`backup_partial` while that marker exists, even when the heartbeat is fresh, and the
+one-off command exits non-zero. Missing or stale heartbeats remain separate alerts —
+silence is not evidence.
 
 **Local snapshots live on the same volume as the data** — they protect against
 corruption and mistakes, not disk loss. Set `MISE_BACKUP_RCLONE_REMOTE` (e.g.
@@ -417,20 +426,59 @@ also syncs the snapshot dir **and the full tenant media tree** off-site. An
 unset remote reports `offsite: off`; a broken one reports `failed:*` and exits
 non-zero — never a silent no-op.
 
+### Tenant-storage incident: restore, never reprovision
+
+An existing hosted tenant's database is durable state, not a cache. Ordinary
+requests, scheduled work, queued jobs, exports, and first access after a process
+restart open it in SQLite `mode=rw`; they never create a replacement database or
+tenant directory. Lazy migration is permitted only after that existing database
+has opened successfully. New-tenant provisioning is the sole creation boundary.
+
+If the database is missing, corrupt, or unreadable:
+
+- API callers receive `503 tenant.storage_unavailable`; browser callers receive
+  the matching neutral 503 page. Both include the same `X-Request-ID` reference.
+- The application logs only tenant ID, validated slug, operation, and reference;
+  when Telegram alerts are configured, a throttled Mise ops alert carries those
+  same non-secret fields.
+- Healthy tenants keep starting and recovering queued work. The affected tenant
+  remains unavailable, and no empty-success response is served.
+
+Treat that reference as a restore incident:
+
+1. Stop writes to the affected tenant and correlate the request ID with
+   `tenant storage unavailable` in the application log. Do not delete the
+   control-plane row, rerun signup, or create an empty `mise.db`.
+2. Select a verified snapshot for the exact slug. Restore it to a side file and
+   prove `PRAGMA quick_check` is `ok`, `PRAGMA foreign_key_check` is empty,
+   and `schema_migrations` contains `001_init.sql` before considering a swap.
+3. Human gate: stop the app, take timestamped copies of any surviving
+   `mise.db`, `mise.db-wal`, and `mise.db-shm`, atomically move the verified
+   side file into place, then remove stale WAL/SHM files only after their backups
+   exist.
+4. Start the app, retry with the original tenant host, and verify the 503 clears,
+   expected studio records are present, the log reference has no new occurrence,
+   and a fresh hosted backup succeeds.
+
 ### Restore drill (practice this before you need it)
 
 1. `docker compose exec backup ls /data/backups/` — pick a snapshot stamp.
 2. Restore one tenant DB:
    `docker compose exec backup sh -c 'gunzip -c /data/backups/<stamp>/tenants/<slug>.db.gz > /data/tenants/<slug>/mise.db.restore'`
-3. Verify it opens: `python3 -c "import sqlite3;print(sqlite3.connect('/data/tenants/<slug>/mise.db.restore').execute('PRAGMA quick_check').fetchone())"` (run inside the container).
-4. Swap it in with the app stopped for that step:
-   `docker compose stop mise && mv .../mise.db.restore .../mise.db && docker compose start mise`
-   (also delete stale `mise.db-wal`/`mise.db-shm` beside it).
-5. Full-disk-loss recovery: provision a new host, `rclone sync <remote>/tenants /data/tenants`
+3. Validate the side file inside the container: require `PRAGMA quick_check` to
+   return `ok`, `PRAGMA foreign_key_check` to return no rows, and confirm the
+   `schema_migrations` table contains `001_init.sql`. A failed check stops the drill.
+4. Human gate: stop the app. Make timestamped copies of every surviving
+   `mise.db`, `mise.db-wal`, and `mise.db-shm` for this slug and verify the copies
+   exist. Atomically rename `mise.db.restore` to `mise.db`; only then remove stale
+   WAL/SHM sidecars whose timestamped copies are safe.
+5. Start the app, verify the tenant host serves expected records without the 503,
+   then run a fresh hosted backup before declaring the drill successful.
+6. Full-disk-loss recovery: provision a new host, `rclone sync <remote>/tenants /data/tenants`
    and `rclone sync <remote>/backups /data/backups`, restore each tenant DB from the newest
    snapshot as above (the live DB files in the media sync are NOT crash-consistent — always
    restore DBs from snapshots), then bring the stack up and run the preflight.
-6. Manual one-off pass anytime: `docker compose exec backup python scripts/hosted-backup.py`.
+7. Manual one-off pass anytime: `docker compose exec backup python scripts/hosted-backup.py`.
 
 ## 11. Hosted operations — the /admin/saas cockpit
 

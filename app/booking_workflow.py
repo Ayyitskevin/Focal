@@ -337,6 +337,8 @@ def _execute(claimed: dict) -> None:
                 claimed["workflow_id"],
                 claimed["effect_kind"],
             )
+    except db.ExistingDatabaseUnavailable:
+        raise
     except Exception as exc:
         if not _fail(claimed, exc):
             log.warning(

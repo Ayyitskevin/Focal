@@ -41,6 +41,25 @@ _booking_wake = threading.Event()
 _booking_thread: threading.Thread | None = None
 
 
+def _revalidated_retained_tenant(listed_tenant: dict) -> dict | None:
+    """Resolve one control-plane snapshot row by immutable identity."""
+    from . import saas
+
+    tenant_id = listed_tenant.get("id")
+    listed_slug = listed_tenant.get("slug")
+    if tenant_id is None or not listed_slug:
+        return None
+    tenant = saas.tenant_by_id(tenant_id)
+    if (
+        not tenant
+        or tenant.get("id") != tenant_id
+        or tenant.get("slug") != listed_slug
+        or tenant.get("deleted_at")
+    ):
+        return None
+    return tenant
+
+
 def _loop(stop_event: threading.Event) -> None:
     while not stop_event.wait(config.RECURRING_TICK_SECONDS):
         if config.SAAS_MODE:
@@ -66,12 +85,18 @@ def _loop(stop_event: threading.Event) -> None:
             except Exception:
                 log.exception("weekly digest sweep failed")
             _prune_hosted_mobile_idempotency()
-            for tenant in saas.list_tenants(billable_only=True):
+            for listed_tenant in saas.list_tenants(billable_only=True):
+                listed_slug = listed_tenant.get("slug")
                 try:
+                    tenant = _revalidated_retained_tenant(listed_tenant)
+                    if not tenant:
+                        continue
                     with saas.tenant_runtime(tenant):
                         _sweep_once()
+                except saas.TenantStorageUnavailable as exc:
+                    saas.report_tenant_storage_unavailable(exc, operation="scheduled tenant sweep")
                 except Exception:
-                    log.exception("tenant scheduler sweep failed: %s", tenant["slug"])
+                    log.exception("tenant scheduler sweep failed: %s", listed_slug)
             continue
         _prune_mobile_idempotency()
         _sweep_once()
@@ -120,28 +145,20 @@ def _sweep_booking_workflows() -> None:
     from . import saas
 
     # Delivery recovery is a retention obligation, not a billing benefit. Include
-    # cancelled/unpaid tenants whose DB still exists, while never recreating a
-    # missing database or entering a deleted tenant tombstone.
+    # cancelled/unpaid retained tenants; missing storage produces an incident
+    # signal, while deleted tenant tombstones are never entered or recreated.
     for listed_tenant in saas.list_tenants():
         tenant_id = listed_tenant.get("id")
         listed_slug = listed_tenant.get("slug")
-        if tenant_id is None or not listed_slug:
-            continue
 
         # The list is only a snapshot. Re-fetch by immutable identity immediately
-        # before entering tenant_runtime so a deleted tenant, renamed row, or slug
-        # reused by another tenant cannot be processed from stale state. The path
-        # check is deliberately outside tenant_runtime, whose normal request-path
-        # contract is allowed to provision a missing tenant database.
+        # before entering the existing-only runtime so a deleted tenant, renamed
+        # row, or reused slug cannot be processed from stale state. Do not preflight
+        # the path here: a retained tenant with missing storage must produce the
+        # recovery signal, and SQLite mode=rw prevents replacement creation.
         try:
-            tenant = saas.tenant_by_id(tenant_id)
-            if (
-                not tenant
-                or tenant.get("id") != tenant_id
-                or tenant.get("slug") != listed_slug
-                or tenant.get("deleted_at")
-                or not saas.tenant_db_path(listed_slug).exists()
-            ):
+            tenant = _revalidated_retained_tenant(listed_tenant)
+            if not tenant:
                 continue
         except Exception:
             log.exception(
@@ -153,6 +170,8 @@ def _sweep_booking_workflows() -> None:
         try:
             with saas.tenant_runtime_existing(tenant):
                 booking_workflow.sweep()
+        except saas.TenantStorageUnavailable as exc:
+            saas.report_tenant_storage_unavailable(exc, operation="booking workflow recovery")
         except Exception:
             log.exception("tenant booking workflow sweep failed: %s", listed_slug)
 
@@ -171,18 +190,23 @@ def _prune_hosted_mobile_idempotency() -> None:
 
     Deleted tenant rows are tombstones whose data has moved to ``.trash``; entering
     their runtime would accidentally recreate an empty live-looking directory.
-    Likewise, cleanup never provisions a missing tenant DB merely to delete rows.
+    Likewise, cleanup never provisions a missing tenant DB merely to delete rows;
+    retained missing storage produces the same throttled recovery signal.
     """
     from . import saas
 
-    for tenant in saas.list_tenants():
-        if tenant.get("deleted_at") or not saas.tenant_db_path(tenant["slug"]).exists():
-            continue
+    for listed_tenant in saas.list_tenants():
+        listed_slug = listed_tenant.get("slug")
         try:
+            tenant = _revalidated_retained_tenant(listed_tenant)
+            if not tenant:
+                continue
             with saas.tenant_runtime(tenant):
                 _prune_mobile_idempotency()
+        except saas.TenantStorageUnavailable as exc:
+            saas.report_tenant_storage_unavailable(exc, operation="mobile idempotency cleanup")
         except Exception:
-            log.exception("tenant mobile idempotency cleanup failed: %s", tenant["slug"])
+            log.exception("tenant mobile idempotency cleanup failed: %s", listed_slug)
 
 
 def _sweep_once() -> None:

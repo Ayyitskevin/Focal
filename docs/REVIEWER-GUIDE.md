@@ -69,6 +69,8 @@ separate macOS `build-test` workflow because Linux cannot run the Xcode gate.
 - Are the ADRs recording durable decisions, or accumulating plans that no longer
   match code?
 - Which tests prove trust boundaries, and which only preserve current output?
+- Does every retained-tenant entry point open existing storage without a hidden
+  create path, while one broken tenant leaves healthy tenants available?
 
 ## Current holds to keep in frame
 
@@ -77,8 +79,6 @@ The most material open items are:
 
 - [#182](https://github.com/Ayyitskevin/mise/issues/182): native product scope is
   narrower than the pocket-OS direction;
-- [#181](https://github.com/Ayyitskevin/mise/issues/181): missing hosted tenant
-  storage can be recreated instead of failing loud;
 - [#180](https://github.com/Ayyitskevin/mise/issues/180): App Store purchase/IAP
   distribution strategy is undecided;
 - [#179](https://github.com/Ayyitskevin/mise/issues/179): privacy manifest and
