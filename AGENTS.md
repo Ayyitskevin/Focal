@@ -1,16 +1,26 @@
-# AGENTS.md — scope contract for autonomous work on Mise
+# AGENTS.md — scope contract for autonomous work on Focal
 
-Mise is a **product-incubation sandbox** — a web + iOS "solo studio OS" for wedding
-photographers, under active exploration by a fleet of AI agents. It is **NOT deployed and
-has no live users.** This file is the contract that lets an agent work continuously without
-a human watching every commit. Read it before you touch anything. When code and this file
-disagree, stop and ask — don't reconcile silently.
+Focal is a self-hostable, local-first studio operating system for solo photographers
+and small creative studios. It is in active development and private-beta preparation.
+This file is the contract that lets an agent work continuously without a human watching
+every commit. Read it before you touch anything. When code and this file disagree, stop
+and ask — do not reconcile silently.
 
-The **live** photography site lives in a **separate repo, `github.com/Ayyitskevin/kleephotography`**
-— that repo is what deploys to flow `100.90.17.20:8400` · `/opt/mise` · `kleephotography.com`
-and handles real Stripe money for real clients. Do not confuse the two: nothing you push to
-THIS repo reaches production, and you never edit the flow deploy tree from here. Work in your
-own clone or a `claude/<topic>` branch.
+The public photography website lives in a separate repository,
+github.com/Ayyitskevin/kleephotography. Focal is not that site's hidden backend,
+deployment source of truth, or customer-data store. Do not edit that repository or its
+deployment tree from here.
+
+Hestia is a separate greenfield commercial SaaS track. Sibling repositories are design
+references only unless an explicit, reviewed contract says otherwise. Focal owns its
+own data, tests, runtime boundaries, and product claims.
+
+The public product name is Focal. The codebase still contains compatibility-sensitive
+legacy Mise/MISE_* identifiers in environment variables, filesystem paths, service names,
+Swift project names, and historical documents. A branding pass must not rename those
+runtime identifiers, database keys, deployment units, or API contracts. Treat a full
+namespace migration as a separate red-light change with tests, rollback, and human
+review.
 
 ## Green-light — work freely, commit straight to `main`, push `all`
 
@@ -82,10 +92,10 @@ locally before pushing — CI runs the same on `main` and on PRs.
 
 ## Operating the live admin (if your task does, not just edits code)
 
-After any **write** in Mise admin (client/project/shot create or update, status change),
+After any **write** in Focal admin (client/project/shot create or update, status change),
 append one row to the Notion **Mise Activity Log** (Command Center · db
 `14ed3722-8165-48a2-82e0-cecbaf4c5daa`) — one-way, display-only, one row per write. Never
-read that log back into any Mise flow.
+read that log back into any Focal flow.
 
 ## Safety net (so you know what's catching you)
 
