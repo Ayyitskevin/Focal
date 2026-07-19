@@ -15,7 +15,7 @@ opened or changed.
 
 from __future__ import annotations
 
-BLOCKER_URL = "https://github.com/Ayyitskevin/mise/issues/185"
+BLOCKER_URL = "https://github.com/Ayyitskevin/Focal/issues/185"
 DISABLED_MESSAGE = (
     "Reviewer demo provisioning is disabled: the former seeder is unsafe for "
     "hosted state. Do not run it on local, staging, or production control data. "
