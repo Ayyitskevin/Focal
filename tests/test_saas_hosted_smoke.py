@@ -124,7 +124,7 @@ def test_platform_demo_tour_renders(tmp_path, monkeypatch):
     response = asyncio.run(saas.demo(_request("/demo", "mise.test")))
 
     assert response.status_code == 200
-    assert "Restaurant content day" in response.body.decode()
+    assert "Commercial content day" in response.body.decode()
     assert "Wedding story collection" in response.body.decode()
 
 
@@ -136,9 +136,9 @@ def test_platform_home_and_pricing_answer_buyer_objections(tmp_path, monkeypatch
 
     home_body = home.body.decode()
     pricing_body = pricing.body.decode()
-    assert "Does Mise replace Pixieset and HoneyBook" in home_body
-    assert "No paid tiers" in home_body
-    assert "Trial-first setup" in pricing_body
+    assert "Does Focal replace a photographer's small stack" in home_body
+    assert "Focused workflow" in home_body
+    assert "Gallery delivery" in pricing_body
     assert "Solo-founder supportable" in pricing_body
 
 
@@ -151,10 +151,10 @@ def test_platform_marketing_pages_render_share_metadata(tmp_path, monkeypatch):
 
     assert '<link rel="canonical" href="https://mise.test/">' in home
     assert '"@type": "SoftwareApplication"' in home
-    assert '"price": "20"' in home
-    assert 'property="og:title" content="Mise Pricing - $20/month"' in pricing
+    assert '"name": "Focal"' in home
+    assert 'property="og:title" content="Focal Private Beta"' in pricing
     assert '<link rel="canonical" href="https://mise.test/pricing">' in pricing
-    assert 'property="og:title" content="Mise Demo - F&B and Wedding Client Studio"' in demo
+    assert 'property="og:title" content="Focal Demo — Pocket Studio OS"' in demo
     assert '<link rel="canonical" href="https://mise.test/demo">' in demo
 
 
@@ -173,7 +173,7 @@ def test_legal_pages_render_and_are_platform_paths(tmp_path, monkeypatch):
         support.body.decode(),
     )
     # Each doc renders its own distinct content, not a shared stub.
-    assert "Terms of Service" in terms_body and "$20/month" in terms_body
+    assert "Terms of Service" in terms_body and "private beta" in terms_body.lower()
     assert "Privacy Policy" in privacy_body
     assert "train AI models" in privacy_body  # the no-AI-training promise
     assert "help@mise.test" in support_body  # support email surfaces
