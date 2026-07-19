@@ -131,6 +131,8 @@ def client_gallery_detail(
     request: Request,
     response: Response,
     gallery_id: Annotated[int, Path(ge=1)],
+    cursor: Annotated[str | None, Query(max_length=_MAX_CURSOR_LENGTH)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 100,
 ) -> GalleryDetail | Response:
     principal = mobile_auth.authenticate_request(request)
     if gallery_id not in _client_gallery_ids(principal):
@@ -138,10 +140,20 @@ def client_gallery_detail(
     rows = _gallery_query(gallery_id=gallery_id, row_limit=1)
     if not rows:
         raise HTTPException(status_code=404, detail="Gallery not found.")
+    row = rows[0]
+    asset_page = _gallery_assets(
+        gallery_id,
+        request,
+        cursor=cursor,
+        limit=limit,
+        cursor_kind=f"client-gallery-assets:{gallery_id}",
+    )
     detail = GalleryDetail(
-        summary=_gallery_summary(rows[0]),
+        summary=_gallery_summary(row),
         sections=_gallery_sections(gallery_id),
-        assets=_gallery_assets(gallery_id, request),
+        assets=asset_page.items,
+        assets_next_cursor=asset_page.next_cursor,
+        assets_has_more=asset_page.has_more,
         hero_asset_ids=[],
         vision=None,
     )

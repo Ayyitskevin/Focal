@@ -45,9 +45,11 @@ final class GalleryFavoritesTests: XCTestCase {
         )
         let asset = Self.asset(id: 201, isFavorite: false)
 
+        XCTAssertEqual(favorites.favoriteCount(total: 10, in: [asset]), 10)
         XCTAssertFalse(favorites.isFavorite(asset))
         await favorites.toggleFavorite(asset)
 
+        XCTAssertEqual(favorites.favoriteCount(total: 10, in: [asset]), 11)
         XCTAssertTrue(favorites.isFavorite(asset))
         XCTAssertNil(favorites.notice)
         let section = GallerySection(

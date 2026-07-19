@@ -39,8 +39,15 @@ final class GalleryFavorites {
         sectionSelectedCounts[section.id] ?? section.selectedCount
     }
 
-    func favoriteCount(in detail: GalleryDetail) -> Int {
-        detail.assets.lazy.filter { self.isFavorite($0) }.count
+    func favoriteCount(total: Int, in assets: [GalleryAsset]) -> Int {
+        var count = total
+        for asset in assets {
+            guard let override = overrides[asset.id], override != asset.isFavorite else {
+                continue
+            }
+            count += override ? 1 : -1
+        }
+        return max(0, count)
     }
 
     func toggleFavorite(_ asset: GalleryAsset) async {
@@ -66,6 +73,100 @@ final class GalleryFavorites {
     }
 }
 
+@MainActor
+@Observable
+final class GalleryAssetPager {
+    private(set) var assets: [GalleryAsset]
+    private(set) var nextCursor: String?
+    private(set) var hasMore: Bool
+    private(set) var isLoading = false
+    private(set) var requiresRefresh = false
+    var notice: String?
+
+    private var galleryID: Int64
+    private var contentRevision: Int64
+    private var generation = 0
+    private let loadPage: @Sendable (String) async throws -> GalleryDetail
+
+    init(
+        detail: GalleryDetail,
+        loadPage: @escaping @Sendable (String) async throws -> GalleryDetail
+    ) {
+        assets = detail.assets
+        nextCursor = detail.assetsNextCursor
+        hasMore = detail.assetsHasMore
+        galleryID = detail.summary.id
+        contentRevision = detail.summary.contentRevision
+        self.loadPage = loadPage
+    }
+
+    func reset(detail: GalleryDetail) {
+        generation += 1
+        galleryID = detail.summary.id
+        contentRevision = detail.summary.contentRevision
+        assets = detail.assets
+        nextCursor = detail.assetsNextCursor
+        hasMore = detail.assetsHasMore
+        isLoading = false
+        requiresRefresh = false
+        notice = nil
+    }
+
+    func loadNextPage() async {
+        guard hasMore, !isLoading, let cursor = nextCursor else { return }
+        let requestGeneration = generation
+        let expectedGalleryID = galleryID
+        let expectedRevision = contentRevision
+        isLoading = true
+        defer {
+            if generation == requestGeneration {
+                isLoading = false
+            }
+        }
+
+        do {
+            let page = try await loadPage(cursor)
+            try Task.checkCancellation()
+            guard generation == requestGeneration else { return }
+            guard
+                page.summary.id == expectedGalleryID,
+                page.summary.contentRevision == expectedRevision,
+                page.assets.allSatisfy({ $0.galleryID == expectedGalleryID }),
+                page.assetsHasMore == (page.assetsNextCursor != nil)
+            else {
+                rejectPage()
+                return
+            }
+
+            var knownIDs = Set(assets.map(\.id))
+            let newAssets = page.assets.filter { knownIDs.insert($0.id).inserted }
+            if page.assetsHasMore && (
+                newAssets.isEmpty || page.assetsNextCursor == cursor
+            ) {
+                rejectPage()
+                return
+            }
+
+            assets.append(contentsOf: newAssets)
+            nextCursor = page.assetsNextCursor
+            hasMore = page.assetsHasMore
+            requiresRefresh = false
+            notice = nil
+        } catch is CancellationError {
+            // The paging footer left the hierarchy or a refreshed detail replaced this request.
+        } catch {
+            guard generation == requestGeneration else { return }
+            requiresRefresh = false
+            notice = "Couldn’t load more media. Try again."
+        }
+    }
+
+    private func rejectPage() {
+        requiresRefresh = true
+        notice = "This gallery changed. Pull to refresh before loading more."
+    }
+}
+
 /// The shared sectioned photo grid from the design handoff — identical for the
 /// owner and client roles. Tight 3-column grid, small radius, play glyph on
 /// video, heart badge on favorites.
@@ -75,11 +176,26 @@ struct GalleryManifestView: View {
     let mediaLoader: AuthenticatedMediaLoader
     let refresh: @MainActor () async -> Void
 
+    @State private var pager: GalleryAssetPager
     @State private var lightboxAsset: GalleryAsset?
+
+    init(
+        detail: GalleryDetail,
+        favorites: GalleryFavorites,
+        mediaLoader: AuthenticatedMediaLoader,
+        refresh: @escaping @MainActor () async -> Void,
+        loadPage: @escaping @Sendable (String) async throws -> GalleryDetail
+    ) {
+        self.detail = detail
+        self.favorites = favorites
+        self.mediaLoader = mediaLoader
+        self.refresh = refresh
+        _pager = State(initialValue: GalleryAssetPager(detail: detail, loadPage: loadPage))
+    }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            LazyVStack(alignment: .leading, spacing: 20) {
                 summaryStrip
                 ForEach(sectionGroups, id: \.0) { _, section, assets in
                     sectionView(section, assets: assets)
@@ -87,6 +203,7 @@ struct GalleryManifestView: View {
                 if !unsectioned.isEmpty {
                     grid(unsectioned)
                 }
+                paginationFooter
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 16)
@@ -94,7 +211,7 @@ struct GalleryManifestView: View {
         .refreshable { await refresh() }
         .fullScreenCover(item: $lightboxAsset) { asset in
             GalleryLightboxView(
-                assets: detail.assets,
+                assets: pager.assets,
                 initialAssetID: asset.id,
                 favorites: favorites,
                 mediaLoader: mediaLoader
@@ -111,6 +228,9 @@ struct GalleryManifestView: View {
         } message: {
             Text(favorites.notice ?? "")
         }
+        .onChange(of: detail) { _, updated in
+            pager.reset(detail: updated)
+        }
     }
 
     private var summaryStrip: some View {
@@ -119,9 +239,12 @@ struct GalleryManifestView: View {
                 label: detail.summary.deliveryState.clientDisplayName,
                 tone: detail.summary.deliveryState.tone
             )
-            Text("\(favorites.favoriteCount(in: detail)) of \(detail.assets.count) favorited")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+            Text(
+                "\(favorites.favoriteCount(total: detail.summary.favoriteCount, in: pager.assets)) " +
+                    "favorites · \(pager.assets.count) of \(detail.summary.assetCount) media"
+            )
+            .font(.footnote)
+            .foregroundStyle(.secondary)
             Spacer(minLength: 0)
         }
         .accessibilityElement(children: .combine)
@@ -129,7 +252,7 @@ struct GalleryManifestView: View {
 
     private var sectionGroups: [(Int64, GallerySection, [GalleryAsset])] {
         detail.sections.compactMap { section in
-            let assets = detail.assets.filter { $0.sectionID == section.id }
+            let assets = pager.assets.filter { $0.sectionID == section.id }
             guard !assets.isEmpty else { return nil }
             return (section.id, section, assets)
         }
@@ -137,7 +260,7 @@ struct GalleryManifestView: View {
 
     private var unsectioned: [GalleryAsset] {
         let sectionIDs = Set(detail.sections.map(\.id))
-        return detail.assets.filter { asset in
+        return pager.assets.filter { asset in
             guard let sectionID = asset.sectionID else { return true }
             return !sectionIDs.contains(sectionID)
         }
@@ -179,6 +302,44 @@ struct GalleryManifestView: View {
                 .accessibilityLabel(assetLabel(asset))
                 .accessibilityHint("Opens the photo viewer")
             }
+        }
+    }
+
+    @ViewBuilder
+    private var paginationFooter: some View {
+        if let notice = pager.notice {
+            VStack(spacing: 8) {
+                Text(notice)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                if pager.requiresRefresh {
+                    Button("Refresh gallery") {
+                        Task { await refresh() }
+                    }
+                    .buttonStyle(.bordered)
+                } else {
+                    Button("Try loading more") {
+                        Task { await pager.loadNextPage() }
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+        } else if pager.hasMore {
+            Group {
+                if pager.isLoading {
+                    ProgressView("Loading more media…")
+                } else {
+                    Button("Load more media") {
+                        Task { await pager.loadNextPage() }
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
         }
     }
 

@@ -209,7 +209,9 @@ class GalleryVisionSummary(MobileReadModel):
 class GalleryDetail(MobileReadModel):
     summary: GallerySummary
     sections: list[GallerySection] = Field(default_factory=list, max_length=1000)
-    assets: list[GalleryAsset] = Field(default_factory=list, max_length=10_000)
+    assets: list[GalleryAsset] = Field(default_factory=list, max_length=100)
+    assets_next_cursor: str | None = Field(default=None, max_length=_MAX_CURSOR_LENGTH)
+    assets_has_more: bool
     hero_asset_ids: list[int] = Field(default_factory=list, max_length=1000)
     vision: GalleryVisionSummary | None = None
 
@@ -224,7 +226,9 @@ class GalleryDetail(MobileReadModel):
         if len(self.hero_asset_ids) != len(set(self.hero_asset_ids)):
             raise ValueError("hero asset ids must be unique")
         if not set(self.hero_asset_ids).issubset(asset_ids):
-            raise ValueError("hero assets must be present in the manifest")
+            raise ValueError("hero assets must be present in this manifest page")
+        if self.assets_has_more != (self.assets_next_cursor is not None):
+            raise ValueError("asset cursor and has-more state must agree")
         return self
 
 
@@ -659,22 +663,53 @@ def _gallery_sections(gallery_id: int) -> list[GallerySection]:
     ]
 
 
-def _gallery_assets(gallery_id: int, request: Request) -> list[GalleryAsset]:
+def _gallery_assets(
+    gallery_id: int,
+    request: Request,
+    *,
+    cursor: str | None,
+    limit: int,
+    cursor_kind: str,
+) -> APIPage[GalleryAsset]:
+    decoded = _decode_cursor(cursor, cursor_kind, (int, int, int, int))
+    after: tuple[int, int, int, int] | None = None
+    if decoded is not None:
+        after = (
+            int(decoded[0]),
+            int(decoded[1]),
+            int(decoded[2]),
+            int(decoded[3]),
+        )
+
     gate = delivery_gate.clause("a")
+    cursor_predicate = ""
+    params: list[int] = [gallery_id]
+    if after is not None:
+        cursor_predicate = (
+            " AND ((a.section_id IS NULL), COALESCE(a.section_id, 0), "
+            "a.position, a.id) > (?, ?, ?, ?)"
+        )
+        params.extend(after)
+    params.append(limit + 1)
     rows = db.all_(
         f"""SELECT a.id, a.gallery_id, a.section_id, a.kind, a.status,
                     a.filename, a.width, a.height, a.duration, a.bytes,
                     a.position, a.created_at, a.argus_alt_text, a.argus_keywords,
                     a.argus_keeper_score, a.argus_hero_potential, a.cull_state,
+                    a.section_id IS NULL AS unsectioned_rank,
+                    COALESCE(a.section_id, 0) AS section_key,
                     COUNT(f.visitor_id) AS favorite_count
               FROM assets a LEFT JOIN favorites f ON f.asset_id=a.id
-              WHERE a.gallery_id=? AND a.status='ready'{gate}
+              WHERE a.gallery_id=? AND a.status='ready'{gate}{cursor_predicate}
               GROUP BY a.id
-              ORDER BY a.section_id IS NULL, a.section_id, a.position, a.id""",
-        (gallery_id,),
+              ORDER BY unsectioned_rank, section_key, a.position, a.id
+              LIMIT ?""",
+        tuple(params),
     )
+    has_more = len(rows) > limit
+    page_rows = rows[:limit]
     assets: list[GalleryAsset] = []
-    for row in rows:
+    for row in page_rows:
         favorite_count = max(0, int(row["favorite_count"]))
         asset_id = int(row["id"])
         kind = "video" if row["kind"] == "video" else "photo"
@@ -705,7 +740,24 @@ def _gallery_assets(gallery_id: int, request: Request) -> list[GalleryAsset]:
                 cull_state=(row["cull_state"] if row["cull_state"] in {"keep", "cut"} else None),
             )
         )
-    return assets
+
+    next_cursor = None
+    if has_more and page_rows:
+        last = page_rows[-1]
+        next_cursor = _encode_cursor(
+            cursor_kind,
+            (
+                int(last["unsectioned_rank"]),
+                int(last["section_key"]),
+                int(last["position"]),
+                int(last["id"]),
+            ),
+        )
+    return APIPage[GalleryAsset](
+        items=assets,
+        next_cursor=next_cursor,
+        has_more=has_more,
+    )
 
 
 def _vision(row, hero_asset_ids: list[int]) -> GalleryVisionSummary | None:
@@ -772,18 +824,28 @@ def gallery_detail(
     request: Request,
     response: Response,
     gallery_id: Annotated[int, Path(ge=1)],
+    cursor: Annotated[str | None, Query(max_length=_MAX_CURSOR_LENGTH)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 100,
 ) -> GalleryDetail | Response:
     rows = _gallery_query(gallery_id=gallery_id, row_limit=1)
     if not rows:
         raise HTTPException(status_code=404, detail="Gallery not found.")
     row = rows[0]
-    assets = _gallery_assets(gallery_id, request)
-    asset_ids = {asset.id for asset in assets}
+    asset_page = _gallery_assets(
+        gallery_id,
+        request,
+        cursor=cursor,
+        limit=limit,
+        cursor_kind=f"owner-gallery-assets:{gallery_id}",
+    )
+    asset_ids = {asset.id for asset in asset_page.items}
     hero_asset_ids = _hero_ids(row["argus_hero_asset_ids"], asset_ids)
     detail = GalleryDetail(
         summary=_gallery_summary(row),
         sections=_gallery_sections(gallery_id),
-        assets=assets,
+        assets=asset_page.items,
+        assets_next_cursor=asset_page.next_cursor,
+        assets_has_more=asset_page.has_more,
         hero_asset_ids=hero_asset_ids,
         vision=_vision(row, hero_asset_ids),
     )

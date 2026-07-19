@@ -81,6 +81,7 @@ struct ClientGalleriesView: View {
 struct ClientGalleryDetailView: View {
     let gallery: GallerySummary
     let mediaLoader: AuthenticatedMediaLoader
+    private let repository: ClientRepository
     @State private var model: ResourceModel<GalleryDetail>
     @State private var favorites: GalleryFavorites
 
@@ -91,6 +92,7 @@ struct ClientGalleryDetailView: View {
     ) {
         self.gallery = gallery
         self.mediaLoader = mediaLoader
+        self.repository = repository
         _model = State(initialValue: ResourceModel(
             staleAfter: 60 * 60,
             cached: { try await repository.cachedGallery(id: gallery.id) },
@@ -118,7 +120,10 @@ struct ClientGalleryDetailView: View {
                     detail: detail,
                     favorites: favorites,
                     mediaLoader: mediaLoader,
-                    refresh: { await model.refresh() }
+                    refresh: { await model.refresh() },
+                    loadPage: { cursor in
+                        try await repository.galleryPage(id: gallery.id, cursor: cursor)
+                    }
                 )
             },
             empty: {

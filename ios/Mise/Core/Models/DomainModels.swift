@@ -213,6 +213,8 @@ struct GalleryDetail: Codable, Hashable, Sendable, Identifiable {
     let summary: GallerySummary
     let sections: [GallerySection]
     let assets: [GalleryAsset]
+    let assetsNextCursor: String?
+    let assetsHasMore: Bool
     let heroAssetIDs: [Int64]
     let vision: GalleryVisionSummary?
 }

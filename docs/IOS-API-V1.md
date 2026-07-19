@@ -196,7 +196,7 @@ persists neither the snapshot nor its ETag.
 | --- | --- | --- |
 | `GET /api/v1/client/home` | any guest | capability-shaped `ClientHomeSummary` with server-computed `next_steps` |
 | `GET /api/v1/client/galleries` | gallery/workspace/portal guest | `Page<GallerySummary>` scoped to that capability's galleries |
-| `GET /api/v1/client/galleries/{id}` | gallery/workspace/portal guest | `GalleryDetail` manifest (404 outside scope) |
+| `GET /api/v1/client/galleries/{id}` | gallery/workspace/portal guest | bounded `GalleryDetail` asset page (404 outside scope) |
 | `GET /api/v1/client/bookings` | workspace/portal guest | `Page<Booking>` for that capability's `client_id` only |
 | `GET /api/v1/projects/{id}/proposals` | owner, or that exact workspace guest | `Page<Proposal>`; drafts never serialize |
 | `GET /api/v1/projects/{id}/contracts` | owner, or that exact workspace guest | `Page<Contract>` |
@@ -207,8 +207,16 @@ signing, and checkout remain canonical web flows until their own milestones.
 A gallery exchange cannot read documents; a workspace exchange cannot open a
 sibling project; a document exchange cannot widen into galleries or bookings.
 
-Collections default to 25 and cap at 100. Cursors carry ordering state but no
-authorization; authorization is reevaluated on every page.
+Collections default to 25 and cap at 100. Gallery-detail asset pages default
+to 100 and use the same upper bound. Their signed cursor is scoped to the exact
+gallery, owner/client endpoint family, deterministic section/position/ID
+ordering. Cursors carry ordering state but no authorization; authorization is
+reevaluated on every page.
+
+Asset cursors are explicitly non-snapshot keysets over the current authorized
+view. If membership or ordering changes during traversal, an asset moved before
+the cursor can require a first-page refresh and a moved row can repeat; native
+consumers de-duplicate repeated IDs.
 
 ## Initial commands
 
@@ -650,9 +658,24 @@ authorized media variants under `links`. This is the canonical wire shape:
           "cull_state": "keep"
         }
       ],
+      "assets_next_cursor": null,
+      "assets_has_more": false,
       "hero_asset_ids": [201],
       "vision": null
     }
+
+Each response contains at most 100 assets. `assets_next_cursor` is non-null
+exactly when `assets_has_more` is true; pass it back as `cursor` (with an
+optional bounded `limit`) to the same detail route. Sections and summary
+counts describe the whole gallery, while `assets` and `hero_asset_ids` are
+page-local and internally coherent. Every page has its own private,
+Authorization-varying ETag.
+
+The native repositories persist only the existing conditional first-page
+response. Later pages append in session memory, reject gallery/revision
+mismatches, de-duplicate asset IDs, and are discarded with the view/session.
+The paging footer starts one bounded request per explicit load-more action and
+exposes retry or first-page refresh recovery without chaining every later page.
 
 Never expose gallery/portal PINs, `stored` filenames, or server paths. Media URLs
 must enforce bearer scope, gallery publication/expiry, asset parentage/readiness,

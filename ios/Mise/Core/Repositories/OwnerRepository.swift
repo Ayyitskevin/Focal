@@ -425,6 +425,12 @@ actor OwnerRepository {
         )
     }
 
+    func galleryPage(id: Int64, cursor: String) async throws -> GalleryDetail {
+        try await send(
+            MiseEndpoints.Galleries.detail(id: id, cursor: cursor)
+        )
+    }
+
     // ── Commercial spine (owner read-only; queue S9) ─────────────────────────
 
     func cachedCommercialActions() async throws -> ResourceSnapshot<[CommercialAction]>? {

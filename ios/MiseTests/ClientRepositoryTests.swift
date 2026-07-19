@@ -129,6 +129,8 @@ final class ClientRepositoryTests: XCTestCase {
       },
       "sections": [],
       "assets": [],
+      "assets_next_cursor": null,
+      "assets_has_more": false,
       "hero_asset_ids": [],
       "vision": null
     }
