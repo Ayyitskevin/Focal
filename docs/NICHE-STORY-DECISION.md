@@ -5,7 +5,7 @@
 > **Status:** Kevin decision required · **Prepared:** 2026-07-17 · **Feeds:**
 > Conductor T3 (reviewer-demo content) and T4 (store metadata + screenshots).
 > T3 remains independently held by
-> [issue #185](https://github.com/Ayyitskevin/mise/issues/185).
+> [issue #185](https://github.com/Ayyitskevin/Focal/issues/185).
 
 This decision selects Focal's **public acquisition story**. It does not remove
 features or reverse the commercial-spine ADRs.
@@ -71,7 +71,7 @@ Whichever option wins, the T3 replacement needs bookings, tasks, and actual
 gallery assets, all with stable demo-owned identities. **Do not reuse
 `bootstrap.ensure_public_showcase` for that convergence:** it can relabel unowned
 ready assets and the first gallery, which violates T3's preserve-manual-data
-boundary. [Issue #185](https://github.com/Ayyitskevin/mise/issues/185) keeps the
+boundary. [Issue #185](https://github.com/Ayyitskevin/Focal/issues/185) keeps the
 seed mechanism intentionally unspecified until Kevin approves the operator-only
 identity and owned-record design.
 
