@@ -1,36 +1,29 @@
 {% extends "base.html" %}
 {% block robots %}<meta name="robots" content="index, follow">{% endblock %}
-{% block title %}Mise - Hosted client studio for solo creatives{% endblock %}
+{% block title %}Focal - Pocket studio OS for photographers{% endblock %}
 {% block head %}
 {% include "saas/_analytics.html" %}
-<meta name="description" content="Hosted client studio for solo photographers and videographers: galleries, proposals, contracts, invoices, portals, and workflow reminders for exactly $20/month.">
+<meta name="description" content="A pocket studio OS for photographers: inquiries, booking, galleries, contracts, payments, delivery, and workflow in one focused workspace.">
 <link rel="canonical" href="{{ canonical_url }}">
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="Mise">
-<meta property="og:title" content="Mise - Hosted client studio for solo creatives">
-<meta property="og:description" content="Professional client studio, hosted and maintained for you, only $20/month after a 14-day trial.">
+<meta property="og:site_name" content="Focal">
+<meta property="og:title" content="Focal - Pocket studio OS for photographers">
+<meta property="og:description" content="Professional client studio, hosted and maintained for you, only Private beta after a 14-day trial.">
 <meta property="og:url" content="{{ canonical_url }}">
 <meta property="og:image" content="{{ base_url }}/static/og-card.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Mise — hosted client studio for solo creatives, $20/month">
+<meta property="og:image:alt" content="Focal — hosted client studio for solo creatives, Private beta">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="{{ base_url }}/static/og-card.png">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
-  "name": "Mise",
+  "name": "Focal",
   "applicationCategory": "BusinessApplication",
   "operatingSystem": "Web",
-  "description": "Hosted client studio for solo photographers and videographers.",
-  "offers": {
-    "@type": "Offer",
-    "price": "20",
-    "priceCurrency": "USD",
-    "availability": "https://schema.org/InStock",
-    "url": "{{ pricing_url }}"
-  }
+  "description": "Hosted client studio for solo photographers and videographers."
 }
 </script>
 <style>
@@ -81,52 +74,52 @@
 {% block content %}
 <main class="ms-wrap">
   <header class="ms-nav">
-    <div class="ms-brand">Mise</div>
-    <nav class="ms-navlinks" aria-label="Mise">
+    <div class="ms-brand">Focal</div>
+    <nav class="ms-navlinks" aria-label="Focal">
       <a href="/demo">Demo</a>
-      <a href="/pricing">$20/month</a>
+      <a href="/pricing">Private beta</a>
     </nav>
   </header>
   <section class="ms-hero">
     <div class="ms-copy">
-      <div class="ms-kicker">Hosted client studio for solo creatives</div>
-      <h1>Professional client studio, hosted and maintained for you.</h1>
-      <p class="ms-lede">PIN-gated galleries, proposals, contracts, invoices, and client portals in one quiet workspace. No setup, no plugin stack, no tier maze. Just $20/month after a 14-day trial.</p>
+      <div class="ms-kicker">Pocket studio OS for photographers</div>
+      <h1>Your whole studio in focus.</h1>
+      <p class="ms-lede">Keep inquiries, bookings, galleries, contracts, invoices, payments, and client follow-up together without stitching your studio across a dozen tools.</p>
       <div class="ms-actions">
-        <a class="ms-btn" href="/pricing">Start free trial</a>
+        <a class="ms-btn" href="/pricing">View product tour</a>
         <a class="ms-btn secondary" href="/demo">View demo tour</a>
       </div>
       <div class="ms-proof">
-        <div><strong>Flat price.</strong><br>$20/month, cancel anytime.</div>
-        <div><strong>Zero setup.</strong><br>Hosted databases, media paths, and updates.</div>
-        <div><strong>Built focused.</strong><br>Solo F&B and wedding workflow presets.</div>
+        <div><strong>Self-hostable.</strong><br>Private beta, cancel anytime.</div>
+        <div><strong>Focused workflow.</strong><br>One calm surface for the work that matters.</div>
+        <div><strong>Human-reviewed AI.</strong><br>Optional assistance; operator approval stays in charge.</div>
       </div>
     </div>
-    <div class="ms-product" aria-label="Mise product preview">
+    <div class="ms-product" aria-label="Focal product preview">
       <div class="ms-product-head"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
       <div class="ms-product-body">
-        <div class="ms-screen-row"><div><b>Seasonal Menu Content Day</b><span>Proposal sent - invoice draft ready</span></div><span class="ms-pill">F&B</span></div>
-        <div class="ms-screen-row"><div><b>Spring Wedding Preview</b><span>PIN-gated gallery - proofing open</span></div><span class="ms-pill">Wedding</span></div>
-        <div class="ms-screen-row"><div><b>Client Portal</b><span>Galleries, contracts, usage rights, files</span></div><span class="ms-pill">Live</span></div>
+        <div class="ms-screen-row"><div><b>Portrait Collection</b><span>Booking confirmed - brief ready</span></div><span class="ms-pill">Booking</span></div>
+        <div class="ms-screen-row"><div><b>Client Gallery</b><span>PIN-gated gallery - proofing open</span></div><span class="ms-pill">Proofing</span></div>
+        <div class="ms-screen-row"><div><b>Studio Workspace</b><span>Clients, projects, galleries, payments</span></div><span class="ms-pill">Focus</span></div>
       </div>
     </div>
   </section>
   <section class="ms-band" id="included">
-    <div><h2>Client galleries</h2><p>Private delivery links, PIN access, favorites, comments, downloads, and proofing.</p></div>
-    <div><h2>Booking paperwork</h2><p>Proposals, signed contracts, and Stripe-backed invoices stay connected to each project.</p></div>
-    <div><h2>Hosted operations</h2><p>Tenant-isolated SQLite, file storage, onboarding presets, billing, and one-command Docker launch.</p></div>
+    <div><h2>Gallery delivery</h2><p>Private delivery links, PIN access, favorites, comments, downloads, and proofing.</p></div>
+    <div><h2>Bookings & money</h2><p>Bookings, contracts, invoices, and payment state stay connected to each project.</p></div>
+    <div><h2>Studio operations</h2><p>Self-hosted SQLite, local media, optional integrations, and a focused operator workflow.</p></div>
   </section>
   <section class="ms-faq" id="faq">
     <div>
       <div class="ms-kicker">Founder-friendly value</div>
-      <h2>Built to replace the small-stack chaos.</h2>
-      <p>Mise keeps the buyer promise narrow: one professional client studio for solo creatives, hosted for exactly $20/month.</p>
+      <h2>Built for the whole studio loop.</h2>
+      <p>Focal keeps the buyer promise narrow: one professional client studio for solo creatives, hosted for exactly Private beta.</p>
     </div>
     <div class="ms-faq-list">
-      <div class="ms-faq-item"><b>Does Mise replace Pixieset and HoneyBook for a solo studio?</b><span>It covers the practical overlap: galleries, proofing, proposals, contracts, invoices, client portals, and workflow reminders in one lightweight place.</span></div>
-      <div class="ms-faq-item"><b>No paid tiers or hidden upgrades?</b><span>Correct. The hosted product has one flat plan: $20/month after the 14-day trial, cancel anytime.</span></div>
-      <div class="ms-faq-item"><b>What happens on day one?</b><span>New studios can load F&B or wedding presets, inspect demo records, then replace them with real clients.</span></div>
-      <div class="ms-faq-item"><b>Is each studio isolated?</b><span>Yes. Hosted mode gives every tenant its own SQLite database and media directory.</span></div>
+      <div class="ms-faq-item"><b>Does Focal replace a photographer's small stack?</b><span>It brings the practical overlap together: inquiries, bookings, galleries, proofing, contracts, invoices, client portals, and follow-up.</span></div>
+      <div class="ms-faq-item"><b>Is Focal ready for everyone?</b><span>Not yet. Focal is in active development and private-beta preparation; hosted access and pricing are not public claims.</span></div>
+      <div class="ms-faq-item"><b>What is in the first slice?</b><span>New studios can load Booking or wedding presets, inspect demo records, then replace them with real clients.</span></div>
+      <div class="ms-faq-item"><b>Can I self-host it?</b><span>Yes. Self-hosted mode is the canonical review path, with one studio database and local media by default.</span></div>
     </div>
   </section>
 </main>
