@@ -1,6 +1,6 @@
-# Contributing to Mise
+# Contributing to Focal
 
-Mise is a pre-release product-incubation repository. Contributions are welcome,
+Focal is a pre-release product-incubation repository. Contributions are welcome,
 but a passing test suite is not the same as launch approval: money, tenant data,
 authentication, legal documents, schema, and deployment changes receive a stricter
 human review.
