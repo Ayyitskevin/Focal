@@ -8,9 +8,11 @@ Milestone 3 (ADR 0067) adds the shared-client reads (`/client/home`,
 `/client/galleries`, `/client/bookings`, project document collections), the
 gallery-guest favorite toggle, and bearer-authenticated media routes. Milestone
 4a adds owner task completion, booking cancellation, and the session-bound
-booking-reschedule command below. S6e adds its durable, operator-visible delivery
-workflow. S6f implements the source-aware slot read required by native
-reschedule. Other commands remain planned.
+booking-reschedule command below. The studio-task inbox adds a complete read of
+existing open Mise studio-operation rows without moving general planning authority
+out of Notion. S6e adds its durable, operator-visible delivery workflow. S6f
+implements the source-aware slot read required by native reschedule. Other commands
+remain planned.
 
 ## Conventions
 
@@ -159,6 +161,7 @@ not become a client-wide session.
 | Method/path | Response |
 | --- | --- |
 | `GET /api/v1/dashboard` | `DashboardSummary` |
+| `GET /api/v1/tasks` | `Page<TaskSummary>` containing every open Mise studio-task row |
 | `GET /api/v1/clients` | `Page<ClientSummary>` |
 | `GET /api/v1/clients/{id}` | client detail |
 | `GET /api/v1/projects` | `Page<ProjectSummary>` |
@@ -177,6 +180,15 @@ not become a client-wide session.
 The Milestone 2 endpoints are available only to the exact `studio_owner`
 principal with `studio:read`. Client/project detail, AI-run, and
 cull-result reads remain reserved contract surface until their delivery slices.
+
+`GET /api/v1/tasks` is the complete open feed for existing Mise
+studio-operation task rows (`done=0`), not a claim over general or personal
+planning. It defaults to 25 rows, caps at 100, and preserves
+`(due_date IS NULL) ASC, due_date ASC, id DESC` with a signed, resource-bound
+keyset cursor carrying null rank, due key, and ID. Every page reauthorizes and
+returns `Cache-Control: private, no-cache`, `Vary: Authorization`, and ETag/304.
+The native repository fetches all pages into session memory and deliberately
+persists neither the snapshot nor its ETag.
 
 ### Milestone 3 — shared-client reads (implemented)
 

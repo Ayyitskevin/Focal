@@ -2,8 +2,12 @@ import SwiftUI
 
 struct HomeView: View {
     let model: ResourceModel<DashboardSummary>
+    let tasks: ResourceModel<[TaskSummary]>
+    let timeZoneIdentifier: String
     let commands: OwnerCommandModel
+    let taskCoordinator: OwnerTaskCoordinator
     let navigate: (OwnerDestination) -> Void
+    @AccessibilityFocusState private var focusedTaskID: Int64?
 
     var body: some View {
         ResourceView(
@@ -13,17 +17,7 @@ struct HomeView: View {
             empty: { EmptyView() }
         )
         .navigationTitle("Home")
-        .alert(
-            "Task update",
-            isPresented: Binding(
-                get: { commands.taskNotice != nil },
-                set: { if !$0 { commands.taskNotice = nil } }
-            )
-        ) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(commands.taskNotice ?? "")
-        }
+        .ownerTaskNoticeAlert(commands)
     }
 
     private func dashboard(_ summary: DashboardSummary) -> some View {
@@ -85,24 +79,43 @@ struct HomeView: View {
 
     @ViewBuilder
     private func taskSection(_ tasks: [TaskSummary]) -> some View {
-        let visibleTasks = commands.visibleTasks(from: tasks)
+        let visibleTasks = Array(commands.visibleTasks(from: tasks).prefix(6))
 
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Open tasks").font(.headline)
-                Spacer()
-                Text("\(visibleTasks.count)")
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Up next").font(.headline)
+                    Spacer()
+                    NavigationLink {
+                        TasksView(
+                            model: self.tasks,
+                            timeZoneIdentifier: timeZoneIdentifier,
+                            commands: commands,
+                            taskCoordinator: taskCoordinator
+                        )
+                    } label: {
+                        Text("View all")
+                    }
+                    .frame(minWidth: 44, minHeight: 44)
+                    .accessibilityHint("Opens the complete studio-task inbox")
+                }
+                Text("Showing \(visibleTasks.count)")
                     .font(.subheadline.monospacedDigit())
                     .foregroundStyle(.secondary)
-                    .accessibilityLabel("\(visibleTasks.count) open tasks")
+                    .accessibilityLabel("Showing \(visibleTasks.count) studio tasks")
             }
 
             if let completed = commands.justCompletedTask {
-                taskCompletionBanner(completed)
+                OwnerTaskCompletionBanner(
+                    completed: completed,
+                    commands: commands,
+                    undo: { await undoTask(completed) }
+                )
+                .id(completed.id)
             }
 
             if visibleTasks.isEmpty {
-                Text("You’re all caught up.")
+                Text("No studio tasks in this preview. View all to check the full inbox.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -110,129 +123,31 @@ struct HomeView: View {
                     .background(.background, in: RoundedRectangle(cornerRadius: 14))
             } else {
                 ForEach(visibleTasks) { task in
-                    taskRow(task)
+                    OwnerTaskRow(
+                        task: task,
+                        isOverdue: task.isOverdue,
+                        commands: commands,
+                        complete: { await completeTask(task) }
+                    )
+                    .accessibilityFocused($focusedTaskID, equals: task.id)
                 }
             }
         }
     }
 
-    private func taskRow(_ task: TaskSummary) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            if commands.canWrite {
-                Button {
-                    Task {
-                        _ = await commands.completeTask(task)
-                        await refreshDashboard()
-                    }
-                } label: {
-                    Image(systemName: "circle")
-                        .font(.title3)
-                        .frame(width: 44, height: 44)
-                }
-                .buttonStyle(.plain)
-                .disabled(commands.isTaskInFlight(task.id))
-                .accessibilityLabel("Mark \(task.title) done")
-                .accessibilityHint("Removes this task from the open list. You can undo during this session.")
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(task.title)
-                    .font(.body.weight(.semibold))
-                if let metadata = taskMetadata(task) {
-                    Text(metadata)
-                        .font(.footnote)
-                        .foregroundStyle(task.isOverdue ? Color.red : Color.secondary)
-                }
-            }
-            .padding(.vertical, 10)
-            .accessibilityElement(children: .combine)
-
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 10)
-        .background(.background, in: RoundedRectangle(cornerRadius: 14))
+    private func completeTask(_ task: TaskSummary) async {
+        _ = await taskCoordinator.complete(task, from: .home)
     }
 
-    private func taskMetadata(_ task: TaskSummary) -> String? {
-        var details: [String] = []
-        if let projectTitle = task.projectTitle, !projectTitle.isEmpty {
-            details.append(projectTitle)
-        }
-        if let dueOn = task.dueOn {
-            details.append("Due \(dueOn.rawValue)")
-        }
-        if task.isOverdue {
-            details.append("Overdue")
-        }
-        return details.isEmpty ? nil : details.joined(separator: " · ")
-    }
-
-    private func taskCompletionBanner(_ completed: TaskSummary) -> some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) {
-                taskCompletionStatus(completed)
-                Spacer(minLength: 0)
-                taskCompletionActions(completed)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                taskCompletionStatus(completed)
-                taskCompletionActions(completed)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-        }
-        .padding(.horizontal, 12)
-        .background(MiseDesign.okBg, in: RoundedRectangle(cornerRadius: 12))
-    }
-
-    private func taskCompletionStatus(_ completed: TaskSummary) -> some View {
-        HStack(spacing: 12) {
-            if commands.isTaskInFlight(completed.id) {
-                ProgressView()
-                    .accessibilityLabel("Completing \(completed.title)")
-            } else {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(MiseDesign.ok)
-                    .accessibilityHidden(true)
-            }
-
-            Text(commands.isTaskInFlight(completed.id)
-                ? "Completing \(completed.title)…"
-                : "Completed \(completed.title)")
-                .font(.subheadline)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private func taskCompletionActions(_ completed: TaskSummary) -> some View {
-        HStack(spacing: 8) {
-            Button("Undo") {
-                Task {
-                    _ = await commands.undoLastTaskCompletion()
-                    await refreshDashboard()
-                }
-            }
-            .disabled(commands.isTaskInFlight(completed.id))
-            .frame(minWidth: 44, minHeight: 44)
-            .accessibilityLabel("Undo completion of \(completed.title)")
-            .accessibilityHint("Reopens this task.")
-
-            Button {
-                commands.dismissTaskUndo()
-            } label: {
-                Image(systemName: "xmark")
-                    .frame(width: 44, height: 44)
-            }
-            .disabled(commands.isTaskInFlight(completed.id))
-            .accessibilityLabel("Dismiss completion of \(completed.title)")
-        }
+    private func undoTask(_ completed: TaskSummary) async {
+        let didUndo = await taskCoordinator.undo(completed, from: .home)
+        guard didUndo else { return }
+        await Task.yield()
+        focusedTaskID = completed.id
     }
 
     private func refreshDashboard() async {
-        await model.refresh()
-        if case let .loaded(snapshot) = model.state {
-            commands.reconcileTasks(with: snapshot.value.openTasks)
-        }
+        _ = await taskCoordinator.refreshDashboard()
     }
 }
 

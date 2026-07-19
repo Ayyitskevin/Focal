@@ -77,10 +77,16 @@ struct ResourceView<Value: Codable & Sendable, Content: View, Empty: View>: View
     private var statusMessage: String? {
         guard let snapshot = model.state.snapshot else { return nil }
         switch model.state {
+        case .loading where snapshot.source == .session:
+            return "Updating this session’s confirmed changes…"
         case .loading:
             return "Updating data saved \(relativeAge(of: snapshot.storedAt))…"
+        case let .failed(_, failure) where snapshot.source == .session:
+            return "Offline — showing this session’s confirmed changes. \(failure.message)"
         case let .failed(_, failure):
             return "Offline — showing data saved \(relativeAge(of: snapshot.storedAt)). \(failure.message)"
+        case .loaded where snapshot.source == .session:
+            return "Showing this session’s confirmed changes. Pull to refresh."
         case .loaded where snapshot.source == .cache:
             if snapshot.isStale(after: model.staleAfter) {
                 return "Saved \(relativeAge(of: snapshot.storedAt)); it may be out of date. Pull to refresh."

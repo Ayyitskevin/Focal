@@ -1,6 +1,6 @@
 # Mise for iOS — architecture and delivery plan
 
-Status: Milestones 1–3, the M4a backend, native task/cancel, and slot feed are merged; native reschedule remains human-gated and inactive
+Status: Milestones 1–3, the M4a backend, native task/cancel, full studio-task inbox, and slot feed are implemented; native reschedule remains human-gated and inactive
 Design source: the "Mise Mobile" design handoff (owner + client, iPhone/iPad,
 light/dark) is the visual reference for screens, copy tone, and tokens
 Minimum OS: iOS 17 / iPadOS 17
@@ -329,6 +329,12 @@ of reusing the current bearer token.
 
 - owner task completion and booking cancellation are implemented and merged in
   both the backend and native owner companion
+- the owner Home preview is explicitly a six-row “Up next” sample; “View all”
+  pushes a complete, session-memory-only inbox for existing Mise studio-operation
+  task rows. General planning remains Notion-authoritative. Shared session-only
+  overlays keep confirmed completion and Undo coherent across stale or failed
+  reads; only a fresh, non-raced dashboard paired with the full feed may release
+  those overlays
 - atomic booking reschedule plus the S6e durable client-calendar workflow are
   merged but remain default-off: old CANCEL gates replacement
   REQUEST, completed effects survive retries, and status/manual retry are

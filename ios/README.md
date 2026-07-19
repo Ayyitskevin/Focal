@@ -63,6 +63,13 @@ and avoiding it in the foundation keeps auth/session behavior auditable.
   status remains recoverable after the booking moves. A refresh-time continuity
   guard rejects a changed backend session ID. The server capability stays
   default-off (`MISE_BOOKING_WORKFLOW_ENABLED`) pending human review.
+- The owner companion's Home “Up next” area is a truthful six-row preview with
+  a pushed, complete studio-task inbox. That feed aggregates every open Mise
+  studio-operation row in session memory only, uses the workspace timezone for
+  Overdue / Today / Upcoming / No due date sections, and shares Home's
+  session-only completion and Undo overlays. Confirmed Undo remains visible when
+  either follow-up read fails. This does not replace Notion as the authority for
+  general planning tasks.
 - Do not add access tokens, refresh tokens, PINs, Stripe secrets, or APNs keys to
   xcconfig files.
 
