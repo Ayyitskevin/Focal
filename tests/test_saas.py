@@ -905,7 +905,6 @@ def test_reset_token_rejected_on_another_tenant(tmp_path, monkeypatch):
 def test_studio_export_zip_contains_db_and_media(tmp_path, monkeypatch):
     _configure_saas(tmp_path, monkeypatch)
     tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
-    saas.ensure_tenant_database(tenant)
     media_dir = saas.tenant_data_path("alpha") / "galleries"
     media_dir.mkdir(parents=True, exist_ok=True)
     (media_dir / "photo.jpg").write_bytes(b"fake-jpeg-bytes")
@@ -926,7 +925,6 @@ def test_studio_export_zip_contains_db_and_media(tmp_path, monkeypatch):
 def test_delete_studio_tombstones_and_parks_data(tmp_path, monkeypatch):
     _configure_saas(tmp_path, monkeypatch)
     tenant = saas.create_tenant("alpha", "Alpha Studio", "alpha@example.com", "secret123")
-    saas.ensure_tenant_database(tenant)
     assert saas.tenant_data_path("alpha").exists()
     saas.delete_tenant_studio(tenant)
     # The address frees up; the row survives as a canceled tombstone.

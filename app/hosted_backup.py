@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import gzip
 import logging
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -37,26 +38,73 @@ MARKER_NAME = ".last-hosted-backup"
 # fresh and ops_monitor reads only its mtime (ADR 0057: assert the positive, and
 # a partial success is not a full one).
 FAILURE_MARKER_NAME = ".last-hosted-backup-failures"
+_TENANT_SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])$")
 
 
-def _snapshot_sqlite(src: Path, dest_gz: Path) -> None:
+def _snapshot_sqlite(
+    src: Path,
+    dest_gz: Path,
+    *,
+    require_tenant_identity: bool = False,
+    read_tenant_roster: bool = False,
+) -> set[str] | None:
     """Consistent, integrity-checked, gzipped copy of one SQLite database."""
     dest_plain = dest_gz.with_suffix("")  # strip .gz
-    src_con = sqlite3.connect(f"file:{src}?mode=ro", uri=True)
+    roster: set[str] | None = None
     try:
-        dst_con = sqlite3.connect(dest_plain)
+        src_con = sqlite3.connect(f"file:{src}?mode=ro", uri=True)
         try:
-            src_con.backup(dst_con)
-            ok = dst_con.execute("PRAGMA quick_check").fetchone()[0]
-            if ok != "ok":
-                raise RuntimeError(f"integrity check failed for {src}: {ok}")
+            if require_tenant_identity:
+                marker_table = src_con.execute(
+                    "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='schema_migrations'"
+                ).fetchone()
+                marker = (
+                    src_con.execute(
+                        "SELECT 1 FROM schema_migrations WHERE name='001_init.sql'"
+                    ).fetchone()
+                    if marker_table
+                    else None
+                )
+                if marker is None:
+                    raise RuntimeError(f"tenant database identity missing for {src}")
+            dst_con = sqlite3.connect(dest_plain)
+            try:
+                src_con.backup(dst_con)
+                ok = dst_con.execute("PRAGMA quick_check").fetchone()[0]
+                if ok != "ok":
+                    raise RuntimeError(f"integrity check failed for {src}: {ok}")
+                if read_tenant_roster:
+                    # Read from the archived image, not the live control DB: the
+                    # roster and control snapshot must describe the same instant.
+                    roster = _tenant_roster(dst_con)
+            finally:
+                dst_con.close()
         finally:
-            dst_con.close()
-    finally:
-        src_con.close()
-    with open(dest_plain, "rb") as f_in, gzip.open(dest_gz, "wb") as f_out:
-        shutil.copyfileobj(f_in, f_out)
-    dest_plain.unlink()
+            src_con.close()
+        with open(dest_plain, "rb") as f_in, gzip.open(dest_gz, "wb") as f_out:
+            shutil.copyfileobj(f_in, f_out)
+        dest_plain.unlink()
+        return roster
+    except BaseException:
+        # Never leave an unverified plain DB or partial gzip in a snapshot tree.
+        dest_plain.unlink(missing_ok=True)
+        dest_gz.unlink(missing_ok=True)
+        raise
+
+
+def _tenant_roster(con: sqlite3.Connection) -> set[str]:
+    """Return validated retained slugs from one archived control-DB image."""
+
+    try:
+        rows = con.execute("SELECT slug FROM tenants WHERE deleted_at IS NULL").fetchall()
+    except sqlite3.Error as exc:
+        raise RuntimeError("hosted control snapshot has no readable tenant roster") from exc
+    live: set[str] = set()
+    for (slug,) in rows:
+        if not isinstance(slug, str) or not _TENANT_SLUG_RE.fullmatch(slug):
+            raise RuntimeError("hosted control database contains an invalid tenant slug")
+        live.add(slug)
+    return live
 
 
 def _prune(backups_dir: Path, retention_days: int) -> int:
@@ -115,41 +163,51 @@ def run_backup(
     retention_days: int = 14,
     rclone_remote: str = "",
 ) -> dict:
-    """One backup pass. Raises only if NOTHING could be backed up."""
+    """One backup pass anchored to one authoritative control-DB snapshot."""
     backups_dir = data_dir / "backups"
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     dest = backups_dir / stamp
     dest.mkdir(parents=True, exist_ok=True)
 
-    control_done = False
-    if control_db.exists():
-        _snapshot_sqlite(control_db, dest / "saas-control.db.gz")
-        control_done = True
+    if not control_db.is_file():
+        shutil.rmtree(dest, ignore_errors=True)
+        raise RuntimeError(f"nothing to back up under {data_dir} — control database missing")
+    try:
+        expected_tenants = _snapshot_sqlite(
+            control_db,
+            dest / "saas-control.db.gz",
+            read_tenant_roster=True,
+        )
+        if expected_tenants is None:
+            raise RuntimeError("hosted control snapshot did not produce a tenant roster")
+    except BaseException:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise
 
     tenant_count = 0
     failed_tenants: list[str] = []
     tenant_dest = dest / "tenants"
-    if tenants_dir.exists():
-        for entry in sorted(tenants_dir.iterdir()):
-            # .trash holds deleted-studio parking (ADR 0051) — media is preserved
-            # by the offsite sync of tenants_dir; DB snapshots cover live studios.
-            if not entry.is_dir() or entry.name.startswith("."):
-                continue
-            db_file = entry / "mise.db"
-            if not db_file.exists():
-                continue
-            try:
-                tenant_dest.mkdir(exist_ok=True)
-                _snapshot_sqlite(db_file, tenant_dest / f"{entry.name}.db.gz")
-                tenant_count += 1
-            except Exception:
-                # One broken tenant DB must not stop the other studios' backups.
-                log.exception("backup failed for tenant %s", entry.name)
-                failed_tenants.append(entry.name)
-
-    if not control_done and tenant_count == 0:
-        shutil.rmtree(dest, ignore_errors=True)
-        raise RuntimeError(f"nothing to back up under {data_dir} — wrong paths?")
+    # The control roster is authoritative. Tombstones and unregistered directories
+    # are not live tenants; .trash and media are covered by the off-site tree sync.
+    candidate_tenants = sorted(expected_tenants)
+    for slug in candidate_tenants:
+        db_file = tenants_dir / slug / "mise.db"
+        if not db_file.is_file():
+            log.error("backup missing for retained tenant %s", slug)
+            failed_tenants.append(slug)
+            continue
+        try:
+            tenant_dest.mkdir(exist_ok=True)
+            _snapshot_sqlite(
+                db_file,
+                tenant_dest / f"{slug}.db.gz",
+                require_tenant_identity=True,
+            )
+            tenant_count += 1
+        except Exception:
+            # One broken tenant DB must not stop the other studios' backups.
+            log.exception("backup failed for tenant %s", slug)
+            failed_tenants.append(slug)
 
     (backups_dir / MARKER_NAME).write_text(datetime.now(UTC).isoformat())
     # Surface partial failure to ops_monitor via a durable file signal (the sidecar
@@ -164,7 +222,7 @@ def run_backup(
     offsite = _offsite_sync(rclone_remote, backups_dir, tenants_dir, stamp)
     summary = {
         "snapshot": str(dest),
-        "control": control_done,
+        "control": True,
         "tenants": tenant_count,
         "tenant_failures": len(failed_tenants),
         "failed": failed_tenants,

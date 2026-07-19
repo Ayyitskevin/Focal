@@ -239,6 +239,14 @@ async def branded_errors(request: Request, exc: StarletteHTTPException):
     return await http_exception_handler(request, exc)
 
 
+@app.exception_handler(saas.TenantStorageUnavailable)
+async def tenant_storage_errors(request: Request, exc: saas.TenantStorageUnavailable):
+    # Platform-hosted entry points (notably invoice webhooks) can select a tenant
+    # after the host middleware has already passed. Give them the same fail-loud,
+    # correlated storage contract without changing their domain behavior.
+    return saas.tenant_storage_unavailable_response(request, exc)
+
+
 @app.exception_handler(Exception)
 async def unhandled_errors(request: Request, exc: Exception):
     # An uncaught exception means a 500 the user already hit — make it loud.

@@ -57,10 +57,13 @@ Hosted isolation is instance-per-tenant at the application-data layer:
 Custom domains are verified into the same host-first path. Tenant IDs, slugs, or
 headers supplied by the client never select a database.
 
-The current missing-storage behavior is held in
-[#181](https://github.com/Ayyitskevin/mise/issues/181): ordinary hosted requests
-must fail loud if an existing tenant database disappears rather than provisioning
-an empty replacement.
+New-tenant provisioning is the only boundary that creates a tenant tree or
+database. Every retained-tenant request, job, sweep, and export opens the database
+in SQLite `mode=rw` before use; a process-cache miss may migrate that positively
+opened database but cannot create directories. Missing or unreadable storage
+returns a correlated `503 tenant.storage_unavailable`, emits an unconditional
+non-secret log signal plus a throttled ops alert when configured, and leaves
+healthy tenants running.
 
 ## Data and migrations
 

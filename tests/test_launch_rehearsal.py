@@ -195,7 +195,6 @@ def test_full_hosted_lifecycle_rehearsal(tmp_path, monkeypatch):
 
     # 7. Ownership promises: export the whole studio, then delete it —
     #    delete cancels billing and frees the address (ADR 0051).
-    saas.ensure_tenant_database(tenant)
     zip_path = saas.build_studio_export(saas.tenant_by_slug("rehearsal"))
     try:
         assert zip_path.exists() and zip_path.stat().st_size > 0

@@ -128,6 +128,7 @@ through the macOS `build-test` workflow; local setup is in [ios/README.md](ios/R
 ## Engineering constraints worth reviewing
 
 - Tenant choice comes from the request host, never a caller-supplied tenant ID.
+- Existing tenant storage opens fail-loud and can never become an empty replacement studio.
 - Money webhooks are signature-verified, replay-guarded, and amount-reconciled.
 - Native retryable commands use idempotency keys and explicit workflow state.
 - Secrets and optional integrations fail dormant rather than open.
@@ -144,7 +145,6 @@ Mise keeps unresolved risk visible rather than presenting a green CI badge as
 launch approval. The most material open decisions and defects are tracked in:
 
 - [#182 — native companion versus pocket studio OS scope](https://github.com/Ayyitskevin/mise/issues/182)
-- [#181 — missing tenant storage must fail loud](https://github.com/Ayyitskevin/mise/issues/181)
 - [#180 — App Store purchase/IAP strategy](https://github.com/Ayyitskevin/mise/issues/180)
 - [#179 — privacy manifest and label accuracy](https://github.com/Ayyitskevin/mise/issues/179)
 - [#185 — safe reviewer-account replacement](https://github.com/Ayyitskevin/mise/issues/185)
