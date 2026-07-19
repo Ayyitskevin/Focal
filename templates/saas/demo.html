@@ -1,19 +1,19 @@
 {% extends "base.html" %}
 {% block robots %}<meta name="robots" content="index, follow">{% endblock %}
-{% block title %}Mise Demo - F&B and Wedding Client Studio{% endblock %}
+{% block title %}Focal Demo — Pocket Studio OS{% endblock %}
 {% block head %}
 {% include "saas/_analytics.html" %}
-<meta name="description" content="Preview Mise demo workflows for F&B and wedding photographers: inquiry, proposal, contract, invoice, gallery, and client portal.">
+<meta name="description" content="Preview Focal workflows for photographers: inquiry, booking, contract, invoice, gallery, delivery, and client portal.">
 <link rel="canonical" href="{{ canonical_url }}">
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="Mise">
-<meta property="og:title" content="Mise Demo - F&B and Wedding Client Studio">
-<meta property="og:description" content="See how Mise turns a $20/month hosted client studio into a working F&B or wedding workflow on day one.">
+<meta property="og:site_name" content="Focal">
+<meta property="og:title" content="Focal Demo — Pocket Studio OS">
+<meta property="og:description" content="See how Focal turns the photographer's complete client loop into one focused workspace.">
 <meta property="og:url" content="{{ canonical_url }}">
 <meta property="og:image" content="{{ base_url }}/static/og-card.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Mise — hosted client studio for solo creatives, $20/month">
+<meta property="og:image:alt" content="Focal — hosted client studio for solo creatives, private beta">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="{{ base_url }}/static/og-card.png">
 <style>
@@ -48,34 +48,34 @@
 {% endblock %}
 {% block content %}
 <header class="dm-nav">
-  <a href="/">Mise</a>
-  <a href="/pricing">$20/month</a>
+  <a href="/">Focal</a>
+  <a href="/pricing">Private beta</a>
 </header>
 <main class="dm-wrap">
   <section class="dm-hero">
     <div class="dm-kicker">Demo tour</div>
-    <h1>Two real solo-creative workflows, ready on day one.</h1>
-    <p class="dm-lede">Mise starts with simple F&B and wedding workflows so a new trial immediately feels like a working studio, not an empty database.</p>
+    <h1>The studio loop, from inquiry to final frame.</h1>
+    <p class="dm-lede">Focal's demo follows real photography work so the product feels like a working studio, not an empty database.</p>
     <div class="dm-actions">
-      <a class="dm-btn" href="/pricing">Start 14-day trial</a>
+      <a class="dm-btn" href="/pricing">Review private beta</a>
       <a class="dm-btn secondary" href="/">Back to overview</a>
     </div>
   </section>
   <section class="dm-grid">
     <article class="dm-card">
-      <div class="dm-kicker">Food & Beverage</div>
-      <h2>Restaurant content day</h2>
-      <p>For chefs, restaurants, bars, and product shoots where the work moves from package inquiry to usage-aware delivery.</p>
+      <div class="dm-kicker">Portrait & brand</div>
+      <h2>Commercial content day</h2>
+      <p>For portrait, brand, and commercial work where the project moves from inquiry to brief, shoot, and usage-aware delivery.</p>
       <div class="dm-flow">
-        <div class="dm-step"><span class="dm-num">1</span><div><b>Package inquiry</b><span>Public content-day offer creates a lead with budget and shoot notes.</span></div></div>
+        <div class="dm-step"><span class="dm-num">1</span><div><b>Project inquiry</b><span>A public inquiry creates a lead with budget, timing, and shoot notes.</span></div></div>
         <div class="dm-step"><span class="dm-num">2</span><div><b>Proposal and invoice</b><span>Quote, contract, and Stripe invoice stay attached to the project.</span></div></div>
-        <div class="dm-step"><span class="dm-num">3</span><div><b>Usage-ready delivery</b><span>Private gallery, download access, and portal notes keep client assets organized.</span></div></div>
+        <div class="dm-step"><span class="dm-num">3</span><div><b>Gallery and rights-ready delivery</b><span>Private gallery, download access, and portal notes keep client assets organized.</span></div></div>
       </div>
     </article>
     <article class="dm-card">
-      <div class="dm-kicker">Wedding</div>
+      <div class="dm-kicker">Wedding & events</div>
       <h2>Wedding story collection</h2>
-      <p>For wedding photographers who need a calm sales path and a polished delivery experience without a heavyweight CRM.</p>
+      <p>For photographers who need a calm sales path and polished delivery experience without a heavyweight CRM.</p>
       <div class="dm-flow">
         <div class="dm-step"><span class="dm-num">1</span><div><b>Inquiry to proposal</b><span>Preset forms capture date, venue, coverage, and collection preference.</span></div></div>
         <div class="dm-step"><span class="dm-num">2</span><div><b>Contract and retainer</b><span>Signed agreement, retainer invoice, and project timeline sit together.</span></div></div>
@@ -86,24 +86,24 @@
   <section aria-label="Product screenshots">
     <div class="dm-hero dm-section-head">
       <div class="dm-kicker">See it for real</div>
-      <h2>The screens your clients and your mornings actually get.</h2>
+      <h2>The screens your clients and your working day actually get.</h2>
     </div>
     <div class="dm-shots">
       <figure class="dm-shot">
-        <img src="/static/demo/gallery.webp" alt="A PIN-gated client gallery in Mise: hero cover photo, download-all button, and a grid of selects" width="1280" height="860" loading="lazy">
+        <img src="/static/demo/gallery.webp" alt="A PIN-gated client gallery in Focal: hero cover photo, download-all button, and a grid of selects" width="1280" height="860" loading="lazy">
         <figcaption><b>Client gallery.</b> PIN-gated, favorites and comments on, download-all one tap away.</figcaption>
       </figure>
       <figure class="dm-shot">
-        <img src="/static/demo/invoice.webp" alt="A client-facing Mise invoice under the studio's own name, with line items, deposit split, and amount due" width="1280" height="860" loading="lazy">
+        <img src="/static/demo/invoice.webp" alt="A client-facing Focal invoice under the studio's own name, with line items, deposit split, and amount due" width="1280" height="860" loading="lazy">
         <figcaption><b>Invoice your clients trust.</b> The studio's own name on it, deposit split, Stripe-payable when connected.</figcaption>
       </figure>
       <figure class="dm-shot">
-        <img src="/static/demo/onboarding.webp" alt="The Mise onboarding checklist showing a launch-ready studio with presets, demo data, and setup steps complete" width="1280" height="860" loading="lazy">
+        <img src="/static/demo/onboarding.webp" alt="The Focal onboarding checklist showing a launch-ready studio with presets, demo data, and setup steps complete" width="1280" height="860" loading="lazy">
         <figcaption><b>Day-one checklist.</b> Install a preset, publish a lead path, deliver — the score keeps you honest.</figcaption>
       </figure>
     </div>
     <div class="dm-actions">
-      <a class="dm-btn" href="/pricing">Start 14-day trial</a>
+      <a class="dm-btn" href="/pricing">Review private beta</a>
     </div>
   </section>
 </main>
