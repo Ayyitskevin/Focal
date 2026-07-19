@@ -1,4 +1,6 @@
-# Mise Hosted Beta Launch
+# Focal Hosted Beta Launch
+
+> **Historical checklist (July 2026):** This documents a proposed hosted beta path and retains legacy `MISE_*` validation details. It is not evidence that Focal's hosted service is currently public or generally available.
 
 Use this checklist before inviting 5-10 trusted photographers or videographers
 into the hosted `$20/month` beta.
@@ -48,7 +50,7 @@ https://mise.example.com/pricing?utm_source=x&utm_campaign=launch-thread
 https://mise.example.com/pricing?utm_source=referral&utm_campaign=beta
 ```
 
-Mise stores the sanitized source, campaign, and referrer on each tenant. The
+Focal stores the sanitized source, campaign, and referrer on each tenant. The
 operator dashboard summarizes source counts, activation rate, active rate,
 average launch score, and at-risk trials.
 
@@ -74,7 +76,7 @@ Subject: Want to try my $20/month hosted client studio for photographers?
 
 Hi {{ first_name }},
 
-I am opening a small beta for Mise, a hosted client studio for solo
+I am opening a small beta for Focal, a hosted client studio for solo
 photographers and videographers.
 
 It gives you private galleries, proofing, proposals, contracts, Stripe invoices,
@@ -127,7 +129,7 @@ the feedback queue in `/admin/saas` has been triaged, going public is:
    - `/admin/saas` shows the **Public — open signup live** badge in the page
      header. If it still says the gate is armed, the old env var is still set.
 3. **Invite the waitlist.** Download the CSV from `/admin/saas` — everyone on
-   it asked to be told. One plain email: Mise is open, here is the pricing
+   it asked to be told. One plain email: Focal is open, here is the pricing
    link (tag it `utm_campaign=waitlist` so the console shows what it converts).
 4. **Watch the first week.** The weekly digest reports signups, at-risk trials,
    and feedback; the rate limiter already covers `/start-trial` and `/waitlist`
