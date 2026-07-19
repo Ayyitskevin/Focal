@@ -159,7 +159,7 @@ The flag itself flips only by Kevin after the ADR merges.
 Gap G6: App Review needs a working studio without an invite code or expiring trial.
 The provisioner merged in #178 is retired and `scripts/seed_demo_tenant.py` now
 fails closed. **Do not run it against local, staging, or production hosted state.**
-[Issue #185](https://github.com/Ayyitskevin/mise/issues/185) proves why public
+[Issue #185](https://github.com/Ayyitskevin/Focal/issues/185) proves why public
 `signup_source` attribution, a far-future ordinary trial, destructive booking
 replacement, and unconditional password rehashing do not meet this ticket.
 

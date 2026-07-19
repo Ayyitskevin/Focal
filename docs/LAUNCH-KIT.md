@@ -1,6 +1,8 @@
-# Mise $20 Hosted Launch Kit
+# Focal $20 Hosted Launch Kit
 
-Mise is a hosted client studio for solo photographers and videographers:
+> **Historical planning artifact (July 2026):** This launch copy records an earlier hosted-offer hypothesis. Focal is currently in active development/private-beta preparation; the pricing, trial, and public-hosting claims below are not current product promises.
+
+Focal is a hosted client studio for solo photographers and videographers:
 professional galleries, proposals, contracts, Stripe invoices, client portals,
 workflow reminders, and niche presets for exactly `$20/month` after a 14-day
 trial.
@@ -31,7 +33,7 @@ a 14-day trial.
 
 **Value Proof**
 
-Mise replaces the small-stack chaos solo creatives usually stitch together from
+Focal replaces the small-stack chaos solo creatives usually stitch together from
 gallery delivery tools, client CRMs, form builders, invoice links, spreadsheets,
 and reminder apps. The product stays intentionally focused so a solo founder can
 host, support, and improve it without turning the $20 plan into a tier maze.
@@ -60,7 +62,7 @@ The beta invite email and security checklist live in [docs/BETA-LAUNCH.md](BETA-
 
 ## 5-Post X Launch Thread
 
-1. Mise is now hosted: a professional client studio for solo photographers and
+1. Focal is now hosted: a professional client studio for solo photographers and
    videographers. Galleries, proposals, contracts, invoices, portals, and
    workflow reminders in one calm place. Exactly `$20/month` after a 14-day
    trial.
@@ -69,7 +71,7 @@ The beta invite email and security checklist live in [docs/BETA-LAUNCH.md](BETA-
    forms, contracts, invoice links, spreadsheets, and reminders. It works until
    the client experience starts feeling patched together.
 
-3. Mise keeps the promise simple: private galleries, proofing, booking
+3. Focal keeps the promise simple: private galleries, proofing, booking
    paperwork, Stripe invoices, client portals, and project workflows. No paid
    tiers. No setup fee. No plugin stack.
 
@@ -77,7 +79,7 @@ The beta invite email and security checklist live in [docs/BETA-LAUNCH.md](BETA-
    and replace it with real clients. The goal is a working client loop before
    the trial ends: offer, project, paperwork, payment, delivery.
 
-5. Hosted Mise is for solo creatives who want a professional client studio
+5. Hosted Focal is for solo creatives who want a professional client studio
    without paying agency-software prices. `$20/month`, cancel anytime. Start the
    14-day trial: https://mise.example.com/pricing
 

@@ -1,7 +1,11 @@
-# Mise iOS
+# Focal iOS
 
 The checked-in project is generated with XcodeGen so project-file churn does not
 obscure source reviews.
+
+The public product name is now **Focal**. The Xcode project, scheme, app target, API
+configuration keys, and environment variables still use legacy Mise identifiers while
+the compatibility-preserving namespace migration is planned separately.
 
 ## Requirements
 
@@ -20,12 +24,12 @@ obscure source reviews.
        xcodegen generate
        open Mise.xcodeproj
 
-4. Select the Mise scheme and an iOS 17+ destination.
+4. Select the Focal scheme and an iOS 17+ destination.
 5. Run the MiseTests test plan from Xcode or:
 
        xcodebuild test \
          -project Mise.xcodeproj \
-         -scheme Mise \
+         -scheme Focal \
          -destination 'platform=iOS Simulator,name=iPhone 16'
 
 The core foundation intentionally uses URLSession, Security, LocalAuthentication,
@@ -64,7 +68,7 @@ and avoiding it in the foundation keeps auth/session behavior auditable.
   guard rejects a changed backend session ID. The server capability stays
   default-off (`MISE_BOOKING_WORKFLOW_ENABLED`) pending human review.
 - The owner companion's Home “Up next” area is a truthful six-row preview with
-  a pushed, complete studio-task inbox. That feed aggregates every open Mise
+  a pushed, complete studio-task inbox. That feed aggregates every open Focal
   studio-operation row in session memory only, uses the workspace timezone for
   Overdue / Today / Upcoming / No due date sections, and shares Home's
   session-only completion and Undo overlays. Confirmed Undo remains visible when

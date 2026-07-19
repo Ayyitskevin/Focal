@@ -2,16 +2,15 @@ import re
 from pathlib import Path
 
 
-def test_readme_keeps_truthful_pre_release_positioning():
+def test_readme_keeps_truthful_focal_positioning():
     text = Path("README.md").read_text()
 
     required = [
-        "exploratory and pre-release",
-        "not deployed",
-        "no live users",
-        "capable companion",
-        "one flat **$20/month** plan",
-        "product hypothesis",
+        "active development",
+        "private-beta preparation",
+        "not a public",
+        "self-hosted",
+        "FOCAL-IDENTITY.md",
         "scripts/reviewer_demo.py",
         "/demo",
         "AGPL-3.0-only",
@@ -20,6 +19,7 @@ def test_readme_keeps_truthful_pre_release_positioning():
     ]
     for phrase in required:
         assert phrase in text
+    assert "$20/month" not in text
     assert "iOS-first client & studio management" not in text
 
 

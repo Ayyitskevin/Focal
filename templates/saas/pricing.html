@@ -1,19 +1,19 @@
 {% extends "base.html" %}
 {% block robots %}<meta name="robots" content="index, follow">{% endblock %}
-{% block title %}Mise Pricing - $20/month{% endblock %}
+{% block title %}Focal Private Beta{% endblock %}
 {% block head %}
 {% include "saas/_analytics.html" %}
-<meta name="description" content="Mise pricing: one hosted client studio plan for exactly $20/month after a 14-day trial. No paid tiers, no setup fee, cancel anytime.">
+<meta name="description" content="Focal private beta access for a focused studio operating system for photographers and creative studios.">
 <link rel="canonical" href="{{ canonical_url }}">
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="Mise">
-<meta property="og:title" content="Mise Pricing - $20/month">
-<meta property="og:description" content="Start a 14-day trial of Mise, the hosted client studio for solo photographers and videographers.">
+<meta property="og:site_name" content="Focal">
+<meta property="og:title" content="Focal Private Beta">
+<meta property="og:description" content="Request private beta access to Focal, the pocket studio OS for photographers and creative studios.">
 <meta property="og:url" content="{{ canonical_url }}">
 <meta property="og:image" content="{{ base_url }}/static/og-card.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Mise — hosted client studio for solo creatives, $20/month">
+<meta property="og:image:alt" content="Focal — pocket studio OS for photographers">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="{{ base_url }}/static/og-card.png">
 <style>
@@ -62,29 +62,29 @@
 {% block content %}
 <main class="pr-wrap">
   <section class="pr-copy">
-    <a class="pr-back" href="/">Mise</a>
-    <div class="pr-kicker">One plan. No paid tiers.</div>
-    <h1>$20/month for the whole client studio.</h1>
-    <p class="pr-lede">Start with demo data, replace it with your real clients, and keep the hosted system maintained for less than a single gallery delivery fee.</p>
-    <div class="pr-price"><strong>${{ (price_cents / 100)|round(0, 'floor')|int }}</strong><span>/ month after {{ trial_days }} days</span></div>
+    <a class="pr-back" href="/">Focal</a>
+    <div class="pr-kicker">Private beta</div>
+    <h1>A focused studio OS for the whole client loop.</h1>
+    <p class="pr-lede">Focal is in active development and private-beta preparation. Explore the disposable demo, review the product boundaries, and help shape the path from inquiry to final delivery.</p>
+    <div class="pr-price"><strong>Beta</strong><span>invitation-only access</span></div>
     <ul class="pr-list">
-      <li><span class="pr-check">+</span><span><b>Client galleries</b> with PINs, favorites, comments, and downloads.</span></li>
-      <li><span class="pr-check">+</span><span><b>Booking flow</b> from proposal to contract to Stripe invoice.</span></li>
-      <li><span class="pr-check">+</span><span><b>Hosted and maintained</b> with tenant-isolated SQLite and media storage.</span></li>
-      <li><span class="pr-check">+</span><span><b>F&B and wedding presets</b> so the first login is not blank.</span></li>
+      <li><span class="pr-check">+</span><span><b>Gallery delivery</b> with PINs, favorites, comments, downloads, and proofing.</span></li>
+      <li><span class="pr-check">+</span><span><b>Studio workflow</b> from inquiry and booking through contracts, invoices, and follow-up.</span></li>
+      <li><span class="pr-check">+</span><span><b>Self-hostable foundation</b> with a modular web app, local media, and a native iOS companion.</span></li>
+      <li><span class="pr-check">+</span><span><b>Human-reviewed AI</b> that proposes assistance without taking control of business records.</span></li>
     </ul>
     <div class="pr-proof" aria-label="Pricing details">
-      <div><b>No paid tiers.</b> Every hosted customer gets the same product surface for the same $20/month price.</div>
-      <div><b>Trial-first setup.</b> Build the studio, load demo data, and test the workflow before the subscription starts.</div>
-      <div><b>Solo-founder supportable.</b> Built deliberately simple, so one person can keep it fast and reliable — that's why the price holds.</div>
+      <div><b>No public pricing claim.</b> Hosted access and pricing remain invitation-only while the product earns external trust.</div>
+      <div><b>Disposable review.</b> Use the demo tour and temporary data before connecting any real studio.</div>
+      <div><b>Solo-founder supportable.</b> The modular monolith keeps the product understandable, testable, and reversible.</div>
     </div>
-    <p class="pr-note" style="text-align:left"><a href="/demo">Preview the F&B and wedding demo tour</a></p>
+    <p class="pr-note" style="text-align:left"><a href="/demo">Preview the Focal product tour</a></p>
   </section>
   <section class="pr-form-wrap">
     <form method="post" action="/start-trial" class="pr-card"
           {% if plausible_domain %}onsubmit="window.plausible && plausible('Trial Submit')"{% endif %}>
-      <h2>Start your free trial</h2>
-      <p>Choose your studio URL and admin password. Stripe starts the $20/month plan after the trial when configured.</p>
+      <h2>Join the Focal private beta</h2>
+      <p>Request an invitation to review Focal with disposable data. Hosted access is not generally available yet.</p>
       {% if error %}<div class="pr-error">{{ error }}</div>{% endif %}
       <div class="pr-fields">
         <label>Studio name
@@ -110,10 +110,10 @@
         <input type="hidden" name="signup_source" value="{{ values.signup_source or '' }}">
         <input type="hidden" name="signup_campaign" value="{{ values.signup_campaign or '' }}">
         <input type="hidden" name="signup_referrer" value="{{ values.signup_referrer or '' }}">
-        <button type="submit">Start 14-day trial</button>
+        <button type="submit">Request private beta access</button>
       </div>
-      <div class="pr-note">Cancel anytime. No paid tiers. No setup fee.</div>
-      <div class="pr-note">By starting a trial you agree to the
+      <div class="pr-note">Invitation-only access while the product is in private beta.</div>
+      <div class="pr-note">By requesting access you agree to the
         <a href="/terms">Terms</a> and <a href="/privacy">Privacy Policy</a>.</div>
     </form>
     {% if waitlisted %}
@@ -124,8 +124,8 @@
     {% if plausible_domain %}<script>window.plausible && plausible('Waitlist Joined');</script>{% endif %}
     {% elif waitlist_offer %}
     <form method="post" action="/waitlist" class="pr-card pr-waitlist">
-      <h2>No invite yet?</h2>
-      <p>Leave your email and we'll send you one as the beta widens.</p>
+      <h2>Not invited yet?</h2>
+      <p>Leave your email and we'll contact you when the private beta expands.</p>
       <label>Email
         <input type="email" name="email" value="{{ values.owner_email or '' }}"
                placeholder="you@example.com" required>

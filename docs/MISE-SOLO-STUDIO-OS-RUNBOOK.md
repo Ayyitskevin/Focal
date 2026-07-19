@@ -1,4 +1,6 @@
-# Mise Solo Studio OS — operator runbook
+# Focal Solo Studio OS — operator runbook
+
+> **Branding note (July 2026):** The public product name is **Focal**. The legacy filename, runtime identifiers, service names, and the `Mise Activity Log` database name may remain while the compatibility-preserving namespace migration is separately tested.
 
 How to run the consolidated photography-AI stack day to day: the surfaces you open, the
 flags that arm each capability, the review workflows, and how to roll anything back. This is
@@ -278,9 +280,9 @@ Do **not** stop the Argus service until every box below is checked (decommission
 2. **Observe** for the period above. If anything regresses, `MISE_VISION_PROVIDER=argus` is the
    instant revert — nothing else to undo.
 3. **Decommission the Argus *service*** (its own deploy/systemd, its run-store-as-authority, its
-   separate UI/auth). Mise already owns the signals and the review surface, so this removes
+   separate UI/auth). Focal already owns the signals and the review surface, so this removes
    infrastructure, not data.
-4. **Keep the legacy adapter in Mise** (`LegacyArgusVisionAdapter`) and the Grok path **until**
+4. **Keep the legacy adapter in Focal** (`LegacyArgusVisionAdapter`) and the Grok path **until**
    you're past the observation period and confident — it is the last rollback. Removing it is a
    final, separate cleanup, not part of the cutover.
 
@@ -439,7 +441,7 @@ If the database is missing, corrupt, or unreadable:
 - API callers receive `503 tenant.storage_unavailable`; browser callers receive
   the matching neutral 503 page. Both include the same `X-Request-ID` reference.
 - The application logs only tenant ID, validated slug, operation, and reference;
-  when Telegram alerts are configured, a throttled Mise ops alert carries those
+  when Telegram alerts are configured, a throttled Focal ops alert carries those
   same non-secret fields.
 - Healthy tenants keep starting and recovering queued work. The affected tenant
   remains unavailable, and no empty-success response is served.

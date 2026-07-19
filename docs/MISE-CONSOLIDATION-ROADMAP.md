@@ -1,6 +1,8 @@
-# Mise Consolidation Roadmap
+# Focal Consolidation Roadmap
 
-> Ordered, strangler-style migration from "Mise + a fleet of sidecars" to "Mise Solo
+> **Branding note (July 2026):** This roadmap is now the Focal roadmap. Legacy `Mise`/`MISE_*` names in code, paths, and service configuration are compatibility identifiers, not the public product name.
+
+> Ordered, strangler-style migration from "Focal + a fleet of sidecars" to "Focal Solo
 > Studio OS + replaceable workers." Each phase is a set of **vertical slices** with
 > explicit acceptance criteria, a shadow-mode plan, and a rollback. **Never a flag-day
 > replacement.**
@@ -10,7 +12,7 @@ See [`MISE-SOLO-STUDIO-OS.md`](MISE-SOLO-STUDIO-OS.md) for the target and
 
 ## The strangler contract (applies to every capability)
 
-1. Establish a stable internal Mise domain interface.  ← **Phase 0 (done, this branch)**
+1. Establish a stable internal Focal domain interface.  ← **Phase 0 (done, this branch)**
 2. Wrap the existing external service as the **legacy adapter**.  ← **Phase 0 (done)**
 3. Add an internal implementation behind a **feature flag**.
 4. Run internal and legacy paths in **shadow mode** where safe.
@@ -95,11 +97,11 @@ flow changes until a challenger is deliberately wired.
 | Slice | Deliverable | Acceptance | Rollback | Status |
 | --- | --- | --- | --- | --- |
 | 3.1 | Route recommend through `providers` (`Capability.OFFERS`) behind `MISE_PROVIDER_FACADE_OFFERS` (default off); record `ai_runs` provenance. Single Plutus call; `plutus_last_*` recorded identically. | Flag OFF (default) = byte-identical legacy path, no `ai_runs` row; flag ON = facade + one OFFERS provenance row; failure records a non-OK row and `plutus_last_status='error'`. Offers stay proposal-only — no charge/send/invoice touch. | Flip `MISE_PROVIDER_FACADE_OFFERS` off → legacy. | ✅ in PR |
-| 3.2 | Operator review/edit UI for offers in Mise (offers are **A1 drafts**). | No auto-send, no auto-charge; human approves each offer/pitch. | Hide UI; offers remain proposal-only. | ⏳ later |
+| 3.2 | Operator review/edit UI for offers in Focal (offers are **A1 drafts**). | No auto-send, no auto-charge; human approves each offer/pitch. | Hide UI; offers remain proposal-only. | ⏳ later |
 | 3.3 | **30–60 day offer-acceptance/revenue scorecard.** | Measured revenue lift or it is a retire candidate (audit §19.4). | — | ⏳ later |
 
 **Money guardrail:** any pricing/SKU rule that affects an invoice is **red-light** —
-proposal only, deterministic Mise code + human applies it. Never let the model set price
+proposal only, deterministic Focal code + human applies it. Never let the model set price
 or settlement.
 
 ---
@@ -129,7 +131,7 @@ rollback rehearsal (audit §19.4).
 
 ## Phase 6 — Aphrodite product images (optional, later)
 
-Only if current Mise clients/workflows show near-term commercial value. `products`
+Only if current Focal clients/workflows show near-term commercial value. `products`
 module; render-worker contract; **spend guards**; **no automatic client publication**;
 licensing/consent review (audit §13.5). Budget-capped, human-approved, export-gated.
 
@@ -183,7 +185,7 @@ No schema change ships in Phase 0.
 **[CALCULATED ESTIMATE — validate with the audit's 30-day sidecar scorecard, §15.4.]**
 Consolidation does not cut compute; it cuts **operational surface**:
 
-- **Deploy/runtime surfaces:** from ~5 independently-deployed services (Mise + Argus +
+- **Deploy/runtime surfaces:** from ~5 independently-deployed services (Focal + Argus +
   Plutus + Dionysus + workers) toward **1 app + N stateless workers** — fewer systemd
   units, one deploy story, one backup chain that already restore-tests nightly.
 - **Auth surfaces:** from per-sidecar bearer tokens with drift risk (the Plutus 401,

@@ -1,11 +1,13 @@
 # Niche story decision packet
 
+> **Positioning note (July 2026):** This is a dated acquisition-story decision packet. Focal's current public framing is the neutral, pocket studio OS for photographers; the wedding/F&B comparison below is not a current launch claim.
+
 > **Status:** Kevin decision required · **Prepared:** 2026-07-17 · **Feeds:**
 > Conductor T3 (reviewer-demo content) and T4 (store metadata + screenshots).
 > T3 remains independently held by
-> [issue #185](https://github.com/Ayyitskevin/mise/issues/185).
+> [issue #185](https://github.com/Ayyitskevin/Focal/issues/185).
 
-This decision selects Mise's **public acquisition story**. It does not remove
+This decision selects Focal's **public acquisition story**. It does not remove
 features or reverse the commercial-spine ADRs.
 
 ## Executive summary
@@ -32,12 +34,12 @@ existence in product documentation.
 
 | Signal | Evidence | What it means |
 |---|---|---|
-| Photography category ceiling | 2023 Census data report **236,666 nonemployer** and **16,504 employer** photographic-services establishments: **253,170** combined. At Mise's $240 annual price, converting every establishment would be a mechanical ceiling of **$60.8M ARR**. | The category can support a focused micro-SaaS. This is not reachable TAM, a forecast, or a niche split. |
+| Photography category ceiling | 2023 Census data report **236,666 nonemployer** and **16,504 employer** photographic-services establishments: **253,170** combined. At Focal's $240 annual price, converting every establishment would be a mechanical ceiling of **$60.8M ARR**. | The category can support a focused micro-SaaS. This is not reachable TAM, a forecast, or a niche split. |
 | Commercially active proxy | Among nonemployers, **39,121** report at least $50k in receipts and **73,093** report at least $25k. Adding the 16,504 employer establishments gives an all-specialty proxy of **55,625–89,597** operations. Illustrative 1% penetration is **556–896 studios** or **$134k–$215k ARR**. | More useful for planning than the full ceiling, but still not a wedding or F&B SAM; establishments also do not map perfectly to subscription accounts. |
 | Solo-business fit | Census classifies **225,212** of the 236,666 nonemployers (**95.2%**) as sole proprietorships. BLS separately reports **151,200 photographer jobs** in 2024 and **66% self-employed**. | A pocket-sized OS for owner-operators fits how the category is structured. Jobs and establishments are different units, so the figures should not be added. |
 | Segment signal | Of employer establishments, Census reports **11,483 portrait-studio** and **5,021 commercial**. The portrait class includes wedding and several non-wedding services; the much larger nonemployer population is not split at that detail. Of the commercial locations, **90.7% have fewer than five employees**. | The employer subset is numerically larger on the portrait side, but cannot resolve the niche decision or prove a wedding-studio SAM. Commercial also remains a credible pocket-sized wedge. |
 | Client-demand proxies | CDC reports **2,041,926 marriages** in 2023. Census reports **714,532 employer food-service and drinking-place establishments** in 2023. | Both niches have abundant client demand. Marriages and restaurants are not photography studios, and neither measure says how many buy photography or software. |
-| Product fit | The root [`README`](../README.md) says wedding-first, while [ADR 0025](adr/0025-b2b-invoicing-essentials.md) and [ADR 0026](adr/0026-decommission-albums-offers.md) deliberately deepen commercial/F&B workflows. The current [demo presets](../app/saas_demo.py) contain both stories. | Mise has a generic operating loop plus genuinely specialized commercial depth. Public copy must choose one lead without pretending the other capability vanished. |
+| Product fit | The root [`README`](../README.md) says wedding-first, while [ADR 0025](adr/0025-b2b-invoicing-essentials.md) and [ADR 0026](adr/0026-decommission-albums-offers.md) deliberately deepen commercial/F&B workflows. The current [demo presets](../app/saas_demo.py) contain both stories. | Focal has a generic operating loop plus genuinely specialized commercial depth. Public copy must choose one lead without pretending the other capability vanished. |
 
 **Reproduction.** In the 2023 U.S. Nonemployer Statistics file, select
 `ST=00`, `NAICS=54192`, `LFO=-`, `RCPTOT_SIZE=001`. In the 2023 U.S. County
@@ -69,7 +71,7 @@ Whichever option wins, the T3 replacement needs bookings, tasks, and actual
 gallery assets, all with stable demo-owned identities. **Do not reuse
 `bootstrap.ensure_public_showcase` for that convergence:** it can relabel unowned
 ready assets and the first gallery, which violates T3's preserve-manual-data
-boundary. [Issue #185](https://github.com/Ayyitskevin/mise/issues/185) keeps the
+boundary. [Issue #185](https://github.com/Ayyitskevin/Focal/issues/185) keeps the
 seed mechanism intentionally unspecified until Kevin approves the operator-only
 identity and owned-record design.
 
