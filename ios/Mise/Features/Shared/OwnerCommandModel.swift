@@ -15,9 +15,11 @@ final class OwnerCommandModel {
 
     private(set) var taskIDsInFlight: Set<Int64> = []
     private(set) var completedTaskIDs: Set<Int64> = []
+    private(set) var taskMutationGeneration: UInt64 = 0
     private(set) var bookingIDsInFlight: Set<Int64> = []
     private(set) var cancelledBookingIDs: Set<Int64> = []
     private(set) var justCompletedTask: TaskSummary?
+    private var reopenedTasksByID: [Int64: TaskSummary] = [:]
     var taskNotice: String?
     var bookingNotice: String?
 
@@ -35,7 +37,22 @@ final class OwnerCommandModel {
     }
 
     func visibleTasks(from tasks: [TaskSummary]) -> [TaskSummary] {
-        tasks.filter { !completedTaskIDs.contains($0.id) }
+        var visible = tasks.filter { !completedTaskIDs.contains($0.id) }
+        let visibleIDs = Set(visible.lazy.map(\.id))
+        visible.append(contentsOf: reopenedTasksByID.values.filter {
+            !visibleIDs.contains($0.id) && !completedTaskIDs.contains($0.id)
+        })
+        guard !reopenedTasksByID.isEmpty else { return visible }
+        return visible.sorted(by: Self.taskPriority)
+    }
+
+    /// Removes a successful reopen overlay only after the authoritative full
+    /// task feed contains that row. A missing row or failed read keeps the
+    /// command-confirmed task visible in this session.
+    func acknowledgeReopenedTasks(in serverTasks: [TaskSummary]) {
+        for id in serverTasks.lazy.map(\.id) {
+            reopenedTasksByID.removeValue(forKey: id)
+        }
     }
 
     func visibleBookings(from bookings: [Booking]) -> [Booking] {
@@ -44,6 +61,17 @@ final class OwnerCommandModel {
 
     func isTaskInFlight(_ id: Int64) -> Bool {
         taskIDsInFlight.contains(id)
+    }
+
+    var isTaskMutationInFlight: Bool {
+        !taskIDsInFlight.isEmpty
+    }
+
+    /// A dashboard response may reconcile task overlays only if its request
+    /// began outside every task mutation. A later mutation changes the returned
+    /// generation and is rejected again at commit time.
+    func dashboardReconciliationGeneration() -> UInt64? {
+        taskIDsInFlight.isEmpty ? taskMutationGeneration : nil
     }
 
     func isBookingInFlight(_ id: Int64) -> Bool {
@@ -60,18 +88,35 @@ final class OwnerCommandModel {
         bookingIDsInFlight.remove(id)
     }
 
-    /// Drops optimistic task IDs once a successful dashboard refresh proves
-    /// the server list has caught up. A stale/failed snapshot should not call
-    /// this method, so its optimistic overlay remains intact.
-    func reconcileTasks(with serverTasks: [TaskSummary]) {
+    /// Drops optimistic task IDs only when a fresh dashboard request both
+    /// succeeds and did not race a task mutation. The full inbox is not an
+    /// authority for this overlay because Home may still hold its six-row
+    /// in-memory preview.
+    @discardableResult
+    func reconcileDashboardTasks(
+        with serverTasks: [TaskSummary],
+        ifUnchangedSince generation: UInt64,
+        taskFeedSnapshot: [TaskSummary]? = nil,
+        taskFeedIsFreshForGeneration: Bool = false
+    ) -> Bool {
+        guard generation == taskMutationGeneration else { return false }
+        if let taskFeedSnapshot {
+            let taskFeedIDs = Set(taskFeedSnapshot.lazy.map(\.id))
+            guard
+                taskFeedIsFreshForGeneration
+                    || completedTaskIDs.isDisjoint(with: taskFeedIDs)
+            else { return false }
+        }
         completedTaskIDs.formIntersection(taskIDsInFlight)
-        let serverIDs = Set(serverTasks.lazy.map(\.id))
         if let task = justCompletedTask,
-           serverIDs.contains(task.id), !taskIDsInFlight.contains(task.id)
+           let reopened = serverTasks.first(where: { $0.id == task.id }),
+           !taskIDsInFlight.contains(task.id)
         {
+            reopenedTasksByID[task.id] = reopened
             justCompletedTask = nil
             taskNotice = nil
         }
+        return true
     }
 
     /// Drops confirmed cancellation overlays once a successful agenda refresh
@@ -82,23 +127,31 @@ final class OwnerCommandModel {
 
     @discardableResult
     func completeTask(_ task: TaskSummary) async -> Bool {
-        guard canWrite, taskIDsInFlight.insert(task.id).inserted else { return false }
+        guard canWrite, taskIDsInFlight.isEmpty else { return false }
+        taskIDsInFlight.insert(task.id)
         defer { taskIDsInFlight.remove(task.id) }
 
+        taskMutationGeneration &+= 1
+        let previousUndo = justCompletedTask
         taskNotice = nil
         completedTaskIDs.insert(task.id)
         justCompletedTask = task
 
         do {
             let response = try await setTaskCompletionRequest(task.id, true)
-            guard response.id == task.id, response.done else {
+            guard
+                response.id == task.id,
+                response.done,
+                response.completedAt != nil
+            else {
                 throw OwnerCommandResponseError.invalidTaskCompletion
             }
+            reopenedTasksByID.removeValue(forKey: task.id)
             return true
         } catch {
             completedTaskIDs.remove(task.id)
             if justCompletedTask?.id == task.id {
-                justCompletedTask = nil
+                justCompletedTask = previousUndo
             }
             taskNotice = "Couldn’t confirm task completion. Refresh, then retry if it is still shown."
             return false
@@ -107,17 +160,22 @@ final class OwnerCommandModel {
 
     @discardableResult
     func undoLastTaskCompletion() async -> Bool {
-        guard canWrite, let task = justCompletedTask,
-              taskIDsInFlight.insert(task.id).inserted
-        else { return false }
+        guard canWrite, let task = justCompletedTask, taskIDsInFlight.isEmpty else { return false }
+        taskIDsInFlight.insert(task.id)
         defer { taskIDsInFlight.remove(task.id) }
 
+        taskMutationGeneration &+= 1
         taskNotice = nil
         do {
             let response = try await setTaskCompletionRequest(task.id, false)
-            guard response.id == task.id, !response.done else {
+            guard
+                response.id == task.id,
+                !response.done,
+                response.completedAt == nil
+            else {
                 throw OwnerCommandResponseError.invalidTaskReopen
             }
+            reopenedTasksByID[task.id] = task
             completedTaskIDs.remove(task.id)
             if justCompletedTask?.id == task.id {
                 justCompletedTask = nil
@@ -131,6 +189,19 @@ final class OwnerCommandModel {
 
     func dismissTaskUndo() {
         justCompletedTask = nil
+    }
+
+    private static func taskPriority(_ left: TaskSummary, _ right: TaskSummary) -> Bool {
+        switch (left.dueOn?.rawValue, right.dueOn?.rawValue) {
+        case let (leftDue?, rightDue?) where leftDue != rightDue:
+            return leftDue < rightDue
+        case (_?, nil):
+            return true
+        case (nil, _?):
+            return false
+        default:
+            return left.id > right.id
+        }
     }
 
     @discardableResult

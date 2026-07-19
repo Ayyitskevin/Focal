@@ -56,6 +56,27 @@ final class OwnerCommandModelTests: XCTestCase {
     }
 
     @MainActor
+    func testTaskCompletionSerializesDifferentIDsBehindSharedUndoSlot() async {
+        let latch = MutationLatch<TaskCompletion>()
+        let model = makeModel(task: { id, _ in try await latch.wait(id: id) })
+        let firstTask = Self.task(id: 440)
+        let secondTask = Self.task(id: 441)
+
+        let first = Task { @MainActor in await model.completeTask(firstTask) }
+        await latch.waitUntilCalled()
+        XCTAssertTrue(model.isTaskMutationInFlight)
+        let secondResult = await model.completeTask(secondTask)
+        let callCount = await latch.callCount()
+        XCTAssertFalse(secondResult)
+        XCTAssertEqual(callCount, 1)
+
+        await latch.succeed(TaskCompletion(id: firstTask.id, done: true, completedAt: Date()))
+        let firstResult = await first.value
+        XCTAssertTrue(firstResult)
+        XCTAssertEqual(model.justCompletedTask, firstTask)
+    }
+
+    @MainActor
     func testUndoReopensJustCompletedTask() async {
         let recorder = TaskMutationRecorder()
         let model = makeModel(task: { id, completed in
@@ -73,6 +94,50 @@ final class OwnerCommandModelTests: XCTestCase {
         XCTAssertEqual(model.visibleTasks(from: [task]), [task])
         XCTAssertNil(model.justCompletedTask)
         XCTAssertNil(model.taskNotice)
+    }
+
+    @MainActor
+    func testDuplicateUndoIsLockedBehindTheSharedTaskMutation() async {
+        let latch = UndoMutationLatch()
+        let model = makeModel(task: { id, completed in
+            try await latch.mutate(id: id, completed: completed)
+        })
+        let task = Self.task(id: 450)
+        let didComplete = await model.completeTask(task)
+        XCTAssertTrue(didComplete)
+
+        let firstUndo = Task { @MainActor in
+            await model.undoLastTaskCompletion()
+        }
+        await latch.waitUntilUndoCalled()
+        let duplicateResult = await model.undoLastTaskCompletion()
+        let undoCalls = await latch.undoCallCount()
+        XCTAssertFalse(duplicateResult)
+        XCTAssertEqual(undoCalls, 1)
+
+        await latch.succeedUndo(id: task.id)
+        let didUndo = await firstUndo.value
+        XCTAssertTrue(didUndo)
+        XCTAssertEqual(model.visibleTasks(from: []), [task])
+    }
+
+    @MainActor
+    func testSuccessfulUndoOverlaysTaskUntilFullFeedConfirmsIt() async {
+        let model = makeModel()
+        let task = Self.task(id: 451)
+
+        let didComplete = await model.completeTask(task)
+        let didUndo = await model.undoLastTaskCompletion()
+        XCTAssertTrue(didComplete)
+        XCTAssertTrue(didUndo)
+        XCTAssertEqual(model.visibleTasks(from: []), [task])
+
+        model.acknowledgeReopenedTasks(in: [])
+        XCTAssertEqual(model.visibleTasks(from: []), [task])
+
+        model.acknowledgeReopenedTasks(in: [task])
+        XCTAssertTrue(model.visibleTasks(from: []).isEmpty)
+        XCTAssertEqual(model.visibleTasks(from: [task]), [task])
     }
 
     @MainActor
@@ -94,11 +159,124 @@ final class OwnerCommandModelTests: XCTestCase {
             "Couldn’t confirm the task was reopened. Refresh, then retry Undo."
         )
 
-        model.reconcileTasks(with: [task])
+        let generation = model.taskMutationGeneration
+        XCTAssertTrue(model.reconcileDashboardTasks(
+            with: [task],
+            ifUnchangedSince: generation
+        ))
 
         XCTAssertNil(model.justCompletedTask)
         XCTAssertNil(model.taskNotice)
+        XCTAssertEqual(model.visibleTasks(from: []), [task])
         XCTAssertEqual(model.visibleTasks(from: [task]), [task])
+    }
+
+    @MainActor
+    func testTaskFeedRefreshCannotReleaseOverlayBeforeStaleHomeAndUndo() async {
+        let recorder = TaskMutationRecorder()
+        let model = makeModel(task: { id, completed in
+            await recorder.mutate(id: id, completed: completed)
+        })
+        let task = Self.task(id: 49)
+        let staleHome = [task]
+        let initialInbox = [task]
+
+        let didComplete = await model.completeTask(task)
+        XCTAssertTrue(didComplete)
+        XCTAssertTrue(model.visibleTasks(from: staleHome).isEmpty)
+        XCTAssertTrue(model.visibleTasks(from: initialInbox).isEmpty)
+
+        let refreshedInbox: [TaskSummary] = []
+        XCTAssertTrue(model.visibleTasks(from: refreshedInbox).isEmpty)
+        XCTAssertTrue(model.visibleTasks(from: staleHome).isEmpty)
+        XCTAssertEqual(model.justCompletedTask, task)
+
+        let didUndo = await model.undoLastTaskCompletion()
+        XCTAssertTrue(didUndo)
+        let reopenedInbox = [task]
+        XCTAssertEqual(model.visibleTasks(from: staleHome), [task])
+        XCTAssertEqual(model.visibleTasks(from: reopenedInbox), [task])
+        XCTAssertNil(model.justCompletedTask)
+    }
+
+    @MainActor
+    func testDashboardResponseStartedBeforeMutationCannotReleaseOverlay() async {
+        let model = makeModel()
+        let task = Self.task(id: 50)
+        let generationBeforeRequest = model.taskMutationGeneration
+
+        let didComplete = await model.completeTask(task)
+        XCTAssertTrue(didComplete)
+        XCTAssertFalse(model.reconcileDashboardTasks(
+            with: [],
+            ifUnchangedSince: generationBeforeRequest
+        ))
+        XCTAssertTrue(model.visibleTasks(from: [task]).isEmpty)
+        XCTAssertEqual(model.justCompletedTask, task)
+    }
+
+    @MainActor
+    func testFreshDashboardCanReleaseConfirmedOverlay() async {
+        let model = makeModel()
+        let task = Self.task(id: 51)
+
+        let didComplete = await model.completeTask(task)
+        XCTAssertTrue(didComplete)
+        let generation = model.taskMutationGeneration
+        XCTAssertTrue(model.reconcileDashboardTasks(
+            with: [],
+            ifUnchangedSince: generation
+        ))
+
+        XCTAssertEqual(model.visibleTasks(from: [task]), [task])
+        XCTAssertEqual(model.justCompletedTask, task)
+    }
+
+    @MainActor
+    func testDashboardCannotReleaseOverlayIntoStaleTaskFeed() async {
+        let model = makeModel()
+        let task = Self.task(id: 511)
+
+        let didComplete = await model.completeTask(task)
+        XCTAssertTrue(didComplete)
+        let generation = model.taskMutationGeneration
+        XCTAssertFalse(model.reconcileDashboardTasks(
+            with: [],
+            ifUnchangedSince: generation,
+            taskFeedSnapshot: [task]
+        ))
+
+        XCTAssertTrue(model.visibleTasks(from: [task]).isEmpty)
+        XCTAssertEqual(model.justCompletedTask, task)
+    }
+
+    @MainActor
+    func testDashboardRequestGetsNoReconciliationTokenDuringMutation() async {
+        let latch = MutationLatch<TaskCompletion>()
+        let model = makeModel(task: { id, _ in try await latch.wait(id: id) })
+        let task = Self.task(id: 512)
+
+        let completion = Task { @MainActor in await model.completeTask(task) }
+        await latch.waitUntilCalled()
+        XCTAssertNil(model.dashboardReconciliationGeneration())
+
+        await latch.succeed(TaskCompletion(id: task.id, done: true, completedAt: Date()))
+        let didComplete = await completion.value
+        XCTAssertTrue(didComplete)
+        XCTAssertNotNil(model.dashboardReconciliationGeneration())
+    }
+
+    @MainActor
+    func testDismissingUndoDoesNotReleaseStaleHomeOverlay() async {
+        let model = makeModel()
+        let task = Self.task(id: 52)
+
+        let didComplete = await model.completeTask(task)
+        XCTAssertTrue(didComplete)
+        model.dismissTaskUndo()
+
+        XCTAssertNil(model.justCompletedTask)
+        XCTAssertTrue(model.visibleTasks(from: [task]).isEmpty)
     }
 
     @MainActor
@@ -112,6 +290,86 @@ final class OwnerCommandModelTests: XCTestCase {
         XCTAssertFalse(didComplete)
         XCTAssertEqual(model.visibleTasks(from: [task]), [task])
         XCTAssertNotNil(model.taskNotice)
+    }
+
+    @MainActor
+    func testTaskCompletionRequiresTimestampAndReopenRequiresNullTimestamp() async {
+        let invalidCompletion = makeModel(task: { id, _ in
+            TaskCompletion(id: id, done: true, completedAt: nil)
+        })
+        let first = Self.task(id: 53)
+        let invalidCompletionResult = await invalidCompletion.completeTask(first)
+        XCTAssertFalse(invalidCompletionResult)
+        XCTAssertEqual(invalidCompletion.visibleTasks(from: [first]), [first])
+
+        let invalidReopen = makeModel(task: { id, completed in
+            TaskCompletion(id: id, done: completed, completedAt: Date())
+        })
+        let second = Self.task(id: 54)
+        let completionResult = await invalidReopen.completeTask(second)
+        let reopenResult = await invalidReopen.undoLastTaskCompletion()
+        XCTAssertTrue(completionResult)
+        XCTAssertFalse(reopenResult)
+        XCTAssertTrue(invalidReopen.visibleTasks(from: [second]).isEmpty)
+        XCTAssertEqual(invalidReopen.justCompletedTask, second)
+    }
+
+    @MainActor
+    func testTaskCompletionRejectsOpenStateEvenWithTimestamp() async {
+        let model = makeModel(task: { id, _ in
+            TaskCompletion(id: id, done: false, completedAt: Date())
+        })
+        let task = Self.task(id: 541)
+
+        let didComplete = await model.completeTask(task)
+
+        XCTAssertFalse(didComplete)
+        XCTAssertEqual(model.visibleTasks(from: [task]), [task])
+        XCTAssertNil(model.justCompletedTask)
+        XCTAssertNotNil(model.taskNotice)
+    }
+
+    @MainActor
+    func testTaskReopenRejectsWrongIDEvenWithOpenState() async {
+        let model = makeModel(task: { id, completed in
+            TaskCompletion(
+                id: completed ? id : id + 1,
+                done: completed,
+                completedAt: completed ? Date() : nil
+            )
+        })
+        let task = Self.task(id: 542)
+
+        let didComplete = await model.completeTask(task)
+        let didUndo = await model.undoLastTaskCompletion()
+
+        XCTAssertTrue(didComplete)
+        XCTAssertFalse(didUndo)
+        XCTAssertTrue(model.visibleTasks(from: [task]).isEmpty)
+        XCTAssertEqual(model.justCompletedTask, task)
+        XCTAssertNotNil(model.taskNotice)
+    }
+
+    @MainActor
+    func testFailedLaterCompletionRestoresPriorConfirmedUndo() async {
+        let first = Self.task(id: 55)
+        let second = Self.task(id: 56)
+        let model = makeModel(task: { id, completed in
+            if id == second.id { throw TestFailure.offline }
+            return TaskCompletion(
+                id: id,
+                done: completed,
+                completedAt: completed ? Date() : nil
+            )
+        })
+
+        let firstResult = await model.completeTask(first)
+        let secondResult = await model.completeTask(second)
+
+        XCTAssertTrue(firstResult)
+        XCTAssertFalse(secondResult)
+        XCTAssertEqual(model.justCompletedTask, first)
+        XCTAssertTrue(model.visibleTasks(from: [first, second]).map(\.id) == [second.id])
     }
 
     @MainActor
@@ -328,6 +586,40 @@ private actor TaskMutationRecorder {
 
     func values() -> [Bool] {
         completedValues
+    }
+}
+
+private actor UndoMutationLatch {
+    private var undoCalls = 0
+    private var undoContinuation: CheckedContinuation<TaskCompletion, any Error>?
+    private var undoObservers: [CheckedContinuation<Void, Never>] = []
+
+    func mutate(id: Int64, completed: Bool) async throws -> TaskCompletion {
+        if completed {
+            return TaskCompletion(id: id, done: true, completedAt: Date())
+        }
+        undoCalls += 1
+        let observers = undoObservers
+        undoObservers.removeAll()
+        observers.forEach { $0.resume() }
+        return try await withCheckedThrowingContinuation { undoContinuation = $0 }
+    }
+
+    func waitUntilUndoCalled() async {
+        guard undoCalls == 0 else { return }
+        await withCheckedContinuation { undoObservers.append($0) }
+    }
+
+    func undoCallCount() -> Int {
+        undoCalls
+    }
+
+    func succeedUndo(id: Int64) {
+        precondition(undoContinuation != nil)
+        undoContinuation?.resume(
+            returning: TaskCompletion(id: id, done: false, completedAt: nil)
+        )
+        undoContinuation = nil
     }
 }
 

@@ -50,6 +50,8 @@ final class ResourceModel<Value: Codable & Sendable> {
     private let cached: @Sendable () async throws -> ResourceSnapshot<Value>?
     private let remote: @Sendable () async throws -> ResourceSnapshot<Value>
     private var loaded = false
+    private var refreshWaiters: [CheckedContinuation<Void, Never>] = []
+    private var sessionFallback: ResourceSnapshot<Value>?
 
     init(
         staleAfter: TimeInterval,
@@ -64,10 +66,12 @@ final class ResourceModel<Value: Codable & Sendable> {
     func load() async {
         guard !loaded else { return }
         loaded = true
-        state = .loading(nil)
+        state = .loading(state.snapshot ?? sessionFallback)
         if let value = try? await cached() { state = .loaded(value) }
         guard !Task.isCancelled else {
-            if state.snapshot == nil {
+            if let snapshot = state.snapshot {
+                state = .loaded(snapshot)
+            } else {
                 state = .idle
                 loaded = false
             }
@@ -76,29 +80,82 @@ final class ResourceModel<Value: Codable & Sendable> {
         await refresh()
     }
 
-    func refresh() async {
-        guard !isRefreshing else { return }
+    @discardableResult
+    func refresh() async -> Bool {
+        guard !isRefreshing else { return false }
         isRefreshing = true
         let previous = state.snapshot
         state = .loading(previous)
-        defer { isRefreshing = false }
+        defer {
+            isRefreshing = false
+            let waiters = refreshWaiters
+            refreshWaiters.removeAll()
+            waiters.forEach { $0.resume() }
+        }
         do {
             let snapshot = try await remote()
+            sessionFallback = nil
             requiresSubscriptionRecovery = false
+            loaded = true
             state = .loaded(snapshot)
+            return true
         } catch is CancellationError {
-            if let previous {
-                state = .loaded(previous)
+            if let retained = state.snapshot ?? sessionFallback ?? previous {
+                state = .loaded(retained)
             } else {
                 state = .idle
                 loaded = false
             }
+            return false
         } catch {
             let failure = ResourceLoadFailure(error)
             if failure == .subscriptionRequired {
                 requiresSubscriptionRecovery = true
             }
-            state = .failed(previous, failure: failure)
+            state = .failed(
+                state.snapshot ?? sessionFallback ?? previous,
+                failure: failure
+            )
+            return false
         }
+    }
+
+    /// Supplies command-confirmed, session-only rows when no read snapshot has
+    /// resolved yet. The next load/refresh still goes to the network and keeps
+    /// this value only when that request cannot produce a fresher snapshot.
+    func supplySessionFallback(_ value: Value, storedAt: Date = Date()) {
+        guard state.snapshot == nil else { return }
+        let snapshot = ResourceSnapshot(
+            value: value,
+            storedAt: storedAt,
+            source: .session
+        )
+        sessionFallback = snapshot
+        switch state {
+        case .idle, .loaded:
+            state = .loaded(snapshot)
+        case .loading:
+            state = .loading(snapshot)
+        case let .failed(_, failure):
+            state = .failed(snapshot, failure: failure)
+        }
+    }
+
+    /// Waits out an older request, then performs a new fetch. Mutation flows use
+    /// this instead of dropping the post-mutation refresh behind an in-flight
+    /// pre-mutation request.
+    @discardableResult
+    func refreshAfterCurrent() async -> Bool {
+        while isRefreshing {
+            await withCheckedContinuation { continuation in
+                if isRefreshing {
+                    refreshWaiters.append(continuation)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
+        guard !Task.isCancelled else { return false }
+        return await refresh()
     }
 }

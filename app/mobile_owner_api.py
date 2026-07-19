@@ -26,6 +26,8 @@ from . import audit, db, mobile_auth
 from .admin import common as admin_common
 from .admin import studio as admin_studio
 from .mobile_api_helpers import cursor_problem as _cursor_problem
+from .mobile_api_helpers import decode_keyset_cursor as _decode_keyset_cursor
+from .mobile_api_helpers import encode_keyset_cursor as _encode_keyset_cursor
 from .mobile_api_helpers import etag_matches as _etag_matches
 from .mobile_api_helpers import private_headers, require_secret_key
 
@@ -34,6 +36,7 @@ _MAX_PAGE_SIZE = 100
 _CURRENCY = "USD"
 _INT64_MIN = -(2**63)
 _INT64_MAX = 2**63 - 1
+_TASK_CURSOR_KIND = "owner-tasks-open-v1"
 
 
 class OwnerAPIModel(BaseModel):
@@ -239,6 +242,17 @@ def _money(cents: int) -> Money:
     return Money(minor_units=int(cents), currency_code=_CURRENCY)
 
 
+def _task_summary(row) -> TaskSummary:
+    return TaskSummary(
+        id=int(row["id"]),
+        title=row["title"],
+        due_on=_date_only(row["due_date"]),
+        project_id=int(row["project_id"]) if row["project_id"] is not None else None,
+        project_title=row["project_title"],
+        is_overdue=bool(row["overdue"]),
+    )
+
+
 def _studio_today() -> dt.date:
     """Use the same monkeypatchable wall clock as admin financial decisions."""
 
@@ -397,14 +411,7 @@ def _dashboard_summary() -> DashboardSummary:
     )
 
     open_tasks = [
-        TaskSummary(
-            id=int(row["id"]),
-            title=row["title"],
-            due_on=_date_only(row["due_date"]),
-            project_id=int(row["project_id"]) if row["project_id"] is not None else None,
-            project_title=row["project_title"],
-            is_overdue=bool(row["overdue"]),
-        )
+        _task_summary(row)
         for row in db.all_(
             """SELECT t.id, t.title, t.due_date, t.project_id,
                       p.title AS project_title,
@@ -611,6 +618,106 @@ def projects(
         next_cursor=(
             _encode_cursor("projects", int(visible[-1]["id"])) if has_more and visible else None
         ),
+        has_more=has_more,
+    )
+    return _conditional(request, response, payload)
+
+
+def _decode_task_cursor(cursor: str | None) -> tuple[int, str, int] | None:
+    decoded = _decode_keyset_cursor(
+        cursor,
+        _TASK_CURSOR_KIND,
+        (int, str, int),
+    )
+    if decoded is None:
+        return None
+    null_rank, due_key, last_id = decoded
+    if null_rank == 0:
+        try:
+            due_on = dt.date.fromisoformat(due_key)
+        except ValueError:
+            raise _cursor_problem() from None
+        if due_on.isoformat() != due_key:
+            raise _cursor_problem()
+    elif null_rank == 1:
+        if due_key != "":
+            raise _cursor_problem()
+    else:
+        raise _cursor_problem()
+    if last_id <= 0 or last_id > _INT64_MAX:
+        raise _cursor_problem()
+    return null_rank, due_key, last_id
+
+
+def _encode_task_cursor(row) -> str:
+    if row["due_date"] is None:
+        due_key = ""
+        null_rank = 1
+    else:
+        due_key = str(row["due_date"])
+        try:
+            due_on = dt.date.fromisoformat(due_key)
+        except ValueError as exc:
+            raise ValueError("stored task due_date is not canonical YYYY-MM-DD") from exc
+        if due_on.isoformat() != due_key:
+            raise ValueError("stored task due_date is not canonical YYYY-MM-DD")
+        null_rank = 0
+    return _encode_keyset_cursor(
+        _TASK_CURSOR_KIND,
+        (null_rank, due_key, int(row["id"])),
+    )
+
+
+@router.get("/tasks", response_model=APIPage[TaskSummary])
+def tasks(
+    request: Request,
+    response: Response,
+    cursor: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=_MAX_PAGE_SIZE)] = _DEFAULT_PAGE_SIZE,
+) -> APIPage[TaskSummary] | Response:
+    boundary = _decode_task_cursor(cursor)
+    today_iso = _studio_today().isoformat()
+    where = ""
+    params: tuple = (today_iso, limit + 1)
+    if boundary is not None:
+        null_rank, due_key, last_id = boundary
+        where = """
+          AND (
+                (t.due_date IS NULL) > ?
+             OR (
+                    (t.due_date IS NULL) = ?
+                AND (
+                       COALESCE(t.due_date, '') > ?
+                    OR (COALESCE(t.due_date, '') = ? AND t.id < ?)
+                )
+             )
+          )
+        """
+        params = (
+            today_iso,
+            null_rank,
+            null_rank,
+            due_key,
+            due_key,
+            last_id,
+            limit + 1,
+        )
+    rows = db.all_(
+        f"""SELECT t.id, t.title, t.due_date, t.project_id,
+                   p.title AS project_title,
+                   (t.due_date IS NOT NULL AND t.due_date < ?) AS overdue
+              FROM tasks t LEFT JOIN projects p ON p.id=t.project_id
+             WHERE t.done=0
+             {where}
+             ORDER BY (t.due_date IS NULL) ASC, t.due_date ASC, t.id DESC
+             LIMIT ?""",
+        params,
+    )
+    has_more = len(rows) > limit
+    visible = rows[:limit]
+    payload = APIPage[TaskSummary](
+        items=[_task_summary(row) for row in visible],
+        next_cursor=(_encode_task_cursor(visible[-1]) if has_more and visible else None),
         has_more=has_more,
     )
     return _conditional(request, response, payload)

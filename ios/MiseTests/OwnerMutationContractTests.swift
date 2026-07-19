@@ -762,6 +762,112 @@ final class OwnerMutationContractTests: XCTestCase {
         XCTAssertNil(reopen.idempotencyKey)
     }
 
+    func testTaskListEndpointUsesBodylessBearerGetAndBoundedQuery() {
+        let defaultPage = MiseEndpoints.Tasks.list()
+        let cursorPage = MiseEndpoints.Tasks.list(cursor: "next-page", limit: 500)
+
+        XCTAssertEqual(defaultPage.method, .get)
+        XCTAssertEqual(defaultPage.path, "/api/v1/tasks")
+        XCTAssertEqual(
+            defaultPage.queryItems,
+            [
+                APIQueryItem(name: "cursor", value: nil),
+                APIQueryItem(name: "limit", value: "25"),
+            ]
+        )
+        XCTAssertEqual(cursorPage.authentication, .bearer)
+        XCTAssertEqual(
+            cursorPage.queryItems,
+            [
+                APIQueryItem(name: "cursor", value: "next-page"),
+                APIQueryItem(name: "limit", value: "100"),
+            ]
+        )
+        XCTAssertNil(cursorPage.body)
+        XCTAssertNil(cursorPage.idempotencyKey)
+        XCTAssertNil(cursorPage.etag)
+    }
+
+    func testTaskRefreshAggregatesEveryPageWithoutTouchingTenantCache() async throws {
+        let context = makeCache()
+        defer { try? FileManager.default.removeItem(at: context.root) }
+        try await context.cache.write(
+            Self.dashboard,
+            key: "dashboard.v1",
+            etag: #""dashboard-before""#
+        )
+        let cacheBefore = try fileTree(at: context.root)
+        let client = OwnerMutationContractClient([
+            .value(Data(
+                """
+                {
+                  "items":[{
+                    "id":42,"title":"Cull the tasting menu","due_on":"2026-07-13",
+                    "project_id":12,"project_title":"Rossi tasting","is_overdue":true
+                  }],
+                  "next_cursor":"next-page","has_more":true
+                }
+                """.utf8
+            )),
+            .value(Data(
+                """
+                {
+                  "items":[{
+                    "id":41,"title":"Send the selects","due_on":null,
+                    "project_id":null,"project_title":null,"is_overdue":false
+                  }],
+                  "next_cursor":null,"has_more":false
+                }
+                """.utf8
+            )),
+        ])
+        let repository = OwnerRepository(client: client, cache: context.cache)
+
+        let snapshot = try await repository.refreshTasks()
+        let cacheAfter = try fileTree(at: context.root)
+        let requests = await client.capturedRequests()
+
+        XCTAssertEqual(snapshot.value.map(\.id), [42, 41])
+        XCTAssertEqual(
+            snapshot.value,
+            [
+                TaskSummary(
+                    id: 42,
+                    title: "Cull the tasting menu",
+                    dueOn: LocalDate(rawValue: "2026-07-13"),
+                    projectID: 12,
+                    projectTitle: "Rossi tasting",
+                    isOverdue: true
+                ),
+                TaskSummary(
+                    id: 41,
+                    title: "Send the selects",
+                    dueOn: nil,
+                    projectID: nil,
+                    projectTitle: nil,
+                    isOverdue: false
+                ),
+            ]
+        )
+        XCTAssertEqual(snapshot.source, .network)
+        XCTAssertEqual(cacheAfter, cacheBefore)
+        XCTAssertEqual(requests.map(\.method), [.get, .get])
+        XCTAssertEqual(requests.map(\.path), ["/api/v1/tasks", "/api/v1/tasks"])
+        XCTAssertEqual(
+            requests.map(\.queryItems),
+            [
+                [
+                    APIQueryItem(name: "cursor", value: nil),
+                    APIQueryItem(name: "limit", value: "100"),
+                ],
+                [
+                    APIQueryItem(name: "cursor", value: "next-page"),
+                    APIQueryItem(name: "limit", value: "100"),
+                ],
+            ]
+        )
+    }
+
     func testCancelBookingEndpointUsesBodylessBearerPost() {
         let endpoint = MiseEndpoints.Scheduling.cancelBooking(id: 91)
 
@@ -984,6 +1090,21 @@ final class OwnerMutationContractTests: XCTestCase {
             root,
             TenantJSONCache(cacheNamespace: "workspace_test", rootDirectory: root)
         )
+    }
+
+    private func fileTree(at root: URL) throws -> [String: Data] {
+        guard FileManager.default.fileExists(atPath: root.path) else { return [:] }
+        var result: [String: Data] = [:]
+        for path in try FileManager.default.subpathsOfDirectory(atPath: root.path) {
+            let url = root.appendingPathComponent(path)
+            var isDirectory: ObjCBool = false
+            guard
+                FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+                !isDirectory.boolValue
+            else { continue }
+            result[path] = try Data(contentsOf: url)
+        }
+        return result
     }
 
     private static func date(_ value: String) throws -> Date {

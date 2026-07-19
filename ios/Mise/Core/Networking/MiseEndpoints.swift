@@ -71,6 +71,20 @@ enum MiseEndpoints {
     )
 
     enum Tasks {
+        static func list(
+            cursor: String? = nil,
+            limit: Int = 25
+        ) -> APIEndpoint<APIPage<TaskSummary>> {
+            APIEndpoint(
+                method: .get,
+                path: "/api/v1/tasks",
+                queryItems: [
+                    APIQueryItem(name: "cursor", value: cursor),
+                    APIQueryItem(name: "limit", value: String(min(max(limit, 1), 100))),
+                ]
+            )
+        }
+
         static func completion(
             id: Int64,
             completed: Bool

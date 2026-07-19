@@ -4,6 +4,7 @@ enum ResourceSnapshotSource: Equatable, Sendable {
     case cache
     case network
     case revalidated
+    case session
 }
 
 struct ResourceSnapshot<Value: Codable & Sendable>: Sendable {
@@ -155,6 +156,15 @@ actor OwnerRepository {
             MiseEndpoints.Scheduling.bookings(cursor: cursor, limit: 100)
         }
         return try await persist(values, key: Key.bookings)
+    }
+
+    /// The complete studio-task inbox is intentionally session-memory-only.
+    /// It never reads, writes, touches, or removes a tenant cache record.
+    func refreshTasks() async throws -> ResourceSnapshot<[TaskSummary]> {
+        let values = try await fetchAll { cursor in
+            MiseEndpoints.Tasks.list(cursor: cursor, limit: 100)
+        }
+        return ResourceSnapshot(value: values, storedAt: Date(), source: .network)
     }
 
     func setTaskCompletion(id: Int64, completed: Bool) async throws -> TaskCompletion {

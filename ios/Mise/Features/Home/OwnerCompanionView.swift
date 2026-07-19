@@ -32,9 +32,11 @@ struct OwnerCompanionView: View {
     @State private var projects: ResourceModel<[ProjectSummary]>
     @State private var galleries: ResourceModel<[GallerySummary]>
     @State private var bookings: ResourceModel<[Booking]>
+    @State private var tasks: ResourceModel<[TaskSummary]>
     @State private var commercial: ResourceModel<[CommercialAction]>
     @State private var commands: OwnerCommandModel
     @State private var reschedule: BookingRescheduleModel
+    @State private var taskCoordinator: OwnerTaskCoordinator
 
     let session: CurrentSession
     let preferredManageBillingURL: URL?
@@ -72,11 +74,12 @@ struct OwnerCompanionView: View {
             commands: commandModel,
             repository: repository
         ))
-        _home = State(initialValue: ResourceModel(
+        let homeModel = ResourceModel(
             staleAfter: 15 * 60,
             cached: { try await repository.cachedDashboard() },
             remote: { try await repository.refreshDashboard() }
-        ))
+        )
+        _home = State(initialValue: homeModel)
         _clients = State(initialValue: ResourceModel(
             staleAfter: 60 * 60,
             cached: { try await repository.cachedClients() },
@@ -96,6 +99,17 @@ struct OwnerCompanionView: View {
             staleAfter: 15 * 60,
             cached: { try await repository.cachedBookings() },
             remote: { try await repository.refreshBookings() }
+        ))
+        let tasksModel = ResourceModel<[TaskSummary]>(
+            staleAfter: 15 * 60,
+            cached: { nil },
+            remote: { try await repository.refreshTasks() }
+        )
+        _tasks = State(initialValue: tasksModel)
+        _taskCoordinator = State(initialValue: OwnerTaskCoordinator(
+            home: homeModel,
+            tasks: tasksModel,
+            commands: commandModel
         ))
         _commercial = State(initialValue: ResourceModel(
             staleAfter: 15 * 60,
@@ -183,7 +197,13 @@ struct OwnerCompanionView: View {
     private func screen(_ destination: OwnerDestination) -> some View {
         switch destination {
         case .home:
-            HomeView(model: home, commands: commands) { selection = $0 }
+            HomeView(
+                model: home,
+                tasks: tasks,
+                timeZoneIdentifier: session.workspace.timeZone,
+                commands: commands,
+                taskCoordinator: taskCoordinator
+            ) { selection = $0 }
         case .clients:
             ClientsView(model: clients)
         case .projects:
