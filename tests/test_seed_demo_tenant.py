@@ -18,7 +18,7 @@ SUBMISSION_PLAN = ROOT / "docs" / "APP-STORE-SUBMISSION.md"
 CONDUCTOR_PLAN = ROOT / "docs" / "CONDUCTOR-PLAN.md"
 NICHE_DECISION = ROOT / "docs" / "NICHE-STORY-DECISION.md"
 DOCS_INDEX = ROOT / "docs" / "README.md"
-BLOCKER_URL = "https://github.com/Ayyitskevin/mise/issues/185"
+BLOCKER_URL = "https://github.com/Ayyitskevin/Focal/issues/185"
 
 
 def _load_seeder():
