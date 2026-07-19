@@ -1,24 +1,24 @@
-# Mise — Claude Code bootstrap
+# Focal — Claude Code bootstrap
 
-**Mise Solo Studio OS** is a single-tenant modular monolith for a solo photography studio. Stack:
+**Focal Solo Studio OS** is a single-tenant modular monolith for a solo photography studio. Stack:
 FastAPI (async) + HTMX/Alpine.js + SQLite/WAL. One product, one data spine, one operator.
 
 ## Architecture in one paragraph
 
-Mise is the **transaction authority**. AI sidecars (Argus/vision, Odysseus+Dionysus/content,
-Aphrodite/products — dormant) are **stateless workers** driven through a **provider facade**
-(`app/providers/`). The facade owns capability routing, cost ledgering (`ai_runs`), and the
-structured-output contracts (`schemas/*.schema.json`). Every AI output is a **draft a human
-approves** — the model proposes, deterministic code validates, a human clicks. Nothing
-auto-sends, charges, publishes, or prints. (Plutus/offers and Mnemosyne/albums were
-decommissioned — migration 075 — as consumer-print capabilities that don't fit the B2B
-food-and-beverage workflow.)
+Focal is a self-hostable, local-first studio operating system for solo photographers
+and small creative studios. The stack is FastAPI + HTMX/Alpine.js + SQLite/WAL for the
+web application and SwiftUI for the focused iOS companion. Focal is the transaction
+authority. Optional AI/media workers are stateless and operate through a provider
+facade. Every AI output is a draft a human approves: the model proposes, deterministic
+code validates, and an operator decides before anything becomes client-visible,
+financial, contractual, or published state.
+
 
 ## Key invariants (never break these)
 
 - **§11.4 — Model proposes, human approves.** AI results enter a review surface; operator
   action is required before any write to a client-visible record.
-- **Money/rights boundary.** Aphrodite (products) outputs are proposals; Mise enforces spend
+- **Money/rights boundary.** Aphrodite (products) outputs are proposals; Focal enforces spend
   caps and consent gates in code, not convention. No auto-invoice, auto-charge, or auto-publish.
 - **Strangler migration.** Live paths stay green; the new path is flag-gated and can be rolled
   back to the old path by toggling one env var. Decommission only after parity + observation.
@@ -70,14 +70,17 @@ Do NOT:
 | Sibling repo prompts | `docs/sibling-briefs/` |
 | ADR index | `docs/adr/README.md` |
 
-## Current commercial spine handoff
+## Current product spine
 
-Recent F&B/commercial work is documented in ADRs 0034–0046. That spine now includes
-derived repeat-client cadence, canned shot-list and deliverable templates, a project closeout-readiness
-panel, read-only company next-action ranking, a Studio Activity commercial action queue, manual AR
-chase assist for past-due invoices, AR follow-up cadence from send-log history, company
-communication history, and company billing readiness. These are deterministic/operator surfaces only:
-no auto-send, auto-charge, auto-publish, or auto-close.
+Current work is centered on the photographer's operating loop: inquiry, client and
+project records, booking, shot preparation, gallery proofing and delivery, contracts,
+invoices and payment state, follow-up, and owner activity. These surfaces are
+deterministic and operator-controlled. No AI path may auto-send, auto-charge,
+auto-publish, or silently mutate a consequential business record.
+
+The iOS companion is a focused native surface for the highest-value owner and client
+journeys. It must remain honest about capability boundaries instead of pretending to
+have full web parity.
 
 ## Provider facade quick reference
 
