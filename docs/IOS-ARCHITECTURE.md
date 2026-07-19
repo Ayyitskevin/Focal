@@ -139,7 +139,7 @@ work depend on an interactive Keychain prompt.
 - Pydantic request/response DTOs; never serialize SQLite rows directly.
 - JSON booleans, integer cents/minor units, RFC 3339 UTC instants, and explicit
   `YYYY-MM-DD` local dates.
-- Cursor pagination for collections.
+- Cursor pagination for collections and bounded gallery-detail asset pages.
 - RFC 9457-style problem details with stable machine codes and field errors.
 - JSON 401/403 responses; never redirect an API request to `/admin/login`.
 - Named commands for lifecycle transitions (accept, sign, checkout, reschedule),
@@ -198,7 +198,7 @@ Offline is cache-first for safe reads, deliberately narrow for writes.
 | Data | Offline behavior |
 | --- | --- |
 | Dashboard/CRM/document summaries | show last successful snapshot with age |
-| Gallery manifests/thumbnails | URLCache plus protected disk cache |
+| Gallery manifests/thumbnails | cache the conditional first page; append later asset pages in session memory; URLCache plus protected disk cache |
 | Explicit gallery downloads | background URLSession into protected app files |
 | Draft intake/forms/notes | SwiftData draft; queued submit with idempotency key |
 | Favorites/comments | optimistic only when queued operation has a stable ID |
@@ -213,7 +213,7 @@ files and queued writes.
 
 Use server validators instead of polling full payloads:
 
-- gallery `contentRevision` and ETag
+- gallery `contentRevision`, per-page ETag, and signed current-view asset cursor
 - collection cursor plus `updated_since` where deletion tombstones are available
 - background refresh only for user-visible, time-sensitive data
 
@@ -312,6 +312,7 @@ of reusing the current bearer token.
 - `ClientCompanionView`: Home / Gallery / Documents / Bookings tabs for all
   four guest principals, each tab scoped to exactly the unlocked capability
 - shared owner/client sectioned gallery grid + fullscreen paging lightbox;
+  bounded first-page manifests and session-local incremental asset pages;
   optimistic gallery-guest favoriting with server-confirmed proofing counts
 - bearer-authenticated media loading (`AuthenticatedMediaLoader` /
   `AuthenticatedRemoteImage`) — owner manifests render real thumbnails too

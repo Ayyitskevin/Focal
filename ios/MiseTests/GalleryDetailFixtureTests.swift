@@ -65,6 +65,8 @@ final class GalleryDetailFixtureTests: XCTestCase {
                   "cull_state": "keep"
                 }
               ],
+              "assets_next_cursor": null,
+              "assets_has_more": false,
               "hero_asset_ids": [201],
               "vision": null
             }
@@ -77,6 +79,8 @@ final class GalleryDetailFixtureTests: XCTestCase {
         XCTAssertEqual(gallery.summary.deliveryState, .proofing)
         XCTAssertEqual(gallery.sections.first?.proofTarget, 20)
         XCTAssertEqual(gallery.assets.first?.links.thumbnailURL?.host, "studio.example.com")
+        XCTAssertFalse(gallery.assetsHasMore)
+        XCTAssertNil(gallery.assetsNextCursor)
         XCTAssertEqual(gallery.heroAssetIDs, [201])
     }
 }

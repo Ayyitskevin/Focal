@@ -140,6 +140,31 @@ def _seed_gallery() -> tuple[int, int, int]:
     return gallery_id, ready_id, other_gallery_id
 
 
+def _seed_large_gallery(asset_count: int = 10_001) -> int:
+    gallery_id = db.run(
+        """INSERT INTO galleries
+           (slug,title,pin,published,content_rev,type,require_pin,created_at)
+           VALUES ('large-native-gallery','Large Native Gallery','2741',1,12,
+                   'gallery',1,'2026-07-10 12:00:00')"""
+    )
+    with db.tx() as con:
+        con.executemany(
+            """INSERT INTO assets
+               (gallery_id,kind,filename,stored,status,position,created_at)
+               VALUES (?,'photo',?,?,'ready',?,'2026-07-10 12:01:00')""",
+            (
+                (
+                    gallery_id,
+                    f"frame-{position:05d}.jpg",
+                    f"frame-{position:05d}.jpg",
+                    position,
+                )
+                for position in range(asset_count)
+            ),
+        )
+    return gallery_id
+
+
 def _seed_schedule() -> int:
     event_id = db.run(
         """INSERT INTO event_types
@@ -221,6 +246,8 @@ def test_gallery_owner_auth_manifest_safety_and_conditional_cache(api_client, mo
     detail = api_client.get(f"/api/v1/galleries/{gallery_id}", headers=headers)
     assert detail.status_code == 200
     payload = detail.json()
+    assert payload["assets_has_more"] is False
+    assert payload["assets_next_cursor"] is None
     assert payload["summary"]["asset_count"] == 1
     assert payload["summary"]["favorite_count"] == 1
     assert payload["summary"]["delivery_state"] == "proofing"
@@ -253,6 +280,185 @@ def test_gallery_owner_auth_manifest_safety_and_conditional_cache(api_client, mo
     assert api_client.get("/api/v1/galleries/999999", headers=headers).status_code == 404
     wrong_host = api_client.get("https://other.test/api/v1/galleries", headers=headers)
     assert wrong_host.status_code == 401
+
+
+def test_gallery_detail_assets_are_bounded_signed_endpoint_scoped_pages(api_client, monkeypatch):
+    gallery_id = _seed_large_gallery()
+    other_gallery_id, _, _ = _seed_gallery()
+    headers = _owner_headers(api_client)
+    original_all = db.all_
+    asset_queries: list[tuple[str, tuple]] = []
+
+    def capture(sql: str, params: tuple = ()):
+        if "FROM assets a LEFT JOIN favorites" in sql:
+            asset_queries.append((sql, params))
+        return original_all(sql, params)
+
+    monkeypatch.setattr(db, "all_", capture)
+    first = api_client.get(f"/api/v1/galleries/{gallery_id}", headers=headers)
+    assert first.status_code == 200
+    first_payload = first.json()
+    assert len(first_payload["assets"]) == 100
+    assert first_payload["assets_has_more"] is True
+    assert first_payload["assets_next_cursor"]
+    assert [asset["position"] for asset in first_payload["assets"]] == list(range(100))
+    assert asset_queries and "LIMIT ?" in asset_queries[-1][0]
+    assert asset_queries[-1][1][-1] == 101
+
+    cursor = first_payload["assets_next_cursor"]
+    second = api_client.get(
+        f"/api/v1/galleries/{gallery_id}?limit=100&cursor={cursor}",
+        headers=headers,
+    )
+    assert second.status_code == 200
+    second_payload = second.json()
+    assert len(second_payload["assets"]) == 100
+    assert [asset["position"] for asset in second_payload["assets"]] == list(range(100, 200))
+    assert {asset["id"] for asset in first_payload["assets"]}.isdisjoint(
+        asset["id"] for asset in second_payload["assets"]
+    )
+    assert second.headers["etag"] != first.headers["etag"]
+    assert second.headers["cache-control"] == "private, no-cache"
+    assert second.headers["vary"] == "Authorization"
+    assert (
+        api_client.get(
+            f"/api/v1/galleries/{gallery_id}?limit=100&cursor={cursor}",
+            headers={**headers, "If-None-Match": first.headers["etag"]},
+        ).status_code
+        == 200
+    )
+    assert (
+        api_client.get(
+            f"/api/v1/galleries/{gallery_id}?limit=100&cursor={cursor}",
+            headers={**headers, "If-None-Match": second.headers["etag"]},
+        ).status_code
+        == 304
+    )
+
+    tampered = ("A" if cursor[0] != "A" else "B") + cursor[1:]
+    assert (
+        api_client.get(
+            f"/api/v1/galleries/{gallery_id}?cursor={tampered}", headers=headers
+        ).status_code
+        == 422
+    )
+    assert (
+        api_client.get(
+            f"/api/v1/galleries/{other_gallery_id}?cursor={cursor}", headers=headers
+        ).status_code
+        == 422
+    )
+
+
+def test_gallery_detail_asset_cursor_crosses_sections_ties_and_terminal_page(api_client):
+    gallery_id = db.run(
+        """INSERT INTO galleries
+           (slug,title,pin,published,content_rev,type,require_pin,created_at)
+           VALUES ('ordered-native-gallery','Ordered Native Gallery','2742',1,3,
+                   'gallery',1,'2026-07-10 12:00:00')"""
+    )
+    first_section_id = db.run(
+        "INSERT INTO sections (gallery_id,name,position) VALUES (?,?,?)",
+        (gallery_id, "First", 0),
+    )
+    second_section_id = db.run(
+        "INSERT INTO sections (gallery_id,name,position) VALUES (?,?,?)",
+        (gallery_id, "Second", 1),
+    )
+    asset_ids: list[int] = []
+    ordering = (
+        (first_section_id, 0),
+        (first_section_id, 0),
+        (second_section_id, 0),
+        (second_section_id, 1),
+        (None, 0),
+    )
+    for index, (section_id, position) in enumerate(ordering, start=1):
+        asset_ids.append(
+            db.run(
+                """INSERT INTO assets
+                   (gallery_id,section_id,kind,filename,stored,status,position,created_at)
+                   VALUES (?,?, 'photo',?,?,'ready',?,'2026-07-10 12:01:00')""",
+                (
+                    gallery_id,
+                    section_id,
+                    f"ordered-{index}.jpg",
+                    f"ordered-{index}.jpg",
+                    position,
+                ),
+            )
+        )
+    headers = _owner_headers(api_client)
+
+    seen_ids: list[int] = []
+    cursor = None
+    while True:
+        params: dict[str, str | int] = {"limit": 2}
+        if cursor is not None:
+            params["cursor"] = cursor
+        response = api_client.get(
+            f"/api/v1/galleries/{gallery_id}",
+            headers=headers,
+            params=params,
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        seen_ids.extend(asset["id"] for asset in payload["assets"])
+        if not payload["assets_has_more"]:
+            assert payload["assets_next_cursor"] is None
+            assert len(payload["assets"]) == 1
+            break
+        cursor = payload["assets_next_cursor"]
+
+    assert seen_ids == asset_ids
+    assert len(seen_ids) == len(set(seen_ids))
+
+
+def test_gallery_detail_asset_cursor_is_explicitly_non_snapshot(api_client):
+    gallery_id = db.run(
+        """INSERT INTO galleries
+           (slug,title,pin,published,content_rev,type,require_pin,created_at)
+           VALUES ('mutable-native-gallery','Mutable Native Gallery','2743',1,4,
+                   'gallery',1,'2026-07-10 12:00:00')"""
+    )
+    original_ids = [
+        db.run(
+            """INSERT INTO assets
+               (gallery_id,kind,filename,stored,status,position,created_at)
+               VALUES (?,'photo',?,?,'ready',?,'2026-07-10 12:01:00')""",
+            (gallery_id, f"original-{position}.jpg", f"original-{position}.jpg", position),
+        )
+        for position in (10, 20, 30)
+    ]
+    headers = _owner_headers(api_client)
+    first = api_client.get(
+        f"/api/v1/galleries/{gallery_id}",
+        headers=headers,
+        params={"limit": 2},
+    )
+    assert first.status_code == 200
+    cursor = first.json()["assets_next_cursor"]
+    assert cursor
+
+    inserted_before_cursor = db.run(
+        """INSERT INTO assets
+           (gallery_id,kind,filename,stored,status,position,created_at)
+           VALUES (?,'photo','late-ready.jpg','late-ready.jpg','ready',15,
+                   '2026-07-10 12:02:00')""",
+        (gallery_id,),
+    )
+    later = api_client.get(
+        f"/api/v1/galleries/{gallery_id}",
+        headers=headers,
+        params={"limit": 2, "cursor": cursor},
+    )
+    assert later.status_code == 200
+    assert [asset["id"] for asset in later.json()["assets"]] == [original_ids[2]]
+
+    refreshed = api_client.get(f"/api/v1/galleries/{gallery_id}", headers=headers)
+    assert refreshed.status_code == 200
+    refreshed_ids = [asset["id"] for asset in refreshed.json()["assets"]]
+    assert inserted_before_cursor in refreshed_ids
 
 
 def test_gallery_pagination_is_bounded_and_signed(api_client, monkeypatch):

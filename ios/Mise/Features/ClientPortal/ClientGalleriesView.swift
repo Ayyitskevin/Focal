@@ -118,7 +118,10 @@ struct ClientGalleryDetailView: View {
                     detail: detail,
                     favorites: favorites,
                     mediaLoader: mediaLoader,
-                    refresh: { await model.refresh() }
+                    refresh: { await model.refresh() },
+                    loadPage: { cursor in
+                        try await repository.galleryPage(id: gallery.id, cursor: cursor)
+                    }
                 )
             },
             empty: {

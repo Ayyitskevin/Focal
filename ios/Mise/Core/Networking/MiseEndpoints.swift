@@ -217,10 +217,19 @@ enum MiseEndpoints {
             )
         }
 
-        static func detail(id: Int64, etag: String? = nil) -> APIEndpoint<GalleryDetail> {
+        static func detail(
+            id: Int64,
+            cursor: String? = nil,
+            limit: Int = 100,
+            etag: String? = nil
+        ) -> APIEndpoint<GalleryDetail> {
             APIEndpoint(
                 method: .get,
                 path: "/api/v1/galleries/\(id)",
+                queryItems: [
+                    APIQueryItem(name: "cursor", value: cursor),
+                    APIQueryItem(name: "limit", value: String(min(max(limit, 1), 100))),
+                ],
                 etag: etag
             )
         }
@@ -405,10 +414,19 @@ enum MiseEndpoints {
             )
         }
 
-        static func galleryDetail(id: Int64, etag: String? = nil) -> APIEndpoint<GalleryDetail> {
+        static func galleryDetail(
+            id: Int64,
+            cursor: String? = nil,
+            limit: Int = 100,
+            etag: String? = nil
+        ) -> APIEndpoint<GalleryDetail> {
             APIEndpoint(
                 method: .get,
                 path: "/api/v1/client/galleries/\(id)",
+                queryItems: [
+                    APIQueryItem(name: "cursor", value: cursor),
+                    APIQueryItem(name: "limit", value: String(min(max(limit, 1), 100))),
+                ],
                 etag: etag
             )
         }

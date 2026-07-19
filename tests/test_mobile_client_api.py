@@ -219,6 +219,8 @@ def test_gallery_guest_scoped_reads_and_favorite_flow(api_client):
     payload = detail.json()
     assert payload["summary"]["id"] == seed["gallery_id"]
     assert len(payload["assets"]) == 3
+    assert payload["assets_has_more"] is False
+    assert payload["assets_next_cursor"] is None
     first_links = payload["assets"][0]["links"]
     assert first_links["thumbnail_url"].startswith(
         f"https://studio.test/api/v1/media/galleries/{seed['gallery_id']}/assets/"
@@ -267,6 +269,33 @@ def test_gallery_guest_scoped_reads_and_favorite_flow(api_client):
         headers=headers,
     )
     assert foreign.status_code == 403
+
+
+def test_gallery_detail_asset_cursor_is_client_endpoint_scoped(api_client):
+    seed = _seed_world()
+    guest_headers = _unlock(api_client, "gallery", "amelia-wedding", "4821")
+    owner_headers = _owner_headers(api_client)
+
+    first = api_client.get(
+        f"/api/v1/client/galleries/{seed['gallery_id']}?limit=1",
+        headers=guest_headers,
+    )
+    assert first.status_code == 200
+    cursor = first.json()["assets_next_cursor"]
+    assert cursor
+    second = api_client.get(
+        f"/api/v1/client/galleries/{seed['gallery_id']}?limit=1&cursor={cursor}",
+        headers=guest_headers,
+    )
+    assert second.status_code == 200
+    assert second.json()["assets"][0]["id"] != first.json()["assets"][0]["id"]
+
+    replay = api_client.get(
+        f"/api/v1/galleries/{seed['gallery_id']}?cursor={cursor}",
+        headers=owner_headers,
+    )
+    assert replay.status_code == 422
+    assert replay.json()["code"] == "pagination.invalid_cursor"
 
 
 def test_workspace_guest_documents_home_and_bookings(api_client):

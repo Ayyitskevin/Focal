@@ -67,6 +67,12 @@ actor ClientRepository {
         )
     }
 
+    func galleryPage(id: Int64, cursor: String) async throws -> GalleryDetail {
+        try await send(
+            MiseEndpoints.Client.galleryDetail(id: id, cursor: cursor)
+        )
+    }
+
     func cachedBookings() async throws -> ResourceSnapshot<[Booking]>? {
         try await cached(Key.bookings, as: [Booking].self)
     }
