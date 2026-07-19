@@ -64,7 +64,7 @@ App Review will demand working credentials for a sign-in-only app (Guideline 2.1
 
 > **BLOCKED — do not run `scripts/seed_demo_tenant.py` against any hosted state.**
 > The command is intentionally disabled and exits before reading configuration or
-> opening a database. [Issue #185](https://github.com/Ayyitskevin/mise/issues/185)
+> opening a database. [Issue #185](https://github.com/Ayyitskevin/Focal/issues/185)
 > records the proven unsafe behavior in the retired implementation and owns the
 > replacement contract.
 
