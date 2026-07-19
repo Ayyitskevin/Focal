@@ -1,12 +1,14 @@
-# Mise Solo Studio OS
+# Focal Solo Studio OS
+
+> **Branding note (July 2026):** The public product name is **Focal**. This legacy filename and compatibility identifiers such as `MISE_*`, `mise` paths/service names, and native `Mise` targets remain in place until a separately tested namespace migration.
 
 > Single-tenant, modular **operating system** for one photography business and one
 > technically capable owner. This document defines the product, the current state,
 > the target architecture, and the boundaries that keep the live business safe while
-> the sibling sidecars are consolidated into Mise.
+> the sibling sidecars are consolidated into Focal.
 
 **Status:** design + Phase 0 foundation (this branch).
-**Audience:** Kevin (owner/operator) and any agent or engineer working on Mise.
+**Audience:** Kevin (owner/operator) and any agent or engineer working on Focal.
 **Companion docs:** [`MISE-SOLO-STUDIO-OS-RUNBOOK.md`](MISE-SOLO-STUDIO-OS-RUNBOOK.md) (how to operate it) ·
 [`REPO-CONSOLIDATION-MATRIX.md`](REPO-CONSOLIDATION-MATRIX.md) ·
 [`MISE-CONSOLIDATION-ROADMAP.md`](MISE-CONSOLIDATION-ROADMAP.md) ·
@@ -33,22 +35,22 @@ is armed.
 
 ## 1. Product definition
 
-Mise Solo Studio OS is a **single-tenant modular monolith with optional stateless
+Focal Solo Studio OS is a **single-tenant modular monolith with optional stateless
 compute workers**. One FastAPI + HTMX + SQLite application **[CODE]** is the command
 center and the single authority for the business; heavy or experimental AI runs on
 replaceable workers that own no business records.
 
 It absorbs the *proven photography capabilities* of the sibling repositories — Argus
 (vision), Plutus (offers), Mnemosyne (albums), Dionysus (content), and later parts of
-Aphrodite (product images) — **as modules inside Mise**, conforming to Mise's existing
+Aphrodite (product images) — **as modules inside Focal**, conforming to Focal's existing
 conventions and shared infrastructure. It does **not** concatenate repositories, import
-sibling apps at runtime, reproduce their SaaS infrastructure, or rewrite Mise.
+sibling apps at runtime, reproduce their SaaS infrastructure, or rewrite Focal.
 
 The outcome we are optimizing for:
 
 - **Fewer services.** One coherent operator experience instead of a fleet of sidecars
   each with its own auth, queue, deploy, and backup.
-- **One business data spine.** Mise SQLite is the system of record for everything that
+- **One business data spine.** Focal SQLite is the system of record for everything that
   touches a client, money, a contract, or a deliverable.
 - **Clear ownership of state.** Every record has exactly one writer; everything else is
   a projection, a mirror, or a draft awaiting human approval.
@@ -70,12 +72,12 @@ The outcome we are optimizing for:
 
 ## 2. Current-state architecture
 
-Mise today is already a modular monolith **[CODE]**, not a greenfield. It is a
+Focal today is already a modular monolith **[CODE]**, not a greenfield. It is a
 FastAPI app (`app/main.py`) with two route packages (`app/admin/`, `app/public/`), a
 flat set of domain/service modules, a SQLite database in WAL mode (`app/db.py`), and an
 in-process thread-pool job queue that survives restarts (`app/jobs.py`).
 
-### What Mise already owns (verified)
+### What Focal already owns (verified)
 
 | Domain | Where | Evidence |
 | --- | --- | --- |
@@ -91,14 +93,14 @@ in-process thread-pool job queue that survives restarts (`app/jobs.py`).
 | Storage abstraction / media namespace | `config.MEDIA_DIR / <gallery_id> / {original,web,thumb,crops}` | [CODE] |
 | One shared admin auth | `app/admin/auth.py`, `app/security.py`, signed-cookie sessions | [CODE] |
 
-### AI / sibling integrations already wired into Mise (verified)
+### AI / sibling integrations already wired into Focal (verified)
 
 These are the proven photography capabilities the audit says have narrowed to
-"studio-sidecar" roles. **All four already exist inside Mise as outbound integrations**
+"studio-sidecar" roles. **All four already exist inside Focal as outbound integrations**
 — the consolidation is therefore largely about putting them behind one clean internal
 contract, not building integration from scratch.
 
-| Capability | Mise module | Shape | Armed by |
+| Capability | Focal module | Shape | Armed by |
 | --- | --- | --- | --- |
 | **Vision** (Argus) | `app/argus_analyze.py`, `app/argus_writeback.py` | POST `mise_gallery_id` → `/analyze-folder`; queued/sync; callback updates `argus_last_*`; writeback pulls run export → asset scores/alt-text/keywords + hero pick | `MISE_ARGUS_URL` + `MISE_ARGUS_TOKEN` [CODE] |
 | **Offers** (Plutus) | `app/plutus_recommend.py` | POST `mise_gallery_id` → `/recommend/mise-gallery`; records `plutus_last_*` | `MISE_PLUTUS_URL` + `MISE_PLUTUS_TOKEN` [CODE] |
@@ -123,13 +125,13 @@ exactly these differences:
 
 ### Notion and Odysseus boundaries (verified)
 
-- **Notion** is a bounded, one-way human mirror **[CODE]** (`app/notion_sync.py`): Mise
+- **Notion** is a bounded, one-way human mirror **[CODE]** (`app/notion_sync.py`): Focal
   creates/patches selected booking/session/invoice/delivery fields; it is never read
-  back into a Mise flow. *(Carries the known `Notion-Version: 2022-06-28` debt — see
+  back into a Focal flow. *(Carries the known `Notion-Version: 2022-06-28` debt — see
   roadmap. Red-light.)*
 - **Odysseus** is an external reasoning/model-routing adapter **[CODE]**: caption
   drafting delegates model choice entirely to Odysseus (`app/caption_ai.py`), and the
-  shot-list read API exists so Odysseus can read Mise's locally-authored shot list.
+  shot-list read API exists so Odysseus can read Focal's locally-authored shot list.
   Odysseus never mutates money/contract/gallery state directly.
 
 ### Backup safety net (deployed)
@@ -155,11 +157,11 @@ copy and UPS coverage are not verified.
 
 ## 3. Target architecture
 
-A **single-tenant modular monolith** (Mise) + **optional stateless compute workers**.
+A **single-tenant modular monolith** (Focal) + **optional stateless compute workers**.
 
 ```
                  ┌─────────────────────────── flow (production zone) ───────────────────────────┐
-   Internet ───▶ │  Mise (FastAPI + HTMX)                                                        │
+   Internet ───▶ │  Focal (FastAPI + HTMX)                                                        │
    (Cloudflare/  │   studio · crm · scheduling · galleries · documents · billing                 │
     tunnel)      │   vision · offers · albums · content_ai · products(*)  ← capability modules   │
                  │   providers (AI facade) · jobs · audit · automation · operations              │
@@ -192,11 +194,11 @@ phase.
 
 The 2026-06-25 audit's selected Pattern E puts a **PostgreSQL + pgvector control plane
 on mickey** and keeps the siblings as separate worker services. This document follows
-**Kevin's master-prompt directive**: a *Mise-owned* modular monolith that keeps SQLite
+**Kevin's master-prompt directive**: a *Focal-owned* modular monolith that keeps SQLite
 and owns the job/review lifecycle itself, with mickey/strix/cloud as **stateless
 workers** rather than a stateful control plane. The two are reconcilable — both keep
-Mise authoritative, both make workers disposable, both centralize the AI substrate. The
-difference is *where durable job/provenance state lives* (Mise SQLite vs a separate
+Focal authoritative, both make workers disposable, both centralize the AI substrate. The
+difference is *where durable job/provenance state lives* (Focal SQLite vs a separate
 Postgres). This is a deliberate decision for solo-operator simplicity and is recorded
 in [`adr/0001`](adr/0001-modular-monolith-plus-workers.md) and
 [`adr/0005`](adr/0005-sqlite-retention.md), with the measured triggers that would
@@ -206,25 +208,25 @@ reopen it.
 
 ## 4. System-of-record boundaries
 
-Mise SQLite is the single transaction authority. Everything else is a projection,
+Focal SQLite is the single transaction authority. Everything else is a projection,
 mirror, draft, or disposable cache. (Derived from audit §3.1; **Proposed authority** =
-the target for Mise Solo Studio OS.)
+the target for Focal Solo Studio OS.)
 
 | Domain | Authority | Writers | Mirrors / projections | Conflict policy |
 | --- | --- | --- | --- | --- |
-| Leads / inquiries | **Mise** | Mise UI/API | Notion summary | Mise wins |
-| Clients | **Mise** | Mise; controlled migration tools | Notion reference | Mise wins |
-| Projects / shoots | **Mise** | Mise; Odysseus via bounded read API only | Notion Sessions | explicit field ownership |
-| Bookings / schedule | **Mise** | Mise scheduler; Google webhook/OAuth adapter | Google Calendar, Notion | Mise wins |
-| Shot lists | **Mise** | Mise; Odysseus read-only (`/api/shots`) | Notion fallback | Mise wins |
-| Galleries / delivery | **Mise** | Mise | Notion delivery status | Mise wins |
-| Media assets | **Mise metadata + filesystem** | ingest + approved editors | Notion references (no binaries) | content hash / manifest |
-| Contracts | **Mise** | human-reviewed Mise path | Notion status | Mise wins (red-light) |
-| Invoices / payments | **Mise + Stripe events** | Mise pay code + verified webhook | Notion summary | idempotent provider event; Mise wins (red-light) |
-| **AI job state / provenance / approval** | **Mise** | Mise job worker; validated worker callbacks | Notion AI-review queue (summary) | idempotency key; Mise owns accepted status |
-| Offers / client links | **Mise** | Mise (Plutus *proposes*) | Notion summary | one idempotent offer per gallery |
-| Album drafts | **Mise** | Mise (Mnemosyne *proposes*) | — | human-approved version wins |
-| Content drafts | **Mise (client-linked) / Notion (planning)** | human; AI draft only | review queue | human-approved wins |
+| Leads / inquiries | **Focal** | Focal UI/API | Notion summary | Focal wins |
+| Clients | **Focal** | Focal; controlled migration tools | Notion reference | Focal wins |
+| Projects / shoots | **Focal** | Focal; Odysseus via bounded read API only | Notion Sessions | explicit field ownership |
+| Bookings / schedule | **Focal** | Focal scheduler; Google webhook/OAuth adapter | Google Calendar, Notion | Focal wins |
+| Shot lists | **Focal** | Focal; Odysseus read-only (`/api/shots`) | Notion fallback | Focal wins |
+| Galleries / delivery | **Focal** | Focal | Notion delivery status | Focal wins |
+| Media assets | **Focal metadata + filesystem** | ingest + approved editors | Notion references (no binaries) | content hash / manifest |
+| Contracts | **Focal** | human-reviewed Focal path | Notion status | Focal wins (red-light) |
+| Invoices / payments | **Focal + Stripe events** | Focal pay code + verified webhook | Notion summary | idempotent provider event; Focal wins (red-light) |
+| **AI job state / provenance / approval** | **Focal** | Focal job worker; validated worker callbacks | Notion AI-review queue (summary) | idempotency key; Focal owns accepted status |
+| Offers / client links | **Focal** | Focal (Plutus *proposes*) | Notion summary | one idempotent offer per gallery |
+| Album drafts | **Focal** | Focal (Mnemosyne *proposes*) | — | human-approved version wins |
+| Content drafts | **Focal (client-linked) / Notion (planning)** | human; AI draft only | review queue | human-approved wins |
 | Tasks | **Notion** (today) | humans, scoped Odysseus | — | Notion is master until a gated migration |
 | Knowledge / planning | **Notion** (today); Git for tech docs | humans, scoped agents | — | no live dual-master |
 | Source code | **GitHub** | PR/branch rules | local clones | default branch |
@@ -232,17 +234,17 @@ the target for Mise Solo Studio OS.)
 | Backups | **independent backup identity** | backup service | logs | newest verified restore wins |
 
 **Notion must never become** the transaction DB, the job queue, a binary-media store,
-or a second authority for a Mise-owned record. **Odysseus / any provider must never
+or a second authority for a Focal-owned record. **Odysseus / any provider must never
 mutate** money, contract, gallery-publication, or client-delivery state; it may propose
-structured output that deterministic Mise code validates and a human approves.
+structured output that deterministic Focal code validates and a human approves.
 
 ---
 
 ## 5. Module boundaries (target shape)
 
-These are **bounded capabilities inside one Mise process**, not independent apps. Names
+These are **bounded capabilities inside one Focal process**, not independent apps. Names
 conform to the existing flat-module + `admin/`/`public/` layout; we introduce a new
-boundary only where it removes real duplication or establishes a migration seam (Mise
+boundary only where it removes real duplication or establishes a migration seam (Focal
 rule R2 — no abstraction for single-use code).
 
 | Module | Capability | Today → target |
@@ -272,10 +274,10 @@ Workers are **replaceable stateless compute**. They run heavy model execution on
 `mickey`, `strix-halo-a9-mega`, or a cloud provider, and **own no authoritative business
 records** (audit §7.7, §5.2).
 
-- **Mise owns the job and review lifecycle.** A worker receives a job reference +
+- **Focal owns the job and review lifecycle.** A worker receives a job reference +
   bounded inputs, returns a validated result via callback, and updates *run* state — not
   *transaction* state.
-- **Worker failure ≠ business-state failure.** A timeout or outage leaves Mise records
+- **Worker failure ≠ business-state failure.** A timeout or outage leaves Focal records
   untouched (proven for the existing path; enforced by the Phase 0 contract — only an
   `OK` `ProviderResult` may drive a write).
 - **Local worker copies are disposable.** Media travels by durable reference + content
@@ -291,7 +293,7 @@ later, behind a feature flag, in shadow mode, with rollback.
 
 ## 7. Non-goals (explicit)
 
-Mise Solo Studio OS will **not**:
+Focal Solo Studio OS will **not**:
 
 - Become **multi-tenant** or add public SaaS signup / studio-subscription billing.
 - Take a **Hestia runtime dependency** or perform a Hestia database migration. Hestia is
