@@ -156,7 +156,7 @@ Kevin (human-only). Risk: 🟢 green-light · 🔴 red-light (PR + human merge).
 12. **Reviewer demo studio — SUPERSEDED / HOLD.** [Kevin designs and merges] 🔴
     **Do not provision an ordinary paid/trial tenant and do not run
     `scripts/seed_demo_tenant.py` against hosted state.** Issue
-    [#185](https://github.com/Ayyitskevin/mise/issues/185) proves the former design
+    [#185](https://github.com/Ayyitskevin/Focal/issues/185) proves the former design
     could adopt public-signup state, distort billing metrics, delete durable
     workflow rows, and rotate live sessions. Conductor T3 is the current authority:
     its replacement needs durable operator-only identity, complete billing and
