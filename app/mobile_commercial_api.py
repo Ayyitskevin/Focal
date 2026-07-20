@@ -162,6 +162,9 @@ class OverdueInvoice(OwnerAPIModel):
     project_title: str | None = None
     client_id: int | None = None
     client_name: str | None = None
+    # Client payment link for copy/share into chase email ONLY.
+    # Owner AR UI must never open this URL as a "preview" — GET /i/{slug}
+    # records the client first-view transition (sent → viewed).
     public_url: str
 
 

@@ -65,14 +65,39 @@ def next_payment(d: "db.sqlite3.Row") -> tuple[int, str]:
     return d["total_cents"], "full"
 
 
+def _record_client_first_view(request: Request, invoice_id: int, status: str) -> bool:
+    """One-time ``sent → viewed`` transition for a real client open.
+
+    Studio operators previewing via an admin session must never mint client-view
+    state: AR chase, overdue decisions, and "viewed" evidence stay truthful.
+    Concurrent client GETs only flip once because the UPDATE is gated on
+    ``status='sent'``.
+    """
+    if status != "sent":
+        return False
+    if security.is_admin(request):
+        return False
+    before = db.one("SELECT status, viewed_at FROM invoices WHERE id=?", (invoice_id,))
+    if not before or before["status"] != "sent":
+        return False
+    db.run(
+        "UPDATE invoices SET status='viewed', viewed_at=datetime('now') "
+        "WHERE id=? AND status='sent'",
+        (invoice_id,),
+    )
+    after = db.one("SELECT status, viewed_at FROM invoices WHERE id=?", (invoice_id,))
+    if after and after["status"] == "viewed" and before["status"] == "sent":
+        log.info("invoice %s viewed from %s", invoice_id, security.client_ip(request))
+        return True
+    return False
+
+
 @router.get("/i/{slug}", response_class=HTMLResponse)
 async def view_invoice(request: Request, slug: str, thanks: int = 0):
     d = _invoice_or_404(slug)
-    if d["status"] == "sent":
-        db.run(
-            "UPDATE invoices SET status='viewed', viewed_at=datetime('now') WHERE id=?", (d["id"],)
-        )
-        log.info("invoice %s viewed from %s", d["id"], security.client_ip(request))
+    _record_client_first_view(request, d["id"], d["status"])
+    # Re-read so the template reflects any first-view transition that just landed.
+    d = _invoice_or_404(slug)
     amount, kind = next_payment(d)
     paid_cents = db.one(
         """SELECT COALESCE(SUM(amount_cents), 0) AS c

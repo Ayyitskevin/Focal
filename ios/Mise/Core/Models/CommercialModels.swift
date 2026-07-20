@@ -111,6 +111,8 @@ struct OverdueInvoice: Codable, Hashable, Sendable, Identifiable {
     let projectTitle: String?
     let clientID: Int64?
     let clientName: String?
+    /// Client payment link for chase-email copy only. Never open as owner preview —
+    /// the public path records client first-view (`sent → viewed`).
     let publicURL: URL
 
     var id: Int64 { invoiceID }

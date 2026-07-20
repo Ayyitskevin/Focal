@@ -417,6 +417,25 @@ private struct GalleryAssetCell: View {
     }
 }
 
+/// Pure media-link selection for still presentation vs authenticated playback.
+/// Videos must never send the MP4 `previewURL` through `UIImage(data:)` — that
+/// path is image-only and produces "Preview unavailable" for every video.
+enum GalleryMediaPresentation {
+    /// Still image for grid/lightbox: poster (or thumb) for video, preview for photo.
+    static func stillURL(for asset: GalleryAsset) -> URL? {
+        if asset.kind == .video {
+            return asset.links.posterURL ?? asset.links.thumbnailURL
+        }
+        return asset.links.previewURL ?? asset.links.posterURL ?? asset.links.thumbnailURL
+    }
+
+    /// Authenticated video bytes path (MP4 derivative). Nil for photos.
+    static func playbackURL(for asset: GalleryAsset) -> URL? {
+        guard asset.kind == .video else { return nil }
+        return asset.links.previewURL
+    }
+}
+
 /// Fullscreen paging lightbox shared by both roles: black background, close
 /// top-left, "{n} of {total}" counter, contain-fit image, edge-aware chevrons,
 /// and a functional heart when the session may favorite.
@@ -435,27 +454,9 @@ struct GalleryLightboxView: View {
 
             TabView(selection: $selectedID) {
                 ForEach(assets) { asset in
-                    AuthenticatedRemoteImage(
-                        url: asset.links.previewURL ?? asset.links.posterURL,
-                        loader: mediaLoader
-                    ) { phase in
-                        switch phase {
-                        case let .success(image):
-                            image.resizable().scaledToFit()
-                        case .failure:
-                            ContentUnavailableView(
-                                "Preview unavailable",
-                                systemImage: asset.kind == .video
-                                    ? "video.slash" : "photo.badge.exclamationmark",
-                                description: Text(asset.filename)
-                            )
-                            .foregroundStyle(.white)
-                        case .empty:
-                            ProgressView().tint(.white)
-                        }
-                    }
-                    .tag(Optional(asset.id))
-                    .accessibilityLabel(asset.altText ?? asset.filename)
+                    lightboxPage(for: asset)
+                        .tag(Optional(asset.id))
+                        .accessibilityLabel(asset.altText ?? asset.filename)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
@@ -477,6 +478,37 @@ struct GalleryLightboxView: View {
 
     private var currentAsset: GalleryAsset? {
         currentIndex.map { assets[$0] }
+    }
+
+    @ViewBuilder
+    private func lightboxPage(for asset: GalleryAsset) -> some View {
+        if asset.kind == .video {
+            AuthenticatedRemoteVideo(
+                stillURL: GalleryMediaPresentation.stillURL(for: asset),
+                playbackURL: GalleryMediaPresentation.playbackURL(for: asset),
+                loader: mediaLoader,
+                filename: asset.filename
+            )
+        } else {
+            AuthenticatedRemoteImage(
+                url: GalleryMediaPresentation.stillURL(for: asset),
+                loader: mediaLoader
+            ) { phase in
+                switch phase {
+                case let .success(image):
+                    image.resizable().scaledToFit()
+                case .failure:
+                    ContentUnavailableView(
+                        "Preview unavailable",
+                        systemImage: "photo.badge.exclamationmark",
+                        description: Text(asset.filename)
+                    )
+                    .foregroundStyle(.white)
+                case .empty:
+                    ProgressView().tint(.white)
+                }
+            }
+        }
     }
 
     private var overlayControls: some View {

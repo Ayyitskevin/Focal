@@ -268,19 +268,41 @@ struct ArChaseAssistView: View {
                     }
                     Section("Past due") {
                         ForEach(value.overdueInvoices) { inv in
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text(inv.title ?? "Invoice #\(inv.invoiceID)")
-                                        .font(.subheadline).fontWeight(.semibold)
-                                    Spacer()
-                                    Text(inv.owed.ownerDisplayValue).font(.subheadline)
+                            // In-app owner preview only. Never Link to publicURL —
+                            // GET /i/{slug} records the client first-view transition.
+                            DisclosureGroup {
+                                LabeledContent("Status", value: inv.status)
+                                LabeledContent("Total", value: inv.total.ownerDisplayValue)
+                                LabeledContent("Paid", value: inv.paid.ownerDisplayValue)
+                                LabeledContent("Owed", value: inv.owed.ownerDisplayValue)
+                                if let project = inv.projectTitle {
+                                    LabeledContent("Project", value: project)
                                 }
-                                if let due = inv.dueDate {
-                                    Text("Due \(due.rawValue)").font(.footnote).foregroundStyle(.secondary)
+                                if let client = inv.clientName {
+                                    LabeledContent("Client", value: client)
                                 }
-                                Link("Open invoice", destination: inv.publicURL)
-                                    .font(.footnote)
+                                Text("Client payment link is for chase email only — opening it would mark the invoice viewed.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text(inv.title ?? "Invoice #\(inv.invoiceID)")
+                                            .font(.subheadline).fontWeight(.semibold)
+                                        Spacer()
+                                        Text(inv.owed.ownerDisplayValue).font(.subheadline)
+                                    }
+                                    if let due = inv.dueDate {
+                                        Text("Due \(due.rawValue)")
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Text("Preview invoice")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
+                            .accessibilityHint("In-app owner preview. Does not open the client payment link.")
                             .padding(.vertical, 2)
                         }
                     }
