@@ -1,57 +1,40 @@
 # Ship / do-not-ship assessment — Focal
 
-**Date:** 2026-07-20  
-**Branch:** `grok/launch-integrity` (PR #203 + RC acceptance follow-on)  
-**Operator RC entry:** `scripts/rc-acceptance.py` · narrative: `docs/RC-ACCEPTANCE.md`
+**Date:** 2026-07-20 (post-merge #203 reconciliation)  
+**Tip:** `main` @ `2a3e1dca5a871d79507c256b4cbdce8ff8bfbd64`  
+**RC entry:** `scripts/rc-acceptance.py` · matrix: `docs/LAUNCH-INTEGRITY-MATRIX.md` · `docs/RC-ACCEPTANCE.md`
 
 ## Verdict
 
 | Path | Status |
 |---|---|
 | **App Store / production tenants** | **DO NOT SHIP** until #179, #180, #185 replacement, and device gallery QA |
-| **Sandbox PR merge** | **Merge-ready** after Kevin reviews red-light invoice lifecycle (#184) |
+| **Sandbox `main` engineering integrity** | **Ready** for continued green-light development; RC readiness READY on eng gates with STORE SHIP do-not-ship |
 
----
+## Proven on main (after #203)
 
-## What is now proven
+| Area | Status |
+|---|---|
+| Owner→client RC vertical | Proven — `tests/test_rc_acceptance.py` |
+| Invoice owner preview ≠ client viewed (#184 eng) | Proven |
+| Owner draft media + video presentation structure (#183 partial) | Proven API/structure; device QA residual |
+| Gallery paging (#199 eng) | Proven on main since #200 |
+| Storage fail-loud (#181) | Proven |
+| Seeder fail-closed (#185 containment) | Proven |
+| RC readiness fail-honest timeout/tool | Proven — timeout/missing interpreter → **fail** not READY |
+| CI on merge #203 | Green — CI + iOS workflows on main |
 
-| Area | Status | Evidence |
-|---|---|---|
-| Owner→client vertical (task, gallery, media, favorite, authz) | **Proven (RC suite)** | `tests/test_rc_acceptance.py` |
-| Empty / draft / large-gallery bounds | **Proven** | same suite |
-| Missing tenant storage fail-loud (no empty studio) | **Proven** | RC suite + `tests/test_tenant_storage_integrity.py` |
-| Owner invoice preview ≠ client viewed | **Proven** | RC + `tests/test_invoice_owner_preview.py` |
-| Owner draft media; video still/playback split | **Proven (API + structure)** | prior launch-integrity + RC structure checks |
-| Large-gallery paging | **Proven** | #200 + RC + gallery API tests |
-| Reviewer seeder fail-closed | **Proven** | tombstone + RC + seed tests |
-| Operator-readable readiness | **Shipped** | `scripts/rc-acceptance.py` → pass/fail/blocked/n/a + always do-not-ship store line |
+## Residual blockers (do not invent)
 
----
+1. **#179** privacy labels / C617.1 / Product Interaction — owner decision  
+2. **#180** storefront/IAP/free-companion — owner decision  
+3. **#185** safe App Review demo replacement — design hold (containment only)  
+4. **Device AVPlayer QA** for #183 video playback  
+5. Tracker hygiene: #184/#199/#186 may be closable after human confirm — **not auto-closed here**
 
-## Residual blockers
+## Re-run
 
-### Owner decisions (cannot invent)
-
-1. **#179** — Privacy manifest / Connect labels  
-2. **#180** — Storefront / IAP / free-companion CTAs  
-3. **#185** — Safe App Review demo design  
-
-Memo: `docs/APP-STORE-PRIVACY-AND-IAP-DECISIONS.md`
-
-### Engineering residual
-
-4. Device/simulator AVPlayer QA (Linux agent: **not applicable / blocked**)  
-5. Close stale-open tracker items #186 / #199 after human confirm  
-6. Human merge for money-adjacent invoice change  
-
----
-
-## How to re-run evidence
-
-```sh
-source .venv/bin/activate
-python -m pytest tests/test_rc_acceptance.py tests/test_rc_acceptance_readiness.py -q
+```bash
 python scripts/rc-acceptance.py
-python -m pytest tests/ -m unit
-ruff check . && ruff format --check .
+# Expect: READY eng gates + STORE SHIP: do-not-ship
 ```

@@ -29,11 +29,26 @@ def test_structural_checks_pass_on_repo_tree():
     assert by_key["rc_acceptance_tests"]["status"] == "not_applicable"
     assert report["failures"] == 0
     assert report["ready"] is True
+    # App Store / production ship remains blocked regardless of eng READY.
     assert report["store_ship"] == "do-not-ship"
+    assert "179" in report["store_ship_reason"] or "#179" in report["store_ship_reason"]
+    assert "180" in report["store_ship_reason"] or "#180" in report["store_ship_reason"]
+    assert "185" in report["store_ship_reason"] or "#185" in report["store_ship_reason"]
     text = rc_acceptance.format_text(report)
     assert "pass" in text.lower() or "PASS" in text
     assert "STORE SHIP" in text
     assert "do-not-ship" in text
+
+
+def test_post_merge_matrix_documents_do_not_ship_and_named_issues():
+    """Reconciliation matrix must stay aligned with App Store holds after #203."""
+    matrix = (ROOT / "docs" / "LAUNCH-INTEGRITY-MATRIX.md").read_text(encoding="utf-8")
+    assert "2a3e1dc" in matrix or "post-merge" in matrix.lower()
+    assert "do-not-ship" in matrix.lower() or "DO NOT SHIP" in matrix
+    for issue in ("#179", "#180", "#183", "#184", "#185", "#199"):
+        assert issue in matrix
+    # Must not claim App Store ship or close issues by fiat.
+    assert "does **not** close GitHub issues" in matrix or "does not close" in matrix.lower()
 
 
 def test_seed_tombstone_fails_if_reenabled(tmp_path):
