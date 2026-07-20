@@ -1,8 +1,9 @@
 # Release-candidate acceptance — Focal
 
-**Date:** 2026-07-20  
-**Branch tip:** `grok/launch-integrity` (continues PR #203 launch-integrity work)  
-**Operator entry:** `.venv/bin/python scripts/rc-acceptance.py`
+**Date:** 2026-07-20 (post-merge reconciliation)  
+**Tip:** `origin/main` after PR #203 (`2a3e1dc…`)  
+**Operator entry:** `.venv/bin/python scripts/rc-acceptance.py`  
+**Issue matrix:** `docs/LAUNCH-INTEGRITY-MATRIX.md`
 
 ## Verdict
 
