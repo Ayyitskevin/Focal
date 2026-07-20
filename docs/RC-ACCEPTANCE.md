@@ -3,6 +3,7 @@
 **Date:** 2026-07-20 (post-merge reconciliation)  
 **Tip:** `origin/main` after PR #203 (`2a3e1dc…`)  
 **Operator entry:** `.venv/bin/python scripts/rc-acceptance.py`  
+**App Store auditor:** `.venv/bin/python scripts/app-store-readiness.py` (read-only; eng READY ≠ Connect ship)  
 **Issue matrix:** `docs/LAUNCH-INTEGRITY-MATRIX.md`
 
 ## Verdict

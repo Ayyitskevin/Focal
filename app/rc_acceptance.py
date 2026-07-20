@@ -199,6 +199,55 @@ def check_ios_toolchain() -> dict[str, str]:
     )
 
 
+def check_app_store_readiness_surface(root: Path) -> dict[str, str]:
+    """Embed App Store auditor summary without equating eng READY to Connect ship.
+
+    Hard product defects from the auditor (status=fail) fail this RC check.
+    Blocked items (owner decisions, device QA) are summarized but do not fail
+    eng READY — STORE SHIP remains do-not-ship independently.
+    """
+    try:
+        from app import app_store_readiness
+    except Exception as exc:  # pragma: no cover
+        return _check(
+            "app_store_readiness",
+            "App Store readiness auditor",
+            "blocked",
+            f"cannot import app_store_readiness: {exc}",
+        )
+    report = app_store_readiness.build_report(project_root=root)
+    fails = [c for c in report["checks"] if c["status"] == "fail"]
+    blocked = [c for c in report["checks"] if c["status"] == "blocked"]
+    detail = (
+        f"auditor {report['verdict']}: {report['passes']} pass, "
+        f"{report['failures']} fail, {report['blocked']} blocked; "
+        f"APP STORE SHIP={report['app_store_ship']}"
+    )
+    if fails:
+        keys = ", ".join(c["key"] for c in fails)
+        return _check(
+            "app_store_readiness",
+            "App Store readiness auditor",
+            "fail",
+            f"{detail}; hard fails: {keys}",
+            fix="Run scripts/app-store-readiness.py and fix fail rows.",
+        )
+    if blocked:
+        keys = ", ".join(c["key"] for c in blocked)
+        return _check(
+            "app_store_readiness",
+            "App Store readiness auditor",
+            "pass",
+            f"{detail}; blocked (not eng-fail): {keys}",
+        )
+    return _check(
+        "app_store_readiness",
+        "App Store readiness auditor",
+        "pass",
+        detail,
+    )
+
+
 def check_hosted_preflight_surface(root: Path) -> dict[str, str]:
     """Hosted env preflight is a separate operator tool — N/A unless SAAS_MODE."""
     try:
@@ -301,7 +350,7 @@ def build_report(
     include_integrity: bool = True,
 ) -> dict[str, Any]:
     root = _project_root(project_root)
-    checks: list[dict[str, str]] = [
+    checks: list[dict[str, Any]] = [
         check_python_deps(root),
         check_migrations(root),
         check_seed_demo_tombstone(root),
@@ -309,6 +358,7 @@ def build_report(
         check_owner_draft_media_source(root),
         check_ios_toolchain(),
         check_hosted_preflight_surface(root),
+        check_app_store_readiness_surface(root),
     ]
     if run_tests:
         checks.append(
