@@ -2,7 +2,7 @@
 # ruff` meant a new ruff release could reformat rules and fail `ruff format --check` on code
 # nobody touched; pinning turns tool drift into an intentional, Dependabot-reviewable bump.
 # Dependabot's pip ecosystem already scans requirements*.txt, so these get PRs like any dep.
-ruff==0.15.21
+ruff==0.15.22
 pytest==9.1.1
 httpx==0.28.1
 pip-audit==2.10.1
