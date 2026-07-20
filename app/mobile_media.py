@@ -74,21 +74,25 @@ def _insufficient_scope() -> mobile_auth.MobileAuthError:
     )
 
 
-def _authorize(request: Request, gallery_id: int, *, require_download: bool) -> None:
-    """Re-check gallery scope on every media request; scopes are never cached."""
+def _authorize(request: Request, gallery_id: int, *, require_download: bool):
+    """Re-check gallery scope on every media request; scopes are never cached.
+
+    Returns the authenticated principal so callers can apply owner-vs-guest
+    delivery rules without a second auth pass.
+    """
     principal = mobile_auth.authenticate_request(request)
     if principal.kind == mobile_auth.STUDIO_OWNER:
         if not principal.has_scope("studio:read"):
             raise _insufficient_scope()
-        return
+        return principal
     if principal.kind == mobile_auth.GALLERY_GUEST and principal.resource_id == gallery_id:
         if require_download and not principal.has_scope(f"gallery:{gallery_id}:download"):
             raise _insufficient_scope()
-        return
+        return principal
     if principal.kind == mobile_auth.WORKSPACE_GUEST and not require_download:
         row = db.one("SELECT gallery_id FROM projects WHERE id=?", (principal.resource_id,))
         if row and row["gallery_id"] == gallery_id:
-            return
+            return principal
         raise _insufficient_scope()
     if principal.kind == mobile_auth.PORTAL_GUEST and not require_download:
         client_row = db.one("SELECT client_id FROM portals WHERE id=?", (principal.resource_id,))
@@ -98,9 +102,16 @@ def _authorize(request: Request, gallery_id: int, *, require_download: bool) -> 
                 (gallery_id, client_row["client_id"]),
             )
             if owns:
-                return
+                return principal
         raise _insufficient_scope()
     raise _insufficient_scope()
+
+
+def _delivery_eligible_for_principal(principal, gallery) -> bool:
+    """Guests need a published, non-expired gallery; owners may preview drafts."""
+    if principal.kind == mobile_auth.STUDIO_OWNER:
+        return True
+    return bool(gallery["published"]) and not _gallery_is_expired(gallery)
 
 
 @router.get("/galleries/{gallery_id}/assets/{asset_id}/{variant}")
@@ -110,9 +121,9 @@ def serve_asset_media(
     asset_id: int,
     variant: MediaVariant,
 ) -> FileResponse:
-    _authorize(request, gallery_id, require_download=(variant == "download"))
+    principal = _authorize(request, gallery_id, require_download=(variant == "download"))
     gallery = _gallery_row(gallery_id)
-    if not gallery or not gallery["published"] or _gallery_is_expired(gallery):
+    if not gallery or not _delivery_eligible_for_principal(principal, gallery):
         raise HTTPException(status_code=404, detail="Gallery not found.")
     asset = _asset_row(gallery_id, asset_id)
     if not asset:

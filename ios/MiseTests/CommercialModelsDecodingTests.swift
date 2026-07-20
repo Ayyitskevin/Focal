@@ -109,6 +109,8 @@ final class CommercialModelsDecodingTests: XCTestCase {
         XCTAssertEqual(inv.owed.minorUnits, 200000)
         XCTAssertEqual(inv.dueDate?.rawValue, "2026-06-15")
         XCTAssertEqual(inv.publicURL.absoluteString, "https://studio.example.com/i/inv-2026-118")
+        // publicURL is the client path — owner UI must not open it as preview.
+        XCTAssertTrue(inv.publicURL.path.hasPrefix("/i/"))
         XCTAssertEqual(value.cadence.status, .recent)
         XCTAssertEqual(value.cadence.daysSince, 2)
         XCTAssertNotNil(value.cadence.lastSentAt)

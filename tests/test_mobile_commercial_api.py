@@ -194,6 +194,8 @@ def test_ar_chase_assist_money_urls_and_filter(api_client):
     assert inv["owed"]["minor_units"] == 250000
     assert inv["public_url"] == "https://studio.test/i/inv-overdue"
     assert "slug" not in inv  # raw slug is never exposed, only the public URL
+    # public_url is for chase-email copy only — not an owner preview open target.
+    assert inv["public_url"].startswith("https://studio.test/i/")
     assert body["cadence"]["status"] == "never"
     assert body["draft"]["to"] == "ap@blueplate.example"
     assert body["draft"]["subject"].startswith("Follow-up on open invoice balance - ")
