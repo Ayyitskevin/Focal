@@ -256,19 +256,20 @@ def run_pytest_suite(
             check=False,
         )
     except subprocess.TimeoutExpired:
+        # Required behavioral suites must not report READY when they did not finish.
         return _check(
             key,
             label,
-            "blocked",
-            f"pytest timed out after {timeout}s",
+            "fail",
+            f"pytest timed out after {timeout}s (suite did not complete)",
             fix="Re-run the suite directly and inspect hung tests.",
         )
     except FileNotFoundError:
         return _check(
             key,
             label,
-            "blocked",
-            "python/pytest not executable",
+            "fail",
+            "python/pytest not executable (suite did not run)",
             fix="Activate the project .venv.",
         )
     tail = (proc.stdout or "")[-800:] + (proc.stderr or "")[-400:]
@@ -348,8 +349,24 @@ def build_report(
     for c in checks:
         counts[c["status"]] += 1
 
-    # Product readiness for merge/RC evidence: no fail; blocked items are env limits.
-    product_ready = counts["fail"] == 0
+    # Product readiness: zero fails, and every *required* behavioral suite that
+    # was scheduled must be pass. Env limits (iOS Xcode, hosted preflight when
+    # not SAAS) may be blocked/n/a without failing ready. Timeout/tool failure
+    # on a required suite is fail (see run_pytest_suite) so READY cannot be a
+    # silent skip of the core acceptance gate.
+    by_key = {c["key"]: c for c in checks}
+    required_suite_keys = ("rc_acceptance_tests", "integrity_regressions")
+    required_ok = True
+    for key in required_suite_keys:
+        check = by_key.get(key)
+        if check is None:
+            continue
+        if check["status"] == "not_applicable":
+            continue  # intentionally skipped (--no-tests / --no-integrity)
+        if check["status"] != "pass":
+            required_ok = False
+            break
+    product_ready = counts["fail"] == 0 and required_ok
     # Store ship still requires owner decisions — never claimed here.
     return {
         "ready": product_ready,
