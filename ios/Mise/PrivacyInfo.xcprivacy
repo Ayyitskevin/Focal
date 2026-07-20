@@ -77,16 +77,9 @@
 				<string>CA92.1</string>
 			</array>
 		</dict>
-		<!-- File timestamps: tenant JSON cache freshness (TenantJSONCache.swift).
-		     C617.1 = timestamps of files inside the app container. -->
-		<dict>
-			<key>NSPrivacyAccessedAPIType</key>
-			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
-			<key>NSPrivacyAccessedAPITypeReasons</key>
-			<array>
-				<string>C617.1</string>
-			</array>
-		</dict>
+		<!-- C617.1 (file timestamps) removed 2026-07-20: TenantJSONCache uses
+		     application-owned storedAt JSON fields, not file-timestamp APIs.
+		     Do not re-add without a real creationDate/modificationDate call. -->
 	</array>
 </dict>
 </plist>

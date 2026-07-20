@@ -40,9 +40,9 @@ This memo lists facts Kevin must decide against. It does **not** invent business
 | Declared reason | Claimed use | Actual code |
 |---|---|---|
 | `CA92.1` UserDefaults | last-workspace origin + installation identity | **Confirmed:** `AuthenticationCoordinator.swift` uses `UserDefaults` |
-| `C617.1` file timestamps | “TenantJSONCache freshness” | **Not found:** no `creationDate` / `modificationDate` / `contentModificationDateKey` / `stat` usage under `ios/Mise/`. `TenantJSONCache` stores application-owned `storedAt` inside JSON envelopes (`TenantJSONCache.swift`). |
+| `C617.1` file timestamps | “TenantJSONCache freshness” | **Removed 2026-07-20** from `PrivacyInfo.xcprivacy` after code audit: no file-timestamp APIs under `ios/Mise/`. `TenantJSONCache` uses application-owned `storedAt` JSON fields. |
 
-**Implication for Kevin:** either remove `C617.1` from the manifest before submission, or introduce a real required-reason API use that matches the reason (not recommended just to keep the declaration).
+**Engineering fix applied:** unused `C617.1` declaration removed (auditor-enforced). Remaining #179 work is still **Kevin decision** on Product Interaction / Other User Content labels — not inventable here.
 
 ---
 
@@ -74,7 +74,7 @@ This memo lists facts Kevin must decide against. It does **not** invent business
 
 1. **Privacy labels — Product Interaction:** Disclose retained session activity, favorites, task completions, and booking mutations as Product Interaction (App Functionality, linked, not tracking)? **Yes / No / Partially (list which).**
 2. **Privacy labels — Other User Content:** Treat booking notes, favorites, or other user-authored business state as Other User Content? **Yes / No / Rationale.**
-3. **PrivacyInfo `C617.1`:** Remove unused file-timestamp reason **or** document a real API use that requires it? **Remove / Keep with code change.**
+3. **PrivacyInfo `C617.1`:** ~~Remove unused file-timestamp reason~~ **Done (removed 2026-07-20).** Re-open only if real file-timestamp API use is added.
 4. **App name / bundle / team:** Confirm Connect identity fields in `docs/APP-STORE-SUBMISSION.md` (still placeholder “Mise” in places post-Focal rebrand).
 5. **Storefront territory:** Ship **U.S.-only**, **worldwide with IAP**, or **worldwide free-companion with all purchase CTAs removed from the binary**?
 6. **Free-companion purity:** If free-companion, remove or hide “Start a studio” and “Manage billing” from iOS, or replace with non-purchase account management that does not link to purchase?

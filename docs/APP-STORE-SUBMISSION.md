@@ -23,8 +23,9 @@ lockstep — they describe the same facts.
 
 - **Tracking:** none; no tracking domains.
 - **Required-reason APIs:** UserDefaults → `CA92.1` (last-workspace origin +
-  installation identity, `AuthenticationCoordinator.swift`); file timestamps →
-  `C617.1` (tenant JSON cache freshness, `TenantJSONCache.swift`).
+  installation identity, `AuthenticationCoordinator.swift`). File-timestamp
+  reason `C617.1` was **removed** 2026-07-20 — `TenantJSONCache` uses app-owned
+  `storedAt` JSON fields, not file-timestamp APIs (see auditor + #179 memo).
 
 ### App Store privacy-label answers (draft — mirror into Connect)
 
