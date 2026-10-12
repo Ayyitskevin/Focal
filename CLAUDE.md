@@ -87,9 +87,10 @@ have full web parity.
 ```python
 # app/providers/contracts.py
 class Capability(enum.Enum):
-    VISION = "vision"       # Argus: keywords, alt text, culling / hero signals
-    CONTENT = "content"     # Odysseus caption / Dionysus packs: captions, copy drafts
-    PRODUCTS = "products"   # Aphrodite: renders — dormant, budget cap + consent gate
+    VISION = "vision"  # Argus: keywords, alt text, culling / hero signals
+    CONTENT = "content"  # Odysseus caption / Dionysus packs: captions, copy drafts
+    PRODUCTS = "products"  # Aphrodite: renders — dormant, budget cap + consent gate
+
 
 # ProviderResult fields: capability, provider, status, review, output,
 #   model, latency_ms, cost_usd, tokens, error
