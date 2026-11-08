@@ -2,14 +2,20 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Mise collects no data for tracking and declares no tracking domains.
-	     Collected-data types mirror what the app actually sends to the studio's
-	     own server: the owner's login email, studio/display name, the account
-	     identity, and a per-install random device identifier used for the
-	     owner's device/session list. Media is viewed over the network only —
-	     the app has no camera, photo-library, or location access. Keep this
-	     file and the App Store privacy labels in lockstep with
-	     docs/APP-STORE-SUBMISSION.md. -->
+	<!-- Focal/Mise collects no data for tracking and declares no tracking domains.
+	     Every type below is traced to code in docs/APP-STORE-SUBMISSION.md ("Data inventory")
+	     and must stay in lockstep with it and the App Store Connect answers (#179):
+	     - EmailAddress: owner sign-in email (POST /api/v1/auth/studio/login).
+	     - Name: NOT typed into the native app today; kept because the device name sent at
+	       sign-in (UIDevice.current.name) usually contains the owner's name and is retained.
+	     - UserID: account/session/gallery-visitor identifiers the server assigns and retains.
+	     - DeviceID: per-install UUID (stored hashed) plus the client IP kept 24 h for sign-in
+	       lockout (pin_attempts). Not IDFA/IDFV.
+	     - ProductInteraction: session created/last-seen, task check-off, gallery favorites,
+	       booking cancel/reschedule, retained by the server.
+	     - OtherUserContent: owner-chosen reschedule times and guest favorite selections
+	       (Kevin to confirm; see the submission doc).
+	     Media is viewed over the network only: no camera, photo-library or location access. -->
 	<key>NSPrivacyTracking</key>
 	<false/>
 	<key>NSPrivacyTrackingDomains</key>
@@ -55,6 +61,30 @@
 		<dict>
 			<key>NSPrivacyCollectedDataType</key>
 			<string>NSPrivacyCollectedDataTypeDeviceID</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeProductInteraction</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeOtherUserContent</string>
 			<key>NSPrivacyCollectedDataTypeLinked</key>
 			<true/>
 			<key>NSPrivacyCollectedDataTypeTracking</key>

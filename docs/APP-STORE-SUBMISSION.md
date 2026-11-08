@@ -30,20 +30,57 @@ lockstep — they describe the same facts.
 ### App Store privacy-label answers (draft — mirror into Connect)
 
 Data collected, all **App Functionality · linked to identity · not used for
-tracking**, sent only to the user's own studio server:
+tracking**, sent only to the user's own studio server. Each row is traced to code
+at `d34cc66` (#179):
 
-| Connect category | What it actually is |
-|---|---|
-| Contact info → Email address | owner sign-in email |
-| Contact info → Name | studio display name / owner name on the account |
-| Identifiers → User ID | the account/principal identity |
-| Identifiers → Device ID | per-install random UUID for the owner's device/session list (not IDFA/IDFV) |
+| Connect category | Manifest key | What it actually is | Source |
+|---|---|---|---|
+| Contact info → Email address | `EmailAddress` | owner sign-in email | `StudioLoginRequest` → `POST /api/v1/auth/studio/login` (`AuthenticationCoordinator.swift:193`); `app/mobile_auth.py` |
+| Contact info → Name | `Name` | **no name is typed into the app today.** Declared because the device name sent at sign-in (`UIDevice.current.name`, `AuthenticationCoordinator.swift:622`) usually contains the owner's name and the server stores it (`api_sessions.device_name`, `app/mobile_auth.py:293-315`). The studio/owner name the app displays is returned by the server, not sent. | decision A below |
+| Identifiers → User ID | `UserID` | account/principal id, session id, and the gallery-visitor id a guest session carries | `api_sessions` (`migrations/081_mobile_api_sessions.sql`), `gallery_visitor_id` |
+| Identifiers → Device ID | `DeviceID` | per-install random UUID (stored hashed: `installation_id_hash`), device platform/app version; **and the client IP**, kept up to 24 h for sign-in lockout (`pin_attempts`, `app/security.py:145-150`). Not IDFA/IDFV. | decision B below |
+| Usage data → Product interaction | `ProductInteraction` | retained session activity (`created_at`, `last_seen_at`, `app/mobile_auth.py:293-315,699-704,813-816`); owner task check-off plus audit row (`app/mobile_owner_api.py:886-900`); gallery favorites (`app/mobile_client_api.py:226-262`); booking cancel, reschedule and workflow retry (`app/mobile_gallery_calendar_api.py:1496,1556,1614`) | Apple: "app launches, taps, clicks … other information about how the user interacts with the app" |
+| User content → Other user content | `OtherUserContent` | owner-chosen reschedule start time/time zone and guest favorite selections, retained as studio business data | decision C below (**Kevin to confirm**) |
 
-Explicitly **not collected**: location, contacts, browsing history, purchase
-history, health, financial data, photos *from the device* (the app has no camera
-or photo-library access — media is viewed over the network from the studio
-server; gallery guests' favorite selections are studio business data on the
-studio's server).
+**Decisions made here, each for Kevin's confirmation:**
+
+- **A. Name — kept, with a narrower reason.** The issue said the "studio display name /
+  owner name" wording did not match what is sent; it did not. The native app sends no
+  typed name. Keeping `Name` is the conservative call because the retained device name
+  usually contains it. If you would rather drop `Name`, send a generic device name
+  (for example the model) instead of `UIDevice.current.name` and remove the entry.
+- **B. Client IP — declared under Device ID, not a new type.** Apple: declare IP
+  "based on how you use" it ("such as precise location, coarse location, device ID, or
+  diagnostics"); an IP "sent on a server call and not retained" needs no disclosure.
+  Here it is retained (24 h, lockout counter) and used only to throttle repeated failed
+  sign-ins, never for location or analytics, so Device ID / App Functionality covers it.
+  Failed-auth lines also go to the server log (`app/security.py:151`); that retention is
+  set by the host's log policy and is not verified here.
+- **C. Other User Content — declared.** Apple says free-form fields are "Other User
+  Content" and you need not disclose everything a user may type, but the owner chooses a
+  reschedule time and a guest chooses favorites, and both are retained. Declaring is the
+  safer error; dropping it is defensible if you read booking times as plain Product
+  Interaction. Not declared: no free-text note, message or upload is sent by the app.
+
+**Watch items (code exists, no UI caller at `d34cc66`):** `createBooking`
+(`BookingCreateRequest`: name, email, phone, notes), `signContract`
+(`ContractSignRequest.signerName`), proposal accept/decline, and invoice checkout are
+defined in `MiseEndpoints.swift` but no screen calls them. If a screen starts to,
+add Name, Email, Phone Number and Other User Content (notes, signature) and revisit
+Purchases before submitting.
+
+Explicitly **not collected**: location, contacts, browsing history, health,
+financial/payment card data (Stripe runs on the web), photos *from the device* (the app
+has no camera or photo-library access — media is viewed over the network from the
+studio server).
+
+### Still to do by hand (Mac / App Store Connect)
+
+1. Archive on the signing Mac, run **Product → Generate Privacy Report**, and compare it
+   with this table and with the Connect answers (issue finding 4); the report is the
+   evidence, not the CI build.
+2. Enter the table above in Connect → App Privacy; "used for tracking" = No everywhere.
+3. Confirm decisions A, C with Kevin before entering them.
 
 ### Export compliance
 

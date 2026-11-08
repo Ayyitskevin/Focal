@@ -73,7 +73,9 @@ This memo lists facts Kevin must decide against. It does **not** invent business
 ## D. Kevin decision checklist (numbered)
 
 1. **Privacy labels — Product Interaction:** Disclose retained session activity, favorites, task completions, and booking mutations as Product Interaction (App Functionality, linked, not tracking)? **Yes / No / Partially (list which).**
+   *Proposed in #179 (awaiting Kevin): **Yes**, all four; declared in `PrivacyInfo.xcprivacy` and `docs/APP-STORE-SUBMISSION.md`.*
 2. **Privacy labels — Other User Content:** Treat booking notes, favorites, or other user-authored business state as Other User Content? **Yes / No / Rationale.**
+   *Proposed in #179 (awaiting Kevin): **Yes** for reschedule times and favorite selections (no booking notes are sent by the app today); rationale in the submission doc, decision C.*
 3. **PrivacyInfo `C617.1`:** ~~Remove unused file-timestamp reason~~ **Done (removed 2026-07-20).** Re-open only if real file-timestamp API use is added.
 4. **App name / bundle / team:** Confirm Connect identity fields in `docs/APP-STORE-SUBMISSION.md` (still placeholder “Mise” in places post-Focal rebrand).
 5. **Storefront territory:** Ship **U.S.-only**, **worldwide with IAP**, or **worldwide free-companion with all purchase CTAs removed from the binary**?
