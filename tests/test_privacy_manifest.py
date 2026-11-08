@@ -84,23 +84,50 @@ def test_no_duplicate_collected_types(manifest):
     assert len(kinds) == len(set(kinds))
 
 
-def test_the_inventory_includes_retained_product_interaction_linked_for_app_functionality(manifest):
-    by_kind = {e["NSPrivacyCollectedDataType"]: e for e in manifest["NSPrivacyCollectedDataTypes"]}
-    entry = by_kind["NSPrivacyCollectedDataTypeProductInteraction"]
-    assert entry["NSPrivacyCollectedDataTypeLinked"] is True
-    assert entry["NSPrivacyCollectedDataTypeTracking"] is False
-    assert entry["NSPrivacyCollectedDataTypePurposes"] == [
-        "NSPrivacyCollectedDataTypePurposeAppFunctionality"
-    ]
+APP_FUNCTIONALITY = ("NSPrivacyCollectedDataTypePurposeAppFunctionality",)
+# The whole declared inventory (#179): (linked, tracking, purposes). A change here is a decision
+# for Kevin and must be mirrored in docs/APP-STORE-SUBMISSION.md and App Store Connect.
+EXPECTED = {
+    f"NSPrivacyCollectedDataType{name}": (True, False, APP_FUNCTIONALITY)
+    for name in (
+        "EmailAddress",
+        "Name",
+        "UserID",
+        "DeviceID",
+        "ProductInteraction",
+        "OtherUserContent",
+    )
+}
 
 
-def test_every_declared_type_is_named_in_the_submission_doc(manifest):
-    doc = SUBMISSION.read_text(encoding="utf-8")
-    for entry in manifest["NSPrivacyCollectedDataTypes"]:
-        key = entry["NSPrivacyCollectedDataType"].removeprefix("NSPrivacyCollectedDataType")
-        assert f"`{key}`" in doc, (
-            f"{key} is in the manifest but not in docs/APP-STORE-SUBMISSION.md"
+def test_the_manifest_declares_exactly_the_expected_inventory(manifest):
+    actual = {
+        e["NSPrivacyCollectedDataType"]: (
+            e["NSPrivacyCollectedDataTypeLinked"],
+            e["NSPrivacyCollectedDataTypeTracking"],
+            tuple(e["NSPrivacyCollectedDataTypePurposes"]),
         )
+        for e in manifest["NSPrivacyCollectedDataTypes"]
+    }
+    assert actual == EXPECTED
+
+
+def _doc_table_keys() -> set[str]:
+    """Manifest keys named in the submission doc's privacy-label table (second column)."""
+    doc = SUBMISSION.read_text(encoding="utf-8")
+    start = doc.index("### App Store privacy-label answers")
+    end = doc.index("### Still to do by hand")
+    rows = re.findall(r"^\|[^|]+\| `([A-Za-z]+)` \|", doc[start:end], flags=re.MULTILINE)
+    return {f"NSPrivacyCollectedDataType{key}" for key in rows}
+
+
+def test_the_doc_table_and_the_manifest_name_the_same_types_both_ways(manifest):
+    declared = {e["NSPrivacyCollectedDataType"] for e in manifest["NSPrivacyCollectedDataTypes"]}
+    documented = _doc_table_keys()
+    assert documented, "the doc table was not found"  # positive control for the parser
+    assert declared - documented == set(), "in the manifest but not in the doc table"
+    assert documented - declared == set(), "in the doc table but not in the manifest"
+    assert documented == set(EXPECTED)
 
 
 def test_the_file_timestamp_reason_is_declared_only_with_a_real_covered_call(manifest):

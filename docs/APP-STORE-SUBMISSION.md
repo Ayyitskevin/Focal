@@ -49,13 +49,24 @@ at `d34cc66` (#179):
   typed name. Keeping `Name` is the conservative call because the retained device name
   usually contains it. If you would rather drop `Name`, send a generic device name
   (for example the model) instead of `UIDevice.current.name` and remove the entry.
-- **B. Client IP — declared under Device ID, not a new type.** Apple: declare IP
-  "based on how you use" it ("such as precise location, coarse location, device ID, or
-  diagnostics"); an IP "sent on a server call and not retained" needs no disclosure.
-  Here it is retained (24 h, lockout counter) and used only to throttle repeated failed
-  sign-ins, never for location or analytics, so Device ID / App Functionality covers it.
-  Failed-auth lines also go to the server log (`app/security.py:151`); that retention is
-  set by the host's log policy and is not verified here.
+- **B. Client IP — two options; Kevin chooses.**
+  Apple: declare IP "based on how you use" it ("such as precise location, coarse
+  location, device ID, or diagnostics"); an IP "sent on a server call and not retained"
+  needs no disclosure, and data kept "longer than the time it takes" to service the
+  request does.
+  - *Option 1 (drafted): cover it under Device ID / App Functionality.* The app keeps the
+    client IP of failed sign-ins for 24 h as a lockout counter (`pin_attempts`,
+    `app/security.py:145-150`), used only to throttle repeated failures, never for
+    location or analytics. It is retained past the request, so Apple's "not retained"
+    exemption does not apply; Device ID / App Functionality is the closest honest label,
+    and the manifest already declares it.
+  - *Option 2: say nothing extra about IP.* Defensible only if you treat the counter as
+    transient. It fails Apple's reading as soon as the row outlives the request, and it
+    does, for 24 h. Not recommended.
+  - **Kevin to check:** how long the host's access and server logs keep client IPs. The
+    app also writes failed-auth lines to the server log (`app/security.py:151`), and an
+    ordinary access log may keep every caller's IP. That retention is set by the host,
+    is **not verified here**, and, if long, still falls under Option 1's label.
 - **C. Other User Content — declared.** Apple says free-form fields are "Other User
   Content" and you need not disclose everything a user may type, but the owner chooses a
   reschedule time and a guest chooses favorites, and both are retained. Declaring is the
