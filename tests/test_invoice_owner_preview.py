@@ -157,3 +157,116 @@ def test_owner_then_client_preserves_client_first_view_semantics(admin_client, p
     row = _row(seed["invoice_id"])
     assert row["status"] == "viewed"
     assert row["viewed_at"] is not None
+
+
+# --- #184 acceptance gaps: engagement history, the owner API, tenant isolation -------------------
+
+
+def _engagement_snapshot(invoice_id: int) -> dict:
+    """Everything an owner preview must leave alone: the whole invoice row and the send/audit logs."""
+    return {
+        "invoice": dict(db.one("SELECT * FROM invoices WHERE id=?", (invoice_id,))),
+        "emails_log": db.one("SELECT COUNT(*) AS n FROM emails_log")["n"],
+        "audit_log": db.one("SELECT COUNT(*) AS n FROM audit_log")["n"],
+        "payments": db.one("SELECT COUNT(*) AS n FROM payments")["n"],
+    }
+
+
+def _owner_headers(client: TestClient) -> dict[str, str]:
+    r = client.post(
+        "/api/v1/auth/studio/login",
+        json={
+            "email": None,
+            "password": "owner-password",
+            "device": {
+                "installation_id": "9C21D2B4-5F81-4B21-8DFC-2E1A33F0A9C9",
+                "name": "Owner iPhone",
+                "platform": "ios",
+                "app_version": "2.0",
+            },
+        },
+    )
+    assert r.status_code == 200, r.text
+    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+
+def test_every_owner_representation_leaves_the_whole_row_and_the_logs_unchanged(admin_client):
+    """The native AR-chase read (the owner preview's data), the admin paper and the admin session
+    on the public URL: the invoice row (status, viewed_at, every column), reminders sent
+    (emails_log), the audit log and payments are byte-for-byte what they were."""
+    seed = _seed_sent_invoice()
+    headers = _owner_headers(admin_client)
+    before = _engagement_snapshot(seed["invoice_id"])
+
+    chase = admin_client.get(f"/api/v1/companies/{seed['client_id']}/ar-chase", headers=headers)
+    assert chase.status_code == 200, chase.text
+    # positive control: the preview data really carries this invoice, so the read did reach it
+    assert seed["invoice_id"] in {i["invoice_id"] for i in chase.json()["overdue_invoices"]}
+    assert admin_client.get(f"/admin/studio/invoices/{seed['invoice_id']}").status_code == 200
+    assert admin_client.get(f"/i/{seed['slug']}").status_code == 200
+
+    assert _engagement_snapshot(seed["invoice_id"]) == before
+
+
+def test_the_owner_api_refuses_an_unauthenticated_reader_and_changes_nothing(public_client):
+    """Positive control for the test above: the AR-chase read is owner-authenticated."""
+    seed = _seed_sent_invoice()
+    before = _engagement_snapshot(seed["invoice_id"])
+
+    refused = public_client.get(f"/api/v1/companies/{seed['client_id']}/ar-chase")
+
+    assert refused.status_code in (401, 403)
+    assert _engagement_snapshot(seed["invoice_id"]) == before
+
+
+def test_hosted_owner_of_one_studio_is_a_client_of_another_and_each_flips_correctly(
+    tmp_path, monkeypatch
+):
+    """Tenant isolation (hosted): studio A's owner session is the owner on A's host and does NOT
+    flip A's invoice; the same cookie replayed on studio B's host is not B's owner, so a real
+    client-style open there is still recorded exactly once."""
+    from starlette.requests import Request
+
+    from app import saas, security
+    from app.public import pay
+
+    monkeypatch.setattr(config, "SAAS_MODE", True)
+    monkeypatch.setattr(config, "BASE_URL", "https://mise.test")
+    monkeypatch.setattr(config, "SAAS_ROOT_DOMAIN", "mise.test")
+    monkeypatch.setattr(config, "SAAS_MARKETING_HOST", "mise.test")
+    monkeypatch.setattr(config, "SAAS_CONTROL_DB_PATH", tmp_path / "control.db")
+    monkeypatch.setattr(config, "SAAS_TENANT_DATA_DIR", tmp_path / "tenants")
+    monkeypatch.setattr(config, "SECRET_KEY", "isolation-secret")
+    saas._MIGRATED_TENANT_DBS.clear()
+    saas.migrate_control()
+    alpha = saas.create_tenant("alpha", "Alpha Studio", "a@example.com", "secret123")
+    beta = saas.create_tenant("beta", "Beta Studio", "b@example.com", "secret123")
+
+    def request(host: str, cookie: str | None) -> Request:
+        headers = [(b"host", host.encode())]
+        if cookie:
+            headers.append((b"cookie", cookie.encode()))
+        return Request(
+            {
+                "type": "http",
+                "method": "GET",
+                "path": "/i/x",
+                "query_string": b"",
+                "headers": headers,
+                "scheme": "https",
+                "server": (host, 443),
+                "client": ("127.0.0.1", 50000),
+            }
+        )
+
+    fp = security._pw_fp(alpha.get("admin_password_hash") or "")
+    alpha_cookie = f"{security.ADMIN_COOKIE}={security.sign(f'tenant:{alpha["id"]}:alpha:{fp}')}"
+
+    def seeded_status_after(tenant: dict, host: str, cookie: str | None) -> str:
+        with saas.tenant_runtime(tenant):
+            seed = _seed_sent_invoice()
+            pay._record_client_first_view(request(host, cookie), seed["invoice_id"], "sent")
+            return _row(seed["invoice_id"])["status"]
+
+    assert seeded_status_after(alpha, "alpha.mise.test", alpha_cookie) == "sent"  # A's owner
+    assert seeded_status_after(beta, "beta.mise.test", alpha_cookie) == "viewed"  # not B's owner
