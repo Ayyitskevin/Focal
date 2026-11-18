@@ -143,7 +143,7 @@ actor TenantJSONCache {
         Self.commandLock.lock()
         defer { Self.commandLock.unlock() }
         let url = commandFileURL(for: key)
-        if let existing = try readStrict(url, as: Value.self), existing.value != expected {
+        guard let existing = try readStrict(url, as: Value.self), existing.value == expected else {
             return nil
         }
         return try writeUnlocked(value, at: url, etag: nil, storedAt: storedAt)

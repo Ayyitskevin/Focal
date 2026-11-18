@@ -71,7 +71,15 @@ final class InquiryReplyTests: XCTestCase {
         XCTAssertEqual(requests.map(\.method), [.post])
         XCTAssertEqual(requests.map(\.path), ["/api/v1/inquiries/123/reply"])
         XCTAssertEqual(requests.first?.idempotencyKey, draft.idempotencyKey)
-        XCTAssertNil(try await repository.pendingInquiryReply(id: 123))
+        let pending = try await repository.pendingInquiryReply(id: 123)
+        XCTAssertNil(pending)
+        try await assertDraftConflict {
+            _ = try await repository.prepareInquiryReply(
+                id: 123, subject: draft.subject, body: draft.body, replacing: draft
+            )
+        }
+        let afterStaleEdit = try await repository.pendingInquiryReply(id: 123)
+        XCTAssertNil(afterStaleEdit)
     }
 
     func testUnknownReplyPreservesSnapshots() async throws {
@@ -79,7 +87,9 @@ final class InquiryReplyTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: context.root) }
         try await context.cache.write(Self.dashboard, key: "dashboard.v1", etag: nil)
         try await context.cache.write([Self.openInquiry], key: "inquiries.v1", etag: nil)
-        let client = ReplyClient([.value(Data(Self.unknownReplyJSON.utf8))])
+        let client = ReplyClient([
+            .value(Data(Self.unknownReplyJSON.utf8)), .value(Data(Self.sentReplyJSON.utf8)),
+        ])
         let repository = OwnerRepository(client: client, cache: context.cache, sessionID: "session-a")
         let draft = try await repository.prepareInquiryReply(
             id: 123,
@@ -102,37 +112,128 @@ final class InquiryReplyTests: XCTestCase {
         XCTAssertNil(result.messageID)
         XCTAssertNotNil(cachedInquiries)
         XCTAssertNotNil(cachedDashboard)
-        XCTAssertEqual(try await repository.pendingInquiryReply(id: 123), draft)
+        try await assertRestoredRetry(root: context.root, client: client, draft: draft)
     }
 
-    func testPendingReplyReusesExactDraftKeyAcrossRepositories() async throws {
+    func testTransportFailureRestoresExactReplyForExplicitRetry() async throws {
+        let context = makeCache()
+        defer { try? FileManager.default.removeItem(at: context.root) }
+        let client = ReplyClient([
+            .failure(.transport(.timedOut)), .value(Data(Self.sentReplyJSON.utf8)),
+        ])
+        let repository = OwnerRepository(client: client, cache: context.cache, sessionID: "session-a")
+        let draft = try await repository.prepareInquiryReply(
+            id: 123, subject: "Re: your inquiry", body: "Thanks — I can help."
+        )
+
+        do {
+            _ = try await repository.replyToInquiry(draft: draft)
+            XCTFail("Expected the transport timeout.")
+        } catch APIError.transport(let code) {
+            XCTAssertEqual(code, .timedOut)
+        }
+        try await assertRestoredRetry(root: context.root, client: client, draft: draft)
+    }
+
+    private func assertRestoredRetry(root: URL, client: ReplyClient, draft: InquiryReplyDraft) async throws {
+        let reopenedCache = TenantJSONCache(cacheNamespace: "workspace_test", rootDirectory: root)
+        let reopened = OwnerRepository(client: client, cache: reopenedCache, sessionID: "session-a")
+        let restored = try await reopened.pendingInquiryReply(id: draft.inquiryID)
+        XCTAssertEqual(restored, draft)
+        let requestsBeforeRetry = await client.capturedRequests()
+        XCTAssertEqual(requestsBeforeRetry.count, 1)
+
+        let retry = try await reopened.prepareInquiryReply(
+            id: draft.inquiryID, subject: " " + draft.subject, body: draft.body + "\n",
+            replacing: try XCTUnwrap(restored)
+        )
+        XCTAssertEqual(retry, draft)
+        let result = try await reopened.replyToInquiry(draft: retry)
+        XCTAssertEqual(result.code, "inquiry.reply_sent")
+        let requests = await client.capturedRequests()
+        XCTAssertEqual(requests.map(\.idempotencyKey), [draft.idempotencyKey, draft.idempotencyKey])
+        for request in requests {
+            let data = try XCTUnwrap(request.body)
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: String])
+            XCTAssertEqual(object, ["channel": "email", "subject": draft.subject, "body": draft.body])
+        }
+        let pending = try await reopened.pendingInquiryReply(id: draft.inquiryID)
+        XCTAssertNil(pending)
+    }
+
+    func testIndependentComposersCanShareOnlyAnIdenticalFirstAttempt() async throws {
         let context = makeCache()
         defer { try? FileManager.default.removeItem(at: context.root) }
         let client = ReplyClient([])
         let first = OwnerRepository(client: client, cache: context.cache, sessionID: "session-a")
-        let second = OwnerRepository(client: client, cache: context.cache, sessionID: "session-a")
+        let otherCache = TenantJSONCache(cacheNamespace: "workspace_test", rootDirectory: context.root)
+        let other = OwnerRepository(client: client, cache: otherCache, sessionID: "session-a")
 
-        let firstDraft = try await first.prepareInquiryReply(id: 123, subject: "Same", body: "Draft")
-        let secondDraft = try await second.prepareInquiryReply(id: 123, subject: "Same", body: "Draft")
-
-        XCTAssertEqual(firstDraft, secondDraft)
-        XCTAssertEqual(firstDraft.idempotencyKey, secondDraft.idempotencyKey)
+        // Both composers opened before either owner action saved a draft.
+        let firstView = try await first.pendingInquiryReply(id: 123)
+        let otherView = try await other.pendingInquiryReply(id: 123)
+        XCTAssertNil(firstView)
+        XCTAssertNil(otherView)
+        let original = try await first.prepareInquiryReply(id: 123, subject: "One", body: "My draft")
+        try await assertDraftConflict {
+            _ = try await other.prepareInquiryReply(id: 123, subject: "Two", body: "Different")
+        }
+        let exact = try await other.prepareInquiryReply(id: 123, subject: " One ", body: "My draft")
+        XCTAssertEqual(exact, original)
+        let saved = try await first.pendingInquiryReply(id: 123)
+        XCTAssertEqual(saved, original)
+        let requests = await client.capturedRequests()
+        XCTAssertTrue(requests.isEmpty)
     }
 
-    func testEditedDraftReplacesAttemptAndOnlyMatchingDiscardSucceeds() async throws {
+    func testEditedDraftReplacesOnlyTheConfirmedAttempt() async throws {
         let context = makeCache()
         defer { try? FileManager.default.removeItem(at: context.root) }
         let client = ReplyClient([])
         let repository = OwnerRepository(client: client, cache: context.cache, sessionID: "session-a")
         let original = try await repository.prepareInquiryReply(id: 123, subject: "Same", body: "Draft")
-        let edited = try await repository.prepareInquiryReply(id: 123, subject: "Same", body: "Edited")
+        let edited = try await repository.prepareInquiryReply(
+            id: 123, subject: "Same", body: "Edited", replacing: original
+        )
 
         XCTAssertNotEqual(original.idempotencyKey, edited.idempotencyKey)
-        XCTAssertEqual(try await repository.pendingInquiryReply(id: 123), edited)
-        XCTAssertFalse(try await repository.discardPendingInquiryReply(ifMatches: original))
-        XCTAssertEqual(try await repository.pendingInquiryReply(id: 123), edited)
-        XCTAssertTrue(try await repository.discardPendingInquiryReply(ifMatches: edited))
-        XCTAssertNil(try await repository.pendingInquiryReply(id: 123))
+        XCTAssertEqual(edited.body, "Edited")
+        try await assertDraftConflict {
+            _ = try await repository.prepareInquiryReply(
+                id: 123, subject: "Same", body: "Stale edit", replacing: original
+            )
+        }
+        try await assertDraftConflict {
+            _ = try await repository.replyToInquiry(draft: original)
+        }
+        let removedOriginal = try await repository.discardPendingInquiryReply(ifMatches: original)
+        XCTAssertFalse(removedOriginal)
+        let saved = try await repository.pendingInquiryReply(id: 123)
+        XCTAssertEqual(saved, edited)
+        let removedEdited = try await repository.discardPendingInquiryReply(ifMatches: edited)
+        XCTAssertTrue(removedEdited)
+        try await assertDraftConflict {
+            _ = try await repository.prepareInquiryReply(
+                id: 123, subject: "Same", body: "After discard", replacing: edited
+            )
+        }
+        let pending = try await repository.pendingInquiryReply(id: 123)
+        XCTAssertNil(pending)
+        let requests = await client.capturedRequests()
+        XCTAssertTrue(requests.isEmpty)
+    }
+
+    private func assertDraftConflict(
+        _ operation: () async throws -> Void,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async throws {
+        do {
+            try await operation()
+            XCTFail("Expected the stale or competing draft to be rejected.", file: file, line: line)
+        } catch OwnerRepositoryError.pendingInquiryReplyConflict {
+            // No network request is permitted on a journal conflict.
+        }
     }
 
     func testMalformedSentReplyPreservesSnapshots() async throws {
@@ -291,6 +392,10 @@ private actor ReplyClient: APIClientProtocol {
             body: endpoint.body,
             idempotencyKey: endpoint.idempotencyKey
         ))
+        guard !replies.isEmpty else {
+            XCTFail("Unexpected request to the reply transport.")
+            throw APIError.transport(.badServerResponse)
+        }
         switch replies.removeFirst() {
         case let .value(data):
             return try MiseJSON.decoder().decode(Response.self, from: data)

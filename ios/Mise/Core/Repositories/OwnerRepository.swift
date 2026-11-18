@@ -55,7 +55,7 @@ enum OwnerRepositoryError: LocalizedError, Sendable {
         case .inquiryReplySessionMismatch:
             "The saved reply draft belongs to a different session."
         case .pendingInquiryReplyConflict:
-            "A newer reply draft is awaiting a definitive outcome."
+            "The saved reply has changed or was cleared. Reopen the composer to check its current state."
         case .staleRead:
             "Newer studio changes are available. Refresh to load the current records."
         case .inactiveSession:
@@ -233,32 +233,26 @@ actor OwnerRepository {
     func prepareInquiryReply(
         id: Int64,
         subject: String,
-        body: String
+        body: String,
+        replacing expected: InquiryReplyDraft? = nil
     ) async throws -> InquiryReplyDraft {
         let currentSessionID = try await requireInquiryReplySession()
         let normalizedSubject = subject.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
         let key = Key.pendingInquiryReply(sessionID: currentSessionID, inquiryID: id)
-        if let existing = try await pendingInquiryReply(id: id) {
-            guard existing.subject != normalizedSubject || existing.body != normalizedBody else {
-                return existing
+        if let expected {
+            guard expected.sessionID == currentSessionID else {
+                throw OwnerRepositoryError.inquiryReplySessionMismatch
             }
-            let replacement = InquiryReplyDraft(
-                sessionID: currentSessionID,
-                inquiryID: id,
-                subject: normalizedSubject,
-                body: normalizedBody,
-                idempotencyKey: UUID()
-            )
-            guard let updated = try await cache.replaceCommand(
-                replacement,
-                key: key,
-                ifMatches: existing
-            ) else {
+            guard expected.inquiryID == id else {
                 throw OwnerRepositoryError.pendingInquiryReplyConflict
             }
-            try await requireActiveCache()
-            return updated.value
+            if expected.subject == normalizedSubject, expected.body == normalizedBody {
+                guard try await pendingInquiryReply(id: id) == expected else {
+                    throw OwnerRepositoryError.pendingInquiryReplyConflict
+                }
+                return expected
+            }
         }
         let proposed = InquiryReplyDraft(
             sessionID: currentSessionID,
@@ -267,9 +261,22 @@ actor OwnerRepository {
             body: normalizedBody,
             idempotencyKey: UUID()
         )
-        let created = try await cache.writeCommandIfAbsent(proposed, key: key, etag: nil)
+        if let expected {
+            guard try await cache.replaceCommand(proposed, key: key, ifMatches: expected) != nil else {
+                throw OwnerRepositoryError.pendingInquiryReplyConflict
+            }
+            try await requireActiveCache()
+            return proposed
+        }
+        let winner = try await cache.writeCommandIfAbsent(proposed, key: key, etag: nil).value
         try await requireActiveCache()
-        return created.value
+        guard winner.sessionID == currentSessionID, winner.inquiryID == id else {
+            throw OwnerRepositoryError.inquiryReplySessionMismatch
+        }
+        guard winner.subject == normalizedSubject, winner.body == normalizedBody else {
+            throw OwnerRepositoryError.pendingInquiryReplyConflict
+        }
+        return winner
     }
 
     @discardableResult
@@ -288,6 +295,9 @@ actor OwnerRepository {
         let currentSessionID = try await requireInquiryReplySession()
         guard draft.sessionID == currentSessionID else {
             throw OwnerRepositoryError.inquiryReplySessionMismatch
+        }
+        guard try await pendingInquiryReply(id: draft.inquiryID) == draft else {
+            throw OwnerRepositoryError.pendingInquiryReplyConflict
         }
         let value = try await send(
             MiseEndpoints.Inquiries.reply(

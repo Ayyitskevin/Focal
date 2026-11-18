@@ -72,6 +72,25 @@ pending/unknown attempts do not appear as sent conversations or set `is_replied`
 - Other failures preserve the draft and the last confirmed detail. No automatic retry
   or offline-send promise is made. Stale responses cannot overwrite a newer detail.
 
+### Retrying an unresolved native reply
+
+An owner who receives an unknown result, loses the response, or reopens a saved
+attempt sees a warning that the original email may already have gone out. The
+composer loads the saved attempt before enabling a send. An exact retry in the
+same session uses the saved key and the same trimmed subject and body. If the
+first request never reached Focal, this retry can send the email for the first time.
+An edited reply is a new email. Before replacing an unresolved attempt, show a
+distinct confirmation explaining that the customer could receive both emails.
+Cancelling preserves the saved attempt and sends nothing.
+
+Draft preparation must return only the text the owner confirmed. Concurrent
+identical first attempts share one key. A different first attempt that loses a
+race, or an edit based on a saved attempt which has since changed or disappeared,
+must stop before sending. A stale composer cannot recreate a consumed draft.
+The owner can reopen to see current state. These guarantees apply within the
+existing authenticated session and use the existing local draft format and
+server replay contract.
+
 ### Acceptance evidence
 
 Cover successful send, exact replay, key conflict, provider exception/unknown,
