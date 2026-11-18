@@ -163,6 +163,7 @@ not become a client-wide session.
 | `GET /api/v1/dashboard` | `DashboardSummary` |
 | `GET /api/v1/tasks` | `Page<TaskSummary>` containing every open Mise studio-task row |
 | `GET /api/v1/inquiries` | `Page<InquirySummary>` containing the read-only owner lead inbox |
+| `GET /api/v1/inquiries/{id}` | `InquiryDetail` with summary and recorded conversation |
 | `GET /api/v1/clients` | `Page<ClientSummary>` |
 | `GET /api/v1/clients/{id}` | client detail |
 | `GET /api/v1/projects` | `Page<ProjectSummary>` |
@@ -189,6 +190,16 @@ message; delivery of the studio's new-inquiry notification does not count as a r
 Malformed legacy shoot dates remain explicitly unavailable instead of failing the
 whole inbox. The collection uses the same signed, resource-bound cursor limits and
 private ETag behavior as the other owner lists.
+
+`GET /api/v1/inquiries/{id}` returns the same summary plus up to the latest 200
+recorded messages in chronological order and `has_older_messages` when older rows
+were omitted. Stored messages mirror the browser thread; when none exist, ID `0`
+synthesizes the original inquiry as one inbound message without duplicating it when
+stored rows arrive. Bodies cap at 65,536 characters and carry `is_truncated`.
+Unknown inquiries return `404 inquiry.not_found`; guests remain excluded, while a
+read-scoped owner may read without receiving mutation authority. Full conversation
+responses use private ETag validation and are not persisted by the native repository.
+See `INQUIRY-MOBILE-TRIAGE.md` for the scoped contract and non-goals.
 
 `GET /api/v1/tasks` is the complete open feed for existing Mise
 studio-operation task rows (`done=0`), not a claim over general or personal
@@ -235,6 +246,8 @@ consumers de-duplicate repeated IDs.
 | `DELETE /api/v1/galleries/{g}/assets/{a}/favorite` | idempotently unselect (implemented, Milestone 3) |
 | `PUT /api/v1/tasks/{id}/completion` | owner: idempotently check a task off; audited (implemented, M4a) |
 | `DELETE /api/v1/tasks/{id}/completion` | owner: idempotently reopen a task; audited (implemented, M4a) |
+| `PUT /api/v1/inquiries/{id}/dismissal` | write-scoped owner: idempotently dismiss an unconverted inquiry; audited |
+| `DELETE /api/v1/inquiries/{id}/dismissal` | write-scoped owner: idempotently restore an inquiry without clearing conversion; audited on a real transition |
 | `POST /api/v1/galleries/{g}/assets/{a}/comments` | add video comment/reply |
 | `POST /api/v1/proposals/{id}/accept` | server-authoritative transition |
 | `POST /api/v1/proposals/{id}/decline` | server-authoritative transition |
@@ -257,7 +270,14 @@ completion as an idempotent sub-resource (`PUT` = ensure done, `DELETE` = ensure
 open), so a repeat call is a safe no-op returning current state. It requires an owner
 bearer carrying `studio:write` and writes one `audit_log` row per real transition
 (`task`/`complete`|`reopen`, actor `owner`) — the web `/admin/tasks/{id}/toggle` path
-writes none. Booking cancellation is naturally idempotent; when it targets a
+writes none. Inquiry dismissal uses the same naturally idempotent sub-resource
+model and needs no `Idempotency-Key`: `PUT` ensures dismissed and `DELETE` ensures
+not dismissed. Only a real transition writes an `inquiry`/`dismiss`|`undismiss`
+audit row as actor `owner`. Dismissing a converted inquiry returns
+`409 inquiry.converted`; restore never clears conversion fields. Both commands
+return the current `InquiryDetail` with `Cache-Control: no-store`.
+
+Booking cancellation is naturally idempotent; when it targets a
 replacement whose provider effect is already running, it returns
 `409 booking.workflow_in_progress` without changing either state. Rescheduling
 is not idempotent — each successful command creates a new row — so it uses the

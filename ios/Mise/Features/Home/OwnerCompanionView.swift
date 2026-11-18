@@ -218,7 +218,7 @@ struct OwnerCompanionView: View {
                 taskCoordinator: taskCoordinator
             ) { selection = $0 }
         case .inquiries:
-            InquiriesView(model: inquiries)
+            InquiriesView(model: inquiries, repository: repository, canWrite: commands.canWrite)
         case .clients:
             ClientsView(model: clients)
         case .projects:
