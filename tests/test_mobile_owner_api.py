@@ -523,13 +523,18 @@ def _insert_inquiry(
 
 def test_inquiries_requires_owner_principal(owner, monkeypatch):
     client, headers, _ = owner
+    inquiry_id = _insert_inquiry("Private Lead")
     assert client.get("/api/v1/inquiries").status_code == 401
+    assert client.get(f"/api/v1/inquiries/{inquiry_id}").status_code == 401
     assert client.get("/api/v1/inquiries", headers=headers).status_code == 200
     guest = _principal(kind=mobile_auth.GALLERY_GUEST, scopes=frozenset({"studio:read"}))
     monkeypatch.setattr(mobile_auth, "authenticate_request", lambda *args, **kwargs: guest)
     response = client.get("/api/v1/inquiries", headers=headers)
     assert response.status_code == 403
     assert response.json()["code"] == "auth.insufficient_scope"
+    detail = client.get(f"/api/v1/inquiries/{inquiry_id}", headers=headers)
+    assert detail.status_code == 403
+    assert detail.json()["code"] == "auth.insufficient_scope"
 
 
 def test_inquiries_maps_storage_fields_and_triage_state(owner):
@@ -700,3 +705,285 @@ def test_inquiries_enforces_limit_bounds(owner, limit):
     client, headers, _ = owner
     response = client.get("/api/v1/inquiries", params={"limit": limit}, headers=headers)
     assert response.status_code == 422
+
+
+def test_inquiry_detail_synthesizes_original_message_when_thread_empty(owner):
+    client, headers, _ = owner
+    inquiry_id = _insert_inquiry(
+        "Legacy Lead",
+        message="Original inquiry\nwith two lines",
+        kind="contact",
+    )
+
+    response = client.get(f"/api/v1/inquiries/{inquiry_id}", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["summary"]["id"] == inquiry_id
+    assert body["summary"]["status"] == "open"
+    assert body["has_older_messages"] is False
+    assert len(body["messages"]) == 1
+    message = body["messages"][0]
+    assert message == {
+        "id": 0,
+        "direction": "in",
+        "channel": "email",
+        "body": "Original inquiry\nwith two lines",
+        "recorded_at": message["recorded_at"],
+        "is_truncated": False,
+    }
+    assert message["recorded_at"].endswith("Z")
+
+    cached = client.get(
+        f"/api/v1/inquiries/{inquiry_id}",
+        headers={**headers, "If-None-Match": response.headers["etag"]},
+    )
+    assert cached.status_code == 304
+
+    missing = client.get("/api/v1/inquiries/999999", headers=headers)
+    assert missing.status_code == 404
+    assert missing.json()["code"] == "inquiry.not_found"
+
+
+def test_inquiry_dismissal_is_idempotent_and_audited(owner):
+    client, headers, _ = owner
+    inquiry_id = _insert_inquiry("Triage Lead")
+    path = f"/api/v1/inquiries/{inquiry_id}/dismissal"
+
+    assert client.put(path).status_code == 401
+
+    dismissed = client.put(path, headers=headers)
+    assert dismissed.status_code == 200
+    assert dismissed.json()["summary"]["status"] == "dismissed"
+    first_row = db.one("SELECT converted_at, dismissed_at FROM inquiries WHERE id=?", (inquiry_id,))
+    assert first_row["dismissed_at"] is not None
+    audits = db.all_(
+        "SELECT action, actor FROM audit_log WHERE entity_type='inquiry' AND entity_id=?",
+        (inquiry_id,),
+    )
+    assert [(row["action"], row["actor"]) for row in audits] == [("dismiss", "owner")]
+
+    repeated = client.put(path, headers=headers)
+    assert repeated.status_code == 200
+    assert (
+        db.one("SELECT dismissed_at FROM inquiries WHERE id=?", (inquiry_id,))["dismissed_at"]
+        == first_row["dismissed_at"]
+    )
+    assert db.one("SELECT COUNT(*) AS n FROM audit_log WHERE entity_type='inquiry'")["n"] == 1
+
+    restored = client.delete(path, headers=headers)
+    assert restored.status_code == 200
+    assert restored.json()["summary"]["status"] == "open"
+    assert (
+        db.one("SELECT dismissed_at FROM inquiries WHERE id=?", (inquiry_id,))["dismissed_at"]
+        is None
+    )
+    assert [
+        row["action"]
+        for row in db.all_(
+            "SELECT action FROM audit_log WHERE entity_type='inquiry' AND entity_id=? ORDER BY id",
+            (inquiry_id,),
+        )
+    ] == ["dismiss", "undismiss"]
+
+    assert client.delete(path, headers=headers).status_code == 200
+    assert db.one("SELECT COUNT(*) AS n FROM audit_log WHERE entity_type='inquiry'")["n"] == 2
+
+
+def test_inquiry_dismissal_requires_write_scope(owner, monkeypatch):
+    client, headers, _ = owner
+    inquiry_id = _insert_inquiry("Read Only Lead")
+    read_only = _principal(kind=mobile_auth.STUDIO_OWNER, scopes=frozenset({"studio:read"}))
+    monkeypatch.setattr(mobile_auth, "authenticate_request", lambda *args, **kwargs: read_only)
+
+    response = client.put(f"/api/v1/inquiries/{inquiry_id}/dismissal", headers=headers)
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "auth.insufficient_scope"
+    detail = client.get(f"/api/v1/inquiries/{inquiry_id}", headers=headers)
+    assert detail.status_code == 200
+    assert detail.json()["summary"]["id"] == inquiry_id
+    assert (
+        db.one("SELECT dismissed_at FROM inquiries WHERE id=?", (inquiry_id,))["dismissed_at"]
+        is None
+    )
+    assert db.one("SELECT COUNT(*) AS n FROM audit_log WHERE entity_type='inquiry'")["n"] == 0
+
+
+def test_converted_inquiry_cannot_be_dismissed(owner):
+    client, headers, _ = owner
+    inquiry_id = _insert_inquiry("Converted Lead", converted_at="2026-07-01 10:00:00")
+
+    response = client.put(f"/api/v1/inquiries/{inquiry_id}/dismissal", headers=headers)
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "inquiry.converted"
+    row = db.one("SELECT converted_at, dismissed_at FROM inquiries WHERE id=?", (inquiry_id,))
+    assert row["converted_at"] == "2026-07-01 10:00:00"
+    assert row["dismissed_at"] is None
+    assert db.one("SELECT COUNT(*) AS n FROM audit_log WHERE entity_type='inquiry'")["n"] == 0
+
+    restored = client.delete(f"/api/v1/inquiries/{inquiry_id}/dismissal", headers=headers)
+    assert restored.status_code == 200
+    assert restored.json()["summary"]["status"] == "converted"
+    unchanged = db.one("SELECT converted_at, dismissed_at FROM inquiries WHERE id=?", (inquiry_id,))
+    assert unchanged["converted_at"] == "2026-07-01 10:00:00"
+    assert unchanged["dismissed_at"] is None
+    assert db.one("SELECT COUNT(*) AS n FROM audit_log WHERE entity_type='inquiry'")["n"] == 0
+
+
+def test_inquiry_detail_uses_stored_thread_without_duplicating_original(owner):
+    client, headers, _ = owner
+    inquiry_id = _insert_inquiry("Thread Lead", message="Original must not repeat")
+    first_id = db.run(
+        """INSERT INTO messages (inquiry_id,direction,channel,body,created_at)
+           VALUES (?,'in','email','First stored reply','2026-07-01 10:00:00')""",
+        (inquiry_id,),
+    )
+    second_id = db.run(
+        """INSERT INTO messages (inquiry_id,direction,channel,body,created_at)
+           VALUES (?,'out','email','Studio response','2026-07-01 10:05:00')""",
+        (inquiry_id,),
+    )
+
+    response = client.get(f"/api/v1/inquiries/{inquiry_id}", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [message["id"] for message in body["messages"]] == [first_id, second_id]
+    assert [message["body"] for message in body["messages"]] == [
+        "First stored reply",
+        "Studio response",
+    ]
+    assert [message["direction"] for message in body["messages"]] == ["in", "out"]
+    assert body["summary"]["is_replied"] is True
+
+
+def test_inquiry_detail_bounds_bodies_and_reports_older_history(owner):
+    client, headers, _ = owner
+    legacy_id = _insert_inquiry("Long Legacy", message="x" * 70_000)
+    legacy = client.get(f"/api/v1/inquiries/{legacy_id}", headers=headers)
+    legacy_message = legacy.json()["messages"][0]
+    assert len(legacy_message["body"]) == 65_536
+    assert legacy_message["is_truncated"] is True
+
+    threaded_id = _insert_inquiry("Long Thread")
+    for index in range(201):
+        db.run(
+            "INSERT INTO messages (inquiry_id,direction,channel,body) VALUES (?,'in','sms',?)",
+            (threaded_id, f"message-{index}"),
+        )
+
+    response = client.get(f"/api/v1/inquiries/{threaded_id}", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["has_older_messages"] is True
+    assert len(body["messages"]) == 200
+    assert body["messages"][0]["body"] == "message-1"
+    assert body["messages"][-1]["body"] == "message-200"
+
+
+@pytest.mark.parametrize("method", ["get", "put", "delete"])
+@pytest.mark.parametrize("inquiry_id", [0, -1, 2**63])
+def test_inquiry_routes_reject_out_of_range_ids(owner, method, inquiry_id):
+    client, headers, _ = owner
+    response = client.request(
+        method,
+        f"/api/v1/inquiries/{inquiry_id}/dismissal"
+        if method != "get"
+        else f"/api/v1/inquiries/{inquiry_id}",
+        headers=headers,
+    )
+    assert response.status_code == 422
+    assert response.json()["code"] == "request.validation_failed"
+
+
+def test_concurrent_dismissal_is_one_audited_transition(owner, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier, Event, Lock, Timer
+
+    _, headers, _ = owner
+    inquiry_id = _insert_inquiry("Concurrent Dismissal")
+    barrier = Barrier(2)
+    release = Event()
+    lock = Lock()
+    selected = 0
+    original_connect = db.connect
+
+    class PausingConnection:
+        def __init__(self, connection):
+            self._connection = connection
+            self.isolation_level = connection.isolation_level
+
+        def execute(self, sql, parameters=()):
+            nonlocal selected
+            result = self._connection.execute(sql, parameters)
+            if "SELECT converted_at, dismissed_at FROM inquiries" in sql:
+                with lock:
+                    selected += 1
+                    if selected == 1:
+                        Timer(0.2, release.set).start()
+                release.wait(timeout=5)
+            return result
+
+        def __getattr__(self, name):
+            return getattr(self._connection, name)
+
+    monkeypatch.setattr(
+        db, "connect", lambda *args, **kwargs: PausingConnection(original_connect())
+    )
+
+    def dismiss():
+        with TestClient(app, base_url="https://studio.test") as threaded_client:
+            barrier.wait()
+            return threaded_client.put(
+                f"/api/v1/inquiries/{inquiry_id}/dismissal",
+                headers=headers,
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(lambda _: dismiss(), range(2)))
+
+    assert [response.status_code for response in responses] == [200, 200]
+    assert db.one("SELECT COUNT(*) AS n FROM audit_log WHERE entity_type='inquiry'")["n"] == 1
+    assert db.one("SELECT COUNT(*) AS n FROM audit_log WHERE action='dismiss'")["n"] == 1
+
+
+def test_inquiry_detail_reads_summary_and_messages_from_one_snapshot(owner, monkeypatch):
+    from threading import Event, Thread
+
+    client, headers, _ = owner
+    inquiry_id = _insert_inquiry("Snapshot Lead", message="Original message")
+    record_read = Event()
+    resume_read = Event()
+    original_record = mobile_owner_api._inquiry_record
+
+    def paused_record(inquiry_id, con=None):
+        row = original_record(inquiry_id, con=con)
+        record_read.set()
+        assert resume_read.wait(timeout=5)
+        return row
+
+    monkeypatch.setattr(mobile_owner_api, "_inquiry_record", paused_record)
+    result = {}
+
+    def get_detail():
+        result["response"] = client.get(f"/api/v1/inquiries/{inquiry_id}", headers=headers)
+
+    thread = Thread(target=get_detail)
+    thread.start()
+    assert record_read.wait(timeout=2)
+    db.run(
+        "INSERT INTO messages (inquiry_id,direction,channel,body) VALUES (?,'out','email',?)",
+        (inquiry_id, "Concurrent outbound reply"),
+    )
+    resume_read.set()
+    thread.join(timeout=10)
+
+    assert not thread.is_alive()
+    response = result["response"]
+    assert response.status_code == 200
+    body = response.json()
+    assert body["summary"]["is_replied"] is False
+    assert [message["body"] for message in body["messages"]] == ["Original message"]

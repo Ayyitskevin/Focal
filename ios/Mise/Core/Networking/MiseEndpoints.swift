@@ -172,7 +172,6 @@ enum MiseEndpoints {
         }
     }
 
-    /// Owner lead inbox — read-only.
     enum Inquiries {
         static func list(
             cursor: String? = nil,
@@ -185,6 +184,17 @@ enum MiseEndpoints {
                     APIQueryItem(name: "cursor", value: cursor),
                     APIQueryItem(name: "limit", value: String(min(max(limit, 1), 100))),
                 ]
+            )
+        }
+
+        static func detail(id: Int64) -> APIEndpoint<InquiryDetail> {
+            APIEndpoint(method: .get, path: "/api/v1/inquiries/\(id)")
+        }
+
+        static func dismissal(id: Int64, dismissed: Bool) -> APIEndpoint<InquiryDetail> {
+            APIEndpoint(
+                method: dismissed ? .put : .delete,
+                path: "/api/v1/inquiries/\(id)/dismissal"
             )
         }
     }

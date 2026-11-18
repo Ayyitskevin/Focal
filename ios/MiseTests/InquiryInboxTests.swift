@@ -54,6 +54,36 @@ final class InquiryInboxTests: XCTestCase {
         XCTAssertEqual(InquiryStatus.dismissed.ownerDisplayName, "Dismissed")
     }
 
+    func testInquiryDetailDecodesStoredThreadAndHistoryFlag() throws {
+        let detail = try MiseJSON.decoder().decode(
+            InquiryDetail.self,
+            from: Data(
+                """
+                {
+                  "summary": \(Self.openInquiryJSON),
+                  "messages": [{
+                    "id": 44,
+                    "direction": "out",
+                    "channel": "email",
+                    "body": "Thanks for reaching out.",
+                    "recorded_at": "2026-08-01T15:00:00Z",
+                    "is_truncated": false
+                  }],
+                  "has_older_messages": true
+                }
+                """.utf8
+            )
+        )
+
+        XCTAssertEqual(detail.summary.id, 123)
+        XCTAssertEqual(detail.messages.map(\.id), [44])
+        XCTAssertEqual(detail.messages.first?.direction, .outbound)
+        XCTAssertEqual(detail.messages.first?.body, "Thanks for reaching out.")
+        XCTAssertEqual(detail.messages.first?.recordedAt, try Self.date("2026-08-01T15:00:00Z"))
+        XCTAssertFalse(detail.messages.first?.isTruncated ?? true)
+        XCTAssertTrue(detail.hasOlderMessages)
+    }
+
     func testInquiryListEndpointUsesBodylessBearerGetAndBoundedQuery() {
         let defaultPage = MiseEndpoints.Inquiries.list()
         let cursorPage = MiseEndpoints.Inquiries.list(cursor: "next-page", limit: 500)
@@ -78,6 +108,27 @@ final class InquiryInboxTests: XCTestCase {
         XCTAssertNil(cursorPage.body)
         XCTAssertNil(cursorPage.idempotencyKey)
         XCTAssertNil(cursorPage.etag)
+    }
+
+    func testInquiryDetailAndDismissalEndpointsUseBodylessBearerRequests() {
+        let detail = MiseEndpoints.Inquiries.detail(id: 123)
+        let dismiss = MiseEndpoints.Inquiries.dismissal(id: 123, dismissed: true)
+        let restore = MiseEndpoints.Inquiries.dismissal(id: 123, dismissed: false)
+
+        XCTAssertEqual(detail.method, .get)
+        XCTAssertEqual(detail.path, "/api/v1/inquiries/123")
+        XCTAssertEqual(detail.authentication, .bearer)
+        XCTAssertNil(detail.body)
+        XCTAssertNil(detail.idempotencyKey)
+        XCTAssertEqual(dismiss.method, .put)
+        XCTAssertEqual(dismiss.path, "/api/v1/inquiries/123/dismissal")
+        XCTAssertEqual(dismiss.authentication, .bearer)
+        XCTAssertNil(dismiss.body)
+        XCTAssertNil(dismiss.idempotencyKey)
+        XCTAssertEqual(restore.method, .delete)
+        XCTAssertEqual(restore.path, dismiss.path)
+        XCTAssertNil(restore.body)
+        XCTAssertNil(restore.idempotencyKey)
     }
 
     func testRefreshInquiriesAggregatesEveryPageIntoTheTenantCache() async throws {

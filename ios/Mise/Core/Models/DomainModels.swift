@@ -203,6 +203,29 @@ struct InquirySummary: Codable, Hashable, Sendable, Identifiable {
     let receivedAt: Date
 }
 
+struct InquiryMessageDirection: APIStringValue {
+    let rawValue: String
+    init(rawValue: String) { self.rawValue = rawValue }
+
+    static let inbound = Self(rawValue: "in")
+    static let outbound = Self(rawValue: "out")
+}
+
+struct InquiryMessage: Codable, Hashable, Sendable, Identifiable {
+    let id: Int64
+    let direction: InquiryMessageDirection
+    let channel: String
+    let body: String
+    let recordedAt: Date
+    let isTruncated: Bool
+}
+
+struct InquiryDetail: Codable, Hashable, Sendable {
+    let summary: InquirySummary
+    let messages: [InquiryMessage]
+    let hasOlderMessages: Bool
+}
+
 struct GalleryDeliveryState: APIStringValue {
     let rawValue: String
     init(rawValue: String) { self.rawValue = rawValue }

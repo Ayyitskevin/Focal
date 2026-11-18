@@ -3,6 +3,8 @@ import SwiftUI
 struct InquiriesView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let model: ResourceModel<[InquirySummary]>
+    let repository: OwnerRepository
+    let canWrite: Bool
     @State private var query = ""
 
     var body: some View {
@@ -30,45 +32,54 @@ struct InquiriesView: View {
                     .listRowBackground(Color.clear)
             } else {
                 ForEach(matches) { inquiry in
-                    VStack(alignment: .leading, spacing: 5) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(inquiry.name).font(.headline)
-                            Spacer()
-                            StatusPill(
-                                label: inquiry.status.ownerDisplayName,
-                                tone: inquiry.status.tone
-                            )
-                        }
-                        if let business = inquiry.business, !business.isEmpty {
-                            Text(business).foregroundStyle(.secondary)
-                        }
-                        if let contact = contactLine(inquiry) {
-                            Text(contact).foregroundStyle(.secondary)
-                        }
-                        Text(topicLine(inquiry))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        if !inquiry.messagePreview.isEmpty {
-                            Text(inquiry.messagePreview)
+                    NavigationLink {
+                        InquiryDetailView(
+                            summary: inquiry,
+                            repository: repository,
+                            canWrite: canWrite,
+                            onTriage: { await model.refreshAfterCurrent() }
+                        )
+                    } label: {
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(inquiry.name).font(.headline)
+                                Spacer()
+                                StatusPill(
+                                    label: inquiry.status.ownerDisplayName,
+                                    tone: inquiry.status.tone
+                                )
+                            }
+                            if let business = inquiry.business, !business.isEmpty {
+                                Text(business).foregroundStyle(.secondary)
+                            }
+                            if let contact = contactLine(inquiry) {
+                                Text(contact).foregroundStyle(.secondary)
+                            }
+                            Text(topicLine(inquiry))
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
-                                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
-                        }
-                        HStack(spacing: 12) {
-                            Text(inquiry.receivedAt, style: .relative)
-                            if let shootOn = inquiry.shootOn {
-                                Label(shootOn.rawValue, systemImage: "calendar")
+                            if !inquiry.messagePreview.isEmpty {
+                                Text(inquiry.messagePreview)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                             }
-                            Spacer()
-                            if inquiry.isReplied {
-                                Label("Replied", systemImage: "arrowshape.turn.up.left.fill")
+                            HStack(spacing: 12) {
+                                Text(inquiry.receivedAt, style: .relative)
+                                if let shootOn = inquiry.shootOn {
+                                    Label(shootOn.rawValue, systemImage: "calendar")
+                                }
+                                Spacer()
+                                if inquiry.isReplied {
+                                    Label("Replied", systemImage: "arrowshape.turn.up.left.fill")
+                                }
                             }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 4)
+                        .accessibilityElement(children: .combine)
                     }
-                    .padding(.vertical, 4)
-                    .accessibilityElement(children: .combine)
                 }
             }
         }

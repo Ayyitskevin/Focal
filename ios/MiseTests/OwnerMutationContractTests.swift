@@ -1179,6 +1179,116 @@ final class OwnerMutationContractTests: XCTestCase {
         }
     }
 
+    func testInquiryDismissalSuccessInvalidatesOnlyInquiryAndDashboardSnapshots() async throws {
+        let context = makeCache()
+        defer { try? FileManager.default.removeItem(at: context.root) }
+        try await context.cache.write(Self.dashboard, key: "dashboard.v1", etag: nil)
+        try await context.cache.write(
+            [Self.openInquirySummary],
+            key: "inquiries.v1",
+            etag: nil
+        )
+        try await context.cache.write(
+            [Self.confirmedBooking],
+            key: "bookings.v1",
+            etag: nil
+        )
+        let client = OwnerMutationContractClient([
+            .value(Data(Self.dismissedInquiryDetailJSON.utf8)),
+        ])
+        let repository = OwnerRepository(client: client, cache: context.cache)
+
+        let detail = try await repository.setInquiryDismissed(id: 123, dismissed: true)
+        let cachedInquiries = try await context.cache.read(
+            "inquiries.v1",
+            as: [InquirySummary].self
+        )
+        let cachedDashboard = try await context.cache.read(
+            "dashboard.v1",
+            as: DashboardSummary.self
+        )
+        let cachedBookings = try await context.cache.read(
+            "bookings.v1",
+            as: [Booking].self
+        )
+        let requests = await client.capturedRequests()
+
+        XCTAssertEqual(detail.summary.status, .dismissed)
+        XCTAssertNil(cachedInquiries)
+        XCTAssertNil(cachedDashboard)
+        XCTAssertNotNil(cachedBookings)
+        XCTAssertEqual(requests.map(\.method), [.put])
+        XCTAssertEqual(requests.map(\.path), ["/api/v1/inquiries/123/dismissal"])
+        XCTAssertNil(requests.first?.body)
+        XCTAssertNil(requests.first?.idempotencyKey)
+    }
+
+    func testInquiryDismissalFailurePreservesSnapshots() async throws {
+        let context = makeCache()
+        defer { try? FileManager.default.removeItem(at: context.root) }
+        try await context.cache.write(Self.dashboard, key: "dashboard.v1", etag: nil)
+        try await context.cache.write(
+            [Self.openInquirySummary],
+            key: "inquiries.v1",
+            etag: nil
+        )
+        let client = OwnerMutationContractClient([
+            .failure(.server(status: 503, problem: nil)),
+        ])
+        let repository = OwnerRepository(client: client, cache: context.cache)
+
+        do {
+            _ = try await repository.setInquiryDismissed(id: 123, dismissed: true)
+            XCTFail("Expected the failed dismissal to throw.")
+        } catch let APIError.server(status, _) {
+            XCTAssertEqual(status, 503)
+        }
+
+        let cachedInquiries = try await context.cache.read(
+            "inquiries.v1",
+            as: [InquirySummary].self
+        )
+        let cachedDashboard = try await context.cache.read(
+            "dashboard.v1",
+            as: DashboardSummary.self
+        )
+        XCTAssertEqual(cachedInquiries?.value, [Self.openInquirySummary])
+        XCTAssertEqual(cachedDashboard?.value.newInquiries, Self.dashboard.newInquiries)
+    }
+
+    func testMismatchedInquiryDismissalResponsePreservesSnapshots() async throws {
+        let context = makeCache()
+        defer { try? FileManager.default.removeItem(at: context.root) }
+        try await context.cache.write(Self.dashboard, key: "dashboard.v1", etag: nil)
+        try await context.cache.write(
+            [Self.openInquirySummary],
+            key: "inquiries.v1",
+            etag: nil
+        )
+        let invalid = Self.dismissedInquiryDetailJSON
+            .replacingOccurrences(of: #""status": "dismissed""#, with: #""status": "open""#)
+        let client = OwnerMutationContractClient([.value(Data(invalid.utf8))])
+        let repository = OwnerRepository(client: client, cache: context.cache)
+
+        do {
+            _ = try await repository.setInquiryDismissed(id: 123, dismissed: true)
+            XCTFail("Expected an inconsistent dismissal response to throw.")
+        } catch OwnerRepositoryError.invalidInquiryResponse {
+            // A wrong success payload must not invalidate the last confirmed cache.
+        }
+
+        let cachedInquiries = try await context.cache.read(
+            "inquiries.v1",
+            as: [InquirySummary].self
+        )
+        let cachedDashboard = try await context.cache.read(
+            "dashboard.v1",
+            as: DashboardSummary.self
+        )
+        XCTAssertEqual(cachedInquiries?.value, [Self.openInquirySummary])
+        XCTAssertNotNil(cachedDashboard)
+    }
+
     private func makeCache() -> (root: URL, cache: TenantJSONCache) {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("owner-mutation-tests-\(UUID().uuidString)")
@@ -1253,6 +1363,53 @@ final class OwnerMutationContractTests: XCTestCase {
         "error_class":"TimeoutError",
         "error_code":"exception"
       }]
+    }
+    """
+
+    private static let openInquirySummary = InquirySummary(
+        id: 123,
+        name: "Jordan Lee",
+        business: nil,
+        email: "jordan@example.com",
+        phone: nil,
+        kind: "wedding",
+        service: "Wedding photography",
+        shootOn: LocalDate(rawValue: "2026-10-03"),
+        messagePreview: "Hi! We’re getting married…",
+        status: .open,
+        isReplied: false,
+        convertedClientID: nil,
+        convertedProjectID: nil,
+        receivedAt: Date(timeIntervalSince1970: 1_700_000_000)
+    )
+
+    private static let dismissedInquiryDetailJSON = """
+    {
+      "summary": {
+        "id": 123,
+        "name": "Jordan Lee",
+        "business": null,
+        "email": "jordan@example.com",
+        "phone": null,
+        "kind": "wedding",
+        "service": "Wedding photography",
+        "shoot_on": "2026-10-03",
+        "message_preview": "Hi! We’re getting married…",
+        "status": "dismissed",
+        "is_replied": false,
+        "converted_client_id": null,
+        "converted_project_id": null,
+        "received_at": "2026-08-01T14:22:10Z"
+      },
+      "messages": [{
+        "id": 0,
+        "direction": "in",
+        "channel": "email",
+        "body": "Hi! We’re getting married…",
+        "recorded_at": "2026-08-01T14:22:10Z",
+        "is_truncated": false
+      }],
+      "has_older_messages": false
     }
     """
 

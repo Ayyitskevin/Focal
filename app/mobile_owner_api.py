@@ -1,4 +1,4 @@
-"""Read-only studio-owner resources for the native Mise API.
+"""Studio-owner resources for the native Mise API.
 
 This router is intentionally safe to mount on its own: every route inherits an
 exact owner-principal dependency.  Bearer authentication is re-evaluated for
@@ -40,7 +40,7 @@ _TASK_CURSOR_KIND = "owner-tasks-open-v1"
 
 
 class OwnerAPIModel(BaseModel):
-    """Strict Pydantic 2 base for owner read responses."""
+    """Strict Pydantic 2 base for owner API responses."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
@@ -223,6 +223,26 @@ class InquirySummary(OwnerAPIModel):
     @classmethod
     def received_at_is_utc(cls, value: dt.datetime) -> dt.datetime:
         return _ensure_utc(value)
+
+
+class InquiryMessage(OwnerAPIModel):
+    id: int = Field(ge=0, le=_INT64_MAX)
+    direction: Literal["in", "out"]
+    channel: str = Field(min_length=1, max_length=64)
+    body: str = Field(max_length=65_536)
+    recorded_at: dt.datetime
+    is_truncated: bool
+
+    @field_validator("recorded_at")
+    @classmethod
+    def recorded_at_is_utc(cls, value: dt.datetime) -> dt.datetime:
+        return _ensure_utc(value)
+
+
+class InquiryDetail(OwnerAPIModel):
+    summary: InquirySummary
+    messages: list[InquiryMessage] = Field(max_length=200)
+    has_older_messages: bool
 
 
 class APIPage[T: BaseModel](OwnerAPIModel):
@@ -733,6 +753,155 @@ def inquiries(
         has_more=has_more,
     )
     return _conditional(request, response, payload)
+
+
+def _inquiry_message(message_id: int, direction, channel, body, created_at) -> InquiryMessage:
+    bounded = str(body or "")[:65_537]
+    return InquiryMessage(
+        id=message_id,
+        direction="out" if direction == "out" else "in",
+        channel=_inquiry_text(channel, maximum=64, fallback="unknown"),
+        body=bounded[:65_536],
+        recorded_at=_utc_timestamp(created_at),
+        is_truncated=len(bounded) > 65_536,
+    )
+
+
+def _inquiry_detail_payload(row, con=None) -> InquiryDetail:
+    sql = """SELECT id, direction, channel, body, created_at FROM messages
+                WHERE inquiry_id=? ORDER BY created_at DESC, id DESC LIMIT 201"""
+    rows = db.all_(sql, (row["id"],)) if con is None else con.execute(sql, (row["id"],)).fetchall()
+    visible = list(reversed(rows[:200]))
+    messages = [
+        _inquiry_message(
+            int(message["id"]),
+            message["direction"],
+            message["channel"],
+            message["body"],
+            message["created_at"],
+        )
+        for message in visible
+    ]
+    if not rows:
+        messages = [
+            _inquiry_message(
+                0,
+                "in",
+                row["kind"] if row["kind"] in ("sms", "call") else "email",
+                row["message"],
+                row["created_at"],
+            )
+        ]
+    return InquiryDetail(
+        summary=_inquiry_summary(row),
+        messages=messages,
+        has_older_messages=len(rows) > 200,
+    )
+
+
+def _inquiry_record(inquiry_id: int, con=None):
+    sql = """SELECT i.id, i.name, i.email, i.business, i.message, i.phone, i.kind,
+                    i.service, i.shoot_date, i.created_at,
+                    i.converted_at, i.dismissed_at,
+                    i.converted_client_id, i.converted_project_id,
+                    EXISTS (
+                        SELECT 1 FROM messages m
+                         WHERE m.inquiry_id=i.id AND m.direction='out'
+                    ) AS is_replied
+               FROM inquiries i WHERE i.id=?"""
+    return db.one(sql, (inquiry_id,)) if con is None else con.execute(sql, (inquiry_id,)).fetchone()
+
+
+@router.get("/inquiries/{inquiry_id}", response_model=InquiryDetail)
+def inquiry_detail(
+    request: Request,
+    response: Response,
+    inquiry_id: Annotated[int, Path(ge=1, le=_INT64_MAX)],
+) -> InquiryDetail | Response:
+    con = db.connect()
+    try:
+        con.execute("BEGIN")
+        row = _inquiry_record(inquiry_id, con=con)
+        if row is None:
+            raise mobile_auth.MobileAuthError(404, "inquiry.not_found", "Inquiry not found.")
+        payload = _inquiry_detail_payload(row, con=con)
+    finally:
+        con.close()
+    return _conditional(request, response, payload)
+
+
+def _set_inquiry_dismissal(inquiry_id: int, *, dismissed: bool) -> InquiryDetail:
+    con = db.connect()
+    con.isolation_level = None
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        row = con.execute(
+            "SELECT converted_at, dismissed_at FROM inquiries WHERE id=?",
+            (inquiry_id,),
+        ).fetchone()
+        if row is None:
+            raise mobile_auth.MobileAuthError(404, "inquiry.not_found", "Inquiry not found.")
+        currently_dismissed = bool(row["dismissed_at"])
+        if dismissed and row["converted_at"]:
+            raise mobile_auth.MobileAuthError(
+                409,
+                "inquiry.converted",
+                "Converted inquiries cannot be dismissed.",
+            )
+        if dismissed and not currently_dismissed:
+            con.execute(
+                "UPDATE inquiries SET dismissed_at=datetime('now') WHERE id=?", (inquiry_id,)
+            )
+            audit.log(
+                con,
+                "inquiry",
+                inquiry_id,
+                "dismiss",
+                diff={"dismissed": [False, True]},
+                actor="owner",
+            )
+        elif not dismissed and currently_dismissed:
+            con.execute("UPDATE inquiries SET dismissed_at=NULL WHERE id=?", (inquiry_id,))
+            audit.log(
+                con,
+                "inquiry",
+                inquiry_id,
+                "undismiss",
+                diff={"dismissed": [True, False]},
+                actor="owner",
+            )
+        result = _inquiry_detail_payload(_inquiry_record(inquiry_id, con=con), con=con)
+        con.commit()
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
+    return result
+
+
+@router.put("/inquiries/{inquiry_id}/dismissal", response_model=InquiryDetail)
+def dismiss_inquiry(
+    inquiry_id: Annotated[int, Path(ge=1, le=_INT64_MAX)],
+    principal: Annotated[mobile_auth.Principal, Depends(require_studio_owner)],
+    response: Response,
+) -> InquiryDetail:
+    _require_studio_write(principal)
+    result = _set_inquiry_dismissal(inquiry_id, dismissed=True)
+    response.headers["Cache-Control"] = "no-store"
+    return result
+
+
+@router.delete("/inquiries/{inquiry_id}/dismissal", response_model=InquiryDetail)
+def restore_inquiry(
+    inquiry_id: Annotated[int, Path(ge=1, le=_INT64_MAX)],
+    principal: Annotated[mobile_auth.Principal, Depends(require_studio_owner)],
+    response: Response,
+) -> InquiryDetail:
+    _require_studio_write(principal)
+    result = _set_inquiry_dismissal(inquiry_id, dismissed=False)
+    response.headers["Cache-Control"] = "no-store"
+    return result
 
 
 def _decode_task_cursor(cursor: str | None) -> tuple[int, str, int] | None:

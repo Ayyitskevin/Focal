@@ -26,6 +26,7 @@ enum OwnerRepositoryError: LocalizedError, Sendable {
     case pendingBookingRescheduleNotFound
     case pendingBookingRescheduleMismatch
     case invalidBookingRescheduleResponse
+    case invalidInquiryResponse
     case inactiveSession
 
     var errorDescription: String? {
@@ -46,6 +47,8 @@ enum OwnerRepositoryError: LocalizedError, Sendable {
             "The requested booking reschedule does not match the saved attempt."
         case .invalidBookingRescheduleResponse:
             "The server returned an inconsistent booking reschedule result."
+        case .invalidInquiryResponse:
+            "The server returned an inconsistent inquiry triage result."
         case .inactiveSession:
             "This signed-out repository can no longer update local state."
         }
@@ -146,6 +149,24 @@ actor OwnerRepository {
             MiseEndpoints.Inquiries.list(cursor: cursor, limit: 100)
         }
         return try await persist(values, key: Key.inquiries)
+    }
+
+    /// Full conversation bodies stay network-first and are never persisted.
+    func inquiryDetail(id: Int64) async throws -> InquiryDetail {
+        try await send(MiseEndpoints.Inquiries.detail(id: id))
+    }
+
+    func setInquiryDismissed(id: Int64, dismissed: Bool) async throws -> InquiryDetail {
+        let value = try await send(MiseEndpoints.Inquiries.dismissal(id: id, dismissed: dismissed))
+        let statusIsExpected = dismissed
+            ? value.summary.status == .dismissed
+            : value.summary.status != .dismissed
+        guard value.summary.id == id, statusIsExpected else {
+            throw OwnerRepositoryError.invalidInquiryResponse
+        }
+        try? await cache.remove(Key.inquiries)
+        try? await cache.remove(Key.dashboard)
+        return value
     }
 
     func cachedGalleries() async throws -> ResourceSnapshot<[GallerySummary]>? {
