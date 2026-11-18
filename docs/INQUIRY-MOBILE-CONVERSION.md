@@ -1,6 +1,6 @@
 # Mobile inquiry-to-client/project conversion specification
 
-**Status:** Review fixes implemented locally; final CI and independent delta review pending
+**Status:** Independently reviewed with notes; backend verified, final macOS CI pending
 **Date:** 2026-11-17
 **Depends on:** `INQUIRY-MOBILE-TRIAGE.md`
 
@@ -128,29 +128,41 @@ to the existing browser undo semantics, which never cascade-delete records.
 
 ## Post-implementation review
 
-**Verdict:** Pragmatic partial — no demonstrated P1/P2/P3 source finding in the
-single-pass author self-review. This is not an independent cross-seat review.
+**Verdict:** PASS-WITH-NOTES from the final independent non-author delta review at
+`4b760c9`. No demonstrated P1/P2/P3 source finding remained in the scoped delta.
+This verdict is bounded by the execution gaps below and is not a merge approval.
 
-Reviewed the API and iOS diffs against every acceptance criterion and the existing
-browser semantics. The implementation preserves the intended client/project shapes,
-serializes duplicate attempts, refuses blank-email matches and dismissed leads,
-returns the documented status/error codes, creates no proposal or external delivery,
-and invalidates exactly the affected snapshots. Navigation is explicitly labeled as
-opening the web admin rather than claiming native detail pages.
+The independent review initially identified three defects, all corrected and
+re-reviewed:
 
-Review-driven test refinements assigned asynchronous cache reads before XCTest
-assertions and covered both invalid conversion responses: an unconverted payload and
-a converted payload missing its client ID.
+- **Stale reads after conversion:** affected cache keys now carry mutation
+  generations. Ordinary writes check before/after persistence, conditional 304
+  revalidation checks again after `cache.touch`, and `ResourceModel` discards stale
+  failed reads. A main-actor-isolated race test suspends an old open-inquiry GET
+  until after conversion and proves it cannot republish that snapshot.
+- **Unreadable converted records:** client/project fields now satisfy the native
+  read DTOs. Names/business/service are bounded, blank names use `Unnamed client`,
+  oversized emails and malformed shoot dates fail before any write, and both native
+  collections serialize their new records.
+- **Inaccurate whitespace evidence:** trailing Markdown whitespace was removed and
+  both base-to-head and base-to-working-tree `git diff --check` pass.
+
+The review also hardened committed-snapshot mutation responses, invalid conversion
+payloads (unconverted or missing client ID), and request-generation protection for
+loads, dismissal, and conversion.
 
 Evidence at the final reviewed tree:
 
-- focused mobile API suite: **63 passed**;
-- full unit partition: **748 passed, 1 documented host-condition skip**;
+- focused mobile API suite: **68 passed**;
+- full unit partition: **753 passed, 1 documented host-condition skip**;
 - full non-unit partition: **385 passed**;
 - Ruff: **402 files clean**;
-- `git diff --check`: clean.
+- concurrent public conversion: two 200 responses create one client, one project,
+  and one audit row;
+- `git diff --check`: clean in both comparison scopes.
 
-Residual verification: the new Swift conversion tests are written but not executed
-on this Linux host. Run the existing macOS workflow for the conversion branch and
-obtain independent non-author review before merge. No production or live-data check
+Residual verification: Swift compilation and XCTest were not available locally.
+The dashboard 304 guard is source-reviewed without a dedicated dynamic regression
+case, and no live multi-process/production concurrency was exercised. Final macOS
+CI and an owner merge decision remain required. No production or live-data check
 was performed or claimed.
