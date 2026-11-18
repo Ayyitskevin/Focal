@@ -298,7 +298,15 @@ def _send_reply(
         con.close()
 
 
-@router.post("/inquiries/{inquiry_id}/reply", response_model=InquiryReplyResult)
+@router.post(
+    "/inquiries/{inquiry_id}/reply",
+    response_model=InquiryReplyResult,
+    status_code=201,
+    responses={
+        201: {"model": InquiryReplyResult, "description": "SMTP accepted and the reply committed"},
+        202: {"model": InquiryReplyResult, "description": "Delivery outcome is unknown"},
+    },
+)
 def reply_to_inquiry(
     inquiry_id: Annotated[int, Path(ge=1, le=2**63 - 1)],
     request: InquiryReplyRequest,

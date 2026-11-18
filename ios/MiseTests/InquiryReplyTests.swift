@@ -42,16 +42,15 @@ final class InquiryReplyTests: XCTestCase {
         try await context.cache.write([Self.openInquiry], key: "inquiries.v1", etag: nil)
         try await context.cache.write([ClientSummary](), key: "clients.v1", etag: nil)
         try await context.cache.write([ProjectSummary](), key: "projects.v1", etag: nil)
-        let key = UUID()
         let client = ReplyClient([.value(Data(Self.sentReplyJSON.utf8))])
-        let repository = OwnerRepository(client: client, cache: context.cache)
-
-        let result = try await repository.replyToInquiry(
+        let repository = OwnerRepository(client: client, cache: context.cache, sessionID: "session-a")
+        let draft = try await repository.prepareInquiryReply(
             id: 123,
             subject: "Re: your inquiry",
-            body: "Thanks — I can help.",
-            idempotencyKey: key
+            body: "Thanks — I can help."
         )
+
+        let result = try await repository.replyToInquiry(draft: draft)
         let cachedInquiries = try await context.cache.read(
             "inquiries.v1",
             as: [InquirySummary].self
@@ -71,7 +70,8 @@ final class InquiryReplyTests: XCTestCase {
         XCTAssertNotNil(cachedProjects)
         XCTAssertEqual(requests.map(\.method), [.post])
         XCTAssertEqual(requests.map(\.path), ["/api/v1/inquiries/123/reply"])
-        XCTAssertEqual(requests.first?.idempotencyKey, key)
+        XCTAssertEqual(requests.first?.idempotencyKey, draft.idempotencyKey)
+        XCTAssertNil(try await repository.pendingInquiryReply(id: 123))
     }
 
     func testUnknownReplyPreservesSnapshots() async throws {
@@ -80,14 +80,14 @@ final class InquiryReplyTests: XCTestCase {
         try await context.cache.write(Self.dashboard, key: "dashboard.v1", etag: nil)
         try await context.cache.write([Self.openInquiry], key: "inquiries.v1", etag: nil)
         let client = ReplyClient([.value(Data(Self.unknownReplyJSON.utf8))])
-        let repository = OwnerRepository(client: client, cache: context.cache)
-
-        let result = try await repository.replyToInquiry(
+        let repository = OwnerRepository(client: client, cache: context.cache, sessionID: "session-a")
+        let draft = try await repository.prepareInquiryReply(
             id: 123,
             subject: "Re: your inquiry",
-            body: "Thanks — I can help.",
-            idempotencyKey: UUID()
+            body: "Thanks — I can help."
         )
+
+        let result = try await repository.replyToInquiry(draft: draft)
 
         let cachedInquiries = try await context.cache.read(
             "inquiries.v1",
@@ -102,6 +102,37 @@ final class InquiryReplyTests: XCTestCase {
         XCTAssertNil(result.messageID)
         XCTAssertNotNil(cachedInquiries)
         XCTAssertNotNil(cachedDashboard)
+        XCTAssertEqual(try await repository.pendingInquiryReply(id: 123), draft)
+    }
+
+    func testPendingReplyReusesExactDraftKeyAcrossRepositories() async throws {
+        let context = makeCache()
+        defer { try? FileManager.default.removeItem(at: context.root) }
+        let client = ReplyClient([])
+        let first = OwnerRepository(client: client, cache: context.cache, sessionID: "session-a")
+        let second = OwnerRepository(client: client, cache: context.cache, sessionID: "session-a")
+
+        let firstDraft = try await first.prepareInquiryReply(id: 123, subject: "Same", body: "Draft")
+        let secondDraft = try await second.prepareInquiryReply(id: 123, subject: "Same", body: "Draft")
+
+        XCTAssertEqual(firstDraft, secondDraft)
+        XCTAssertEqual(firstDraft.idempotencyKey, secondDraft.idempotencyKey)
+    }
+
+    func testEditedDraftReplacesAttemptAndOnlyMatchingDiscardSucceeds() async throws {
+        let context = makeCache()
+        defer { try? FileManager.default.removeItem(at: context.root) }
+        let client = ReplyClient([])
+        let repository = OwnerRepository(client: client, cache: context.cache, sessionID: "session-a")
+        let original = try await repository.prepareInquiryReply(id: 123, subject: "Same", body: "Draft")
+        let edited = try await repository.prepareInquiryReply(id: 123, subject: "Same", body: "Edited")
+
+        XCTAssertNotEqual(original.idempotencyKey, edited.idempotencyKey)
+        XCTAssertEqual(try await repository.pendingInquiryReply(id: 123), edited)
+        XCTAssertFalse(try await repository.discardPendingInquiryReply(ifMatches: original))
+        XCTAssertEqual(try await repository.pendingInquiryReply(id: 123), edited)
+        XCTAssertTrue(try await repository.discardPendingInquiryReply(ifMatches: edited))
+        XCTAssertNil(try await repository.pendingInquiryReply(id: 123))
     }
 
     func testMalformedSentReplyPreservesSnapshots() async throws {
@@ -111,15 +142,15 @@ final class InquiryReplyTests: XCTestCase {
         try await context.cache.write([Self.openInquiry], key: "inquiries.v1", etag: nil)
         let invalid = Self.sentReplyJSON.replacingOccurrences(of: #""message_id": 51"#, with: #""message_id": null"#)
         let client = ReplyClient([.value(Data(invalid.utf8))])
-        let repository = OwnerRepository(client: client, cache: context.cache)
+        let repository = OwnerRepository(client: client, cache: context.cache, sessionID: "session-a")
+        let draft = try await repository.prepareInquiryReply(
+            id: 123,
+            subject: "Re: your inquiry",
+            body: "Thanks — I can help."
+        )
 
         do {
-            _ = try await repository.replyToInquiry(
-                id: 123,
-                subject: "Re: your inquiry",
-                body: "Thanks — I can help.",
-                idempotencyKey: UUID()
-            )
+            _ = try await repository.replyToInquiry(draft: draft)
             XCTFail("Expected a sent result without a message ID to be rejected.")
         } catch OwnerRepositoryError.invalidInquiryResponse {
             // A malformed sent receipt cannot evict confirmed data.

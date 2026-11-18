@@ -1,11 +1,5 @@
 import SwiftUI
 
-private struct InquiryReplyAttempt: Sendable {
-    let idempotencyKey: UUID
-    let subject: String
-    let body: String
-}
-
 struct InquiryReplyComposer: View {
     private let summary: InquirySummary
     private let repository: OwnerRepository
@@ -14,8 +8,9 @@ struct InquiryReplyComposer: View {
     @Binding private var isPresented: Bool
     @State private var subject: String
     @State private var replyBody = ""
-    @State private var attempt: InquiryReplyAttempt?
+    @State private var attempt: InquiryReplyDraft?
     @State private var isSending = false
+    @State private var confirmSend = false
     @State private var notice: String?
 
     init(
@@ -66,11 +61,36 @@ struct InquiryReplyComposer: View {
                     if isSending {
                         ProgressView()
                     } else {
-                        Button("Send email") {
-                            Task { await send() }
-                        }
-                        .disabled(!canSend)
+                        Button("Review") { confirmSend = true }
+                            .disabled(!canSend)
                     }
+                }
+            }
+            .confirmationDialog(
+                "Send this email?",
+                isPresented: $confirmSend,
+                titleVisibility: .visible
+            ) {
+                Button("Send email") {
+                    Task { await send() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                if let email = summary.email {
+                    Text("Send to \(email)? SMTP acceptance does not guarantee inbox delivery.")
+                }
+            }
+            .interactiveDismissDisabled(isSending)
+            .task {
+                guard attempt == nil else { return }
+                do {
+                    if let saved = try await repository.pendingInquiryReply(id: summary.id) {
+                        attempt = saved
+                        subject = saved.subject
+                        replyBody = saved.body
+                    }
+                } catch {
+                    notice = "The saved reply draft could not be read. \(error.localizedDescription)"
                 }
             }
         }
@@ -87,26 +107,17 @@ struct InquiryReplyComposer: View {
         isSending = true
         notice = nil
         defer { isSending = false }
-        let normalizedSubject = subject.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedBody = replyBody.trimmingCharacters(in: .whitespacesAndNewlines)
-        if attempt == nil || attempt?.subject != normalizedSubject || attempt?.body != normalizedBody {
-            attempt = InquiryReplyAttempt(
-                idempotencyKey: UUID(),
-                subject: normalizedSubject,
-                body: normalizedBody
-            )
-        }
-        guard let attempt else { return }
         do {
-            let result = try await repository.replyToInquiry(
+            let prepared = try await repository.prepareInquiryReply(
                 id: summary.id,
-                subject: attempt.subject,
-                body: attempt.body,
-                idempotencyKey: attempt.idempotencyKey
+                subject: subject,
+                body: replyBody
             )
+            attempt = prepared
+            let result = try await repository.replyToInquiry(draft: prepared)
             if result.code == "inquiry.reply_sent" {
                 replyBody = ""
-                self.attempt = nil
+                attempt = nil
                 await onSent(result)
             } else {
                 notice = "Delivery is unknown. Check before sending again; no automatic retry was made."

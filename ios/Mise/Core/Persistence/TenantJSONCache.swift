@@ -131,6 +131,24 @@ actor TenantJSONCache {
         )
     }
 
+    /// Atomically replaces a command only when the current journal matches the
+    /// caller's version, so an edited draft cannot overwrite a newer attempt.
+    @discardableResult
+    func replaceCommand<Value: Codable & Sendable & Equatable>(
+        _ value: Value,
+        key: String,
+        ifMatches expected: Value,
+        storedAt: Date = Date()
+    ) throws -> TenantCacheRecord<Value>? {
+        Self.commandLock.lock()
+        defer { Self.commandLock.unlock() }
+        let url = commandFileURL(for: key)
+        if let existing = try readStrict(url, as: Value.self), existing.value != expected {
+            return nil
+        }
+        return try writeUnlocked(value, at: url, etag: nil, storedAt: storedAt)
+    }
+
     /// Moves an owned legacy journal into session-scoped command storage without
     /// exposing a delete/write gap to another cache actor in this process.
     func migrateLegacyCommandIfMatches<Value: Codable & Sendable & Equatable>(

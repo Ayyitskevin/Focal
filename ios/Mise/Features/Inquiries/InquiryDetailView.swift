@@ -17,6 +17,7 @@ struct InquiryDetailView: View {
     @State private var confirmDismissal = false
     @State private var confirmConversion = false
     @State private var showReplyComposer = false
+    @State private var replyGeneration: UInt64?
 
     init(
         summary: InquirySummary,
@@ -99,9 +100,15 @@ struct InquiryDetailView: View {
                     repository: repository,
                     isPresented: $showReplyComposer,
                     onSent: { result in
+                        let startedGeneration = replyGeneration
+                        showReplyComposer = false
+                        replyGeneration = nil
+                        guard startedGeneration == requestGeneration else {
+                            await onTriage()
+                            return
+                        }
                         requestGeneration &+= 1
                         detail = result.detail
-                        showReplyComposer = false
                         await onTriage()
                     }
                 )
@@ -155,6 +162,7 @@ struct InquiryDetailView: View {
             if canWrite, let email = detail.summary.email, !email.isEmpty {
                 Section {
                     Button("Reply by email", systemImage: "envelope") {
+                        replyGeneration = requestGeneration
                         showReplyComposer = true
                     }
                     .frame(minHeight: 44)

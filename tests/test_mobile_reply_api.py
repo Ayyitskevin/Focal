@@ -93,10 +93,11 @@ def test_reply_success_and_exact_replay_sends_once(owner, monkeypatch):
     receipt = db.one("SELECT * FROM api_idempotency_replays")
     assert receipt["response_status"] == 201
     assert len(receipt["key_hash"]) == 64
-    receipt_text = receipt["response_json"] + receipt["key_hash"]
+    receipt_text = receipt["response_json"] + receipt["key_hash"] + receipt["request_hash"]
     assert str(key) not in receipt_text
     assert "lead@example.test" not in receipt_text
     assert "Thanks — I can help." not in receipt_text
+    assert "Re: your inquiry" not in receipt_text
 
     conflict = _post(client, headers, inquiry_id, key, body="Different content")
     assert conflict.status_code == 409
@@ -143,14 +144,20 @@ def test_reply_commit_failure_after_smtp_stays_unknown(owner, monkeypatch):
     original_connect = db.connect
 
     class FailingConnection:
+        commit_calls = 0
+
         def __init__(self, connection):
             self._connection = connection
             self.isolation_level = connection.isolation_level
 
         def execute(self, sql, parameters=()):
-            if "INSERT INTO messages" in sql:
-                raise RuntimeError("simulated post-SMTP commit failure")
             return self._connection.execute(sql, parameters)
+
+        def commit(self):
+            type(self).commit_calls += 1
+            if type(self).commit_calls == 2:
+                raise RuntimeError("simulated post-SMTP commit failure")
+            return self._connection.commit()
 
         def __getattr__(self, name):
             return getattr(self._connection, name)
@@ -210,6 +217,69 @@ def test_reply_validation_and_authority(owner, monkeypatch):
     monkeypatch.setattr(mobile_auth, "authenticate_request", lambda *args, **kwargs: read_only)
     refused = _post(client, headers, configured_inquiry, key)
     assert refused.status_code == 403
+    assert calls == []
+
+
+def test_reply_guest_and_invalid_input_matrix(owner, monkeypatch):
+    client, headers = owner
+    inquiry_id = _inquiry()
+    key = uuid.uuid4()
+    calls = []
+    monkeypatch.setattr(mailer, "send", lambda *args, **kwargs: calls.append((args, kwargs)))
+    original_auth = mobile_auth.authenticate_request
+    guest = mobile_auth.Principal(
+        session_id="guest",
+        tenant_key="self:https://studio.test",
+        kind=mobile_auth.GALLERY_GUEST,
+        resource_id=1,
+        resource_variant=None,
+        gallery_visitor_id=None,
+        scopes=frozenset({"studio:write"}),
+        device_name=None,
+        device_platform=None,
+        device_app_version=None,
+        created_at=dt.datetime.now(dt.UTC),
+        absolute_expires_at=dt.datetime.now(dt.UTC) + dt.timedelta(days=1),
+    )
+    monkeypatch.setattr(mobile_auth, "authenticate_request", lambda *args, **kwargs: guest)
+    refused = _post(client, headers, inquiry_id, key)
+    assert refused.status_code == 403
+    assert refused.json()["code"] == "auth.insufficient_scope"
+    assert calls == []
+
+    monkeypatch.setattr(mobile_auth, "authenticate_request", original_auth)
+    path = f"/api/v1/inquiries/{inquiry_id}/reply"
+    invalid_payloads = [
+        (
+            {**headers, "Idempotency-Key": "not-a-uuid"},
+            {"channel": "email", "subject": "s", "body": "b"},
+        ),
+        ({**headers, "Idempotency-Key": str(key)}, {"channel": "sms", "subject": "s", "body": "b"}),
+        (
+            {**headers, "Idempotency-Key": str(key)},
+            {"channel": "email", "subject": " ", "body": "b"},
+        ),
+        (
+            {**headers, "Idempotency-Key": str(key)},
+            {"channel": "email", "subject": "s", "body": " "},
+        ),
+        (
+            {**headers, "Idempotency-Key": str(key)},
+            {"channel": "email", "subject": "s" * 201, "body": "b"},
+        ),
+        (
+            {**headers, "Idempotency-Key": str(key)},
+            {"channel": "email", "subject": "s", "body": "b" * 100_001},
+        ),
+        (
+            {**headers, "Idempotency-Key": str(key)},
+            {"channel": "email", "subject": "s", "body": "b", "unexpected": True},
+        ),
+    ]
+    for request_headers, payload in invalid_payloads:
+        response = client.post(path, headers=request_headers, json=payload)
+        assert response.status_code == 422
+        assert response.json()["code"] == "request.validation_failed"
     assert calls == []
 
 

@@ -27,6 +27,8 @@ enum OwnerRepositoryError: LocalizedError, Sendable {
     case pendingBookingRescheduleMismatch
     case invalidBookingRescheduleResponse
     case invalidInquiryResponse
+    case inquiryReplySessionMismatch
+    case pendingInquiryReplyConflict
     case staleRead
     case inactiveSession
 
@@ -50,6 +52,10 @@ enum OwnerRepositoryError: LocalizedError, Sendable {
             "The server returned an inconsistent booking reschedule result."
         case .invalidInquiryResponse:
             "The server returned an inconsistent inquiry triage result."
+        case .inquiryReplySessionMismatch:
+            "The saved reply draft belongs to a different session."
+        case .pendingInquiryReplyConflict:
+            "A newer reply draft is awaiting a definitive outcome."
         case .staleRead:
             "Newer studio changes are available. Refresh to load the current records."
         case .inactiveSession:
@@ -80,6 +86,10 @@ actor OwnerRepository {
 
         static func gallery(_ id: Int64) -> String {
             "gallery.\(id).v1"
+        }
+
+        static func pendingInquiryReply(sessionID: String, inquiryID: Int64) -> String {
+            "inquiry.reply.pending.v1.\(sessionID).\(inquiryID)"
         }
 
         static func pendingBookingReschedule(sessionID: String) -> String {
@@ -196,20 +206,97 @@ actor OwnerRepository {
         return value
     }
 
-    func replyToInquiry(
+    private func requireInquiryReplySession() async throws -> String {
+        guard cacheIsActive else {
+            throw OwnerRepositoryError.inactiveSession
+        }
+        guard let sessionID, !sessionID.isEmpty else {
+            throw OwnerRepositoryError.inquiryReplySessionMismatch
+        }
+        return sessionID
+    }
+
+    func pendingInquiryReply(id: Int64) async throws -> InquiryReplyDraft? {
+        let currentSessionID = try await requireInquiryReplySession()
+        let key = Key.pendingInquiryReply(sessionID: currentSessionID, inquiryID: id)
+        guard let draft = try await cache.readCommand(key, as: InquiryReplyDraft.self)?.value else {
+            try await requireActiveCache()
+            return nil
+        }
+        try await requireActiveCache()
+        guard draft.sessionID == currentSessionID, draft.inquiryID == id else {
+            throw OwnerRepositoryError.inquiryReplySessionMismatch
+        }
+        return draft
+    }
+
+    func prepareInquiryReply(
         id: Int64,
         subject: String,
-        body: String,
-        idempotencyKey: UUID
-    ) async throws -> InquiryReplyResult {
+        body: String
+    ) async throws -> InquiryReplyDraft {
+        let currentSessionID = try await requireInquiryReplySession()
+        let normalizedSubject = subject.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = Key.pendingInquiryReply(sessionID: currentSessionID, inquiryID: id)
+        if let existing = try await pendingInquiryReply(id: id) {
+            guard existing.subject != normalizedSubject || existing.body != normalizedBody else {
+                return existing
+            }
+            let replacement = InquiryReplyDraft(
+                sessionID: currentSessionID,
+                inquiryID: id,
+                subject: normalizedSubject,
+                body: normalizedBody,
+                idempotencyKey: UUID()
+            )
+            guard let updated = try await cache.replaceCommand(
+                replacement,
+                key: key,
+                ifMatches: existing
+            ) else {
+                throw OwnerRepositoryError.pendingInquiryReplyConflict
+            }
+            try await requireActiveCache()
+            return updated.value
+        }
+        let proposed = InquiryReplyDraft(
+            sessionID: currentSessionID,
+            inquiryID: id,
+            subject: normalizedSubject,
+            body: normalizedBody,
+            idempotencyKey: UUID()
+        )
+        let created = try await cache.writeCommandIfAbsent(proposed, key: key, etag: nil)
+        try await requireActiveCache()
+        return created.value
+    }
+
+    @discardableResult
+    func discardPendingInquiryReply(ifMatches draft: InquiryReplyDraft) async throws -> Bool {
+        guard let saved = try await pendingInquiryReply(id: draft.inquiryID) else {
+            return false
+        }
+        guard saved == draft else { return false }
+        return try await cache.removeCommand(
+            Key.pendingInquiryReply(sessionID: saved.sessionID, inquiryID: draft.inquiryID),
+            ifMatches: draft
+        )
+    }
+
+    func replyToInquiry(draft: InquiryReplyDraft) async throws -> InquiryReplyResult {
+        let currentSessionID = try await requireInquiryReplySession()
+        guard draft.sessionID == currentSessionID else {
+            throw OwnerRepositoryError.inquiryReplySessionMismatch
+        }
         let value = try await send(
             MiseEndpoints.Inquiries.reply(
-                id: id,
-                body: InquiryReplyRequest(subject: subject, body: body),
-                idempotencyKey: idempotencyKey
+                id: draft.inquiryID,
+                body: InquiryReplyRequest(subject: draft.subject, body: draft.body),
+                idempotencyKey: draft.idempotencyKey
             )
         )
-        guard value.detail.summary.id == id else {
+        guard value.detail.summary.id == draft.inquiryID else {
             throw OwnerRepositoryError.invalidInquiryResponse
         }
         switch value.code {
@@ -217,6 +304,7 @@ actor OwnerRepository {
             guard value.deliveryStatus == "sent", value.messageID != nil else {
                 throw OwnerRepositoryError.invalidInquiryResponse
             }
+            _ = try await discardPendingInquiryReply(ifMatches: draft)
             advanceMutationGeneration(for: [Key.inquiries, Key.dashboard])
             try? await cache.remove(Key.inquiries)
             try? await cache.remove(Key.dashboard)

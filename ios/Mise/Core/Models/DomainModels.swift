@@ -245,6 +245,14 @@ struct InquiryReplyResult: Codable, Hashable, Sendable {
     let detail: InquiryDetail
 }
 
+struct InquiryReplyDraft: Codable, Hashable, Sendable {
+    let sessionID: String
+    let inquiryID: Int64
+    let subject: String
+    let body: String
+    let idempotencyKey: UUID
+}
+
 struct GalleryDeliveryState: APIStringValue {
     let rawValue: String
     init(rawValue: String) { self.rawValue = rawValue }
