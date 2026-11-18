@@ -155,7 +155,7 @@ final class SessionAuthenticatorTests: XCTestCase {
         XCTAssertEqual(ended.withValue { $0 }, ["tenant_42/session-original"])
     }
 
-    func testGalleryRefreshPreservesDraftOn503AndPurgesOnlyTheEndedSessionOn401() async throws {
+    func testTwoGallerySessionsSharingPersistenceRetainTheirRepliesUntilOneRefreshIsRejected() async throws {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let origin = try XCTUnwrap(URL(string: "https://studio.example.com"))
         let mediaPath = "/api/v1/media/gallery/example"
@@ -163,6 +163,12 @@ final class SessionAuthenticatorTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
 
+        let refreshedA = Self.session(
+            origin: origin.absoluteString, accessToken: "rotated-gallery-token", refreshToken: "rotated-refresh",
+            accessExpiresAt: now.addingTimeInterval(900), sessionID: "session-a"
+        )
+        let refreshedResponse = try MiseJSON.encoder().encode(refreshedA)
+        let expectedMediaToken = LockedBox("gallery-token")
         let refreshStatus = LockedBox(503)
         let paths = LockedBox<[String]>([])
         MockURLProtocol.setHandler { request in
@@ -171,7 +177,8 @@ final class SessionAuthenticatorTests: XCTestCase {
             let status: Int
             switch url.path {
             case mediaPath:
-                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer gallery-token")
+                let expected = expectedMediaToken.withValue { "Bearer " + $0 }
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), expected)
                 status = 401
             case "/api/v1/auth/refresh":
                 XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
@@ -182,9 +189,9 @@ final class SessionAuthenticatorTests: XCTestCase {
             }
             let response = try XCTUnwrap(HTTPURLResponse(
                 url: url, statusCode: status, httpVersion: "HTTP/1.1",
-                headerFields: ["Content-Type": "application/problem+json"]
+                headerFields: ["Content-Type": status == 200 ? "application/json" : "application/problem+json"]
             ))
-            return (response, Data())
+            return (response, status == 200 ? refreshedResponse : Data())
         }
         defer { MockURLProtocol.clearHandler() }
         let config = URLSessionConfiguration.ephemeral
@@ -197,22 +204,31 @@ final class SessionAuthenticatorTests: XCTestCase {
             origin: origin.absoluteString, accessToken: "gallery-token", refreshToken: "refresh",
             accessExpiresAt: now.addingTimeInterval(900), sessionID: "session-a"
         )
+        let other = Self.session(
+            origin: origin.absoluteString, accessToken: "other-token", refreshToken: "other-refresh",
+            accessExpiresAt: now.addingTimeInterval(900), sessionID: "session-b"
+        )
         let persistence = InMemorySessionPersistence(old)
         let ended = LockedBox<[String]>([])
-        let authenticator = SessionAuthenticator(
-            persistence: persistence, refresher: RemoteTokenRefresher(client: client), expectedBaseURL: origin,
-            now: { now },
-            onSessionEnded: { namespace, id in
-                ended.withValue { $0.append("\(namespace)/\(id)") }
-                let cache = TenantJSONCache(cacheNamespace: namespace, rootDirectory: root)
-                do {
-                    try await cache.removeInquiryReplies(sessionID: id)
-                } catch {
-                    XCTFail("Session cleanup failed: \(error)")
+        func openWindow() -> SessionAuthenticator {
+            SessionAuthenticator(
+                persistence: persistence, refresher: RemoteTokenRefresher(client: client), expectedBaseURL: origin,
+                now: { now },
+                onSessionEnded: { namespace, id in
+                    ended.withValue { $0.append("\(namespace)/\(id)") }
+                    let cache = TenantJSONCache(cacheNamespace: namespace, rootDirectory: root)
+                    do {
+                        try await cache.removeInquiryReplies(sessionID: id)
+                    } catch {
+                        XCTFail("Session cleanup failed: \(error)")
+                    }
                 }
-            }
-        )
-        let gallery = AuthenticatedMediaLoader(session: network, authorizer: authenticator)
+            )
+        }
+        let firstWindow = openWindow()
+        let firstSession = try await firstWindow.sessionSnapshot()
+        XCTAssertEqual(firstSession, old)
+        let gallery = AuthenticatedMediaLoader(session: network, authorizer: firstWindow)
         func openRepository(_ sessionID: String) -> OwnerRepository {
             let cache = TenantJSONCache(cacheNamespace: old.workspace.cacheNamespace, rootDirectory: root)
             return OwnerRepository(client: client, cache: cache, sessionID: sessionID)
@@ -222,7 +238,21 @@ final class SessionAuthenticatorTests: XCTestCase {
             return try await repository.prepareInquiryReply(id: 123, subject: "Inquiry", body: body, observing: observed)
         }
         let draftA = try await saveDraft(in: openRepository("session-a"), body: "First private gallery reply")
+        let otherWindow = openWindow()
+        try await otherWindow.install(other)
         let draftB = try await saveDraft(in: openRepository("session-b"), body: "Second private gallery reply")
+        let currentA = try await firstWindow.requestBearer()
+        let currentB = try await otherWindow.requestBearer()
+        XCTAssertEqual(currentA?.token, old.accessToken)
+        XCTAssertEqual(currentB?.token, other.accessToken)
+        XCTAssertEqual(try persistence.load(), other)
+        XCTAssertTrue(ended.withValue { $0.isEmpty })
+        let repositoryA = openRepository("session-a")
+        let restoredA = try await repositoryA.inquiryReplySnapshot(id: 123)
+        let retryA = try await repositoryA.prepareInquiryReply(
+            id: 123, subject: draftA.subject, body: draftA.body, observing: restoredA
+        )
+        XCTAssertEqual(retryA, draftA)
 
         do {
             _ = try await gallery.data(for: mediaURL)
@@ -232,9 +262,14 @@ final class SessionAuthenticatorTests: XCTestCase {
         }
         let retained = try await openRepository("session-a").pendingInquiryReply(id: 123)
         XCTAssertEqual(retained, draftA)
-        XCTAssertEqual(try persistence.load(), old)
+        XCTAssertEqual(try persistence.load(), other)
         XCTAssertTrue(ended.withValue { $0.isEmpty })
 
+        refreshStatus.withValue { $0 = 200 }
+        let rotated = try await firstWindow.refreshBearer(try XCTUnwrap(currentA))
+        XCTAssertEqual(rotated?.token, refreshedA.accessToken)
+        XCTAssertEqual(try persistence.load(), other)
+        expectedMediaToken.withValue { $0 = refreshedA.accessToken }
         refreshStatus.withValue { $0 = 401 }
         do {
             _ = try await gallery.data(for: mediaURL)
@@ -242,9 +277,17 @@ final class SessionAuthenticatorTests: XCTestCase {
         } catch SessionError.expired {
             // Authentication owns the cleanup even though no owner repository made either request.
         }
-        XCTAssertEqual(paths.withValue { $0 }, [mediaPath, "/api/v1/auth/refresh", mediaPath, "/api/v1/auth/refresh"])
-        XCTAssertNil(try persistence.load())
+        XCTAssertEqual(paths.withValue { $0 }, [
+            mediaPath, "/api/v1/auth/refresh", "/api/v1/auth/refresh", mediaPath, "/api/v1/auth/refresh"
+        ])
+        XCTAssertEqual(try persistence.load(), other)
         XCTAssertEqual(ended.withValue { $0 }, ["tenant_42/session-a"])
+        let endedSession = try await firstWindow.sessionSnapshot()
+        let survivingSession = try await otherWindow.sessionSnapshot()
+        let restartedSession = try await openWindow().sessionSnapshot()
+        XCTAssertNil(endedSession)
+        XCTAssertEqual(survivingSession, other)
+        XCTAssertEqual(restartedSession, other)
         let removed = try await openRepository("session-a").pendingInquiryReply(id: 123)
         let preserved = try await openRepository("session-b").pendingInquiryReply(id: 123)
         XCTAssertNil(removed)
@@ -301,7 +344,7 @@ final class SessionAuthenticatorTests: XCTestCase {
         let active = try await authenticator.sessionSnapshot()
         XCTAssertEqual(active, replacement)
         XCTAssertEqual(try persistence.load(), replacement)
-        XCTAssertEqual(ended.withValue { $0 }, ["session-a"])
+        XCTAssertTrue(ended.withValue { $0.isEmpty })
     }
 
     private static func session(

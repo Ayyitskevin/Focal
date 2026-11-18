@@ -15,6 +15,9 @@ struct RemoteTokenRefresher: TokenRefreshing {
 }
 
 actor SessionAuthenticator: RequestAuthorizing {
+    // Windows can share a Keychain account through separate authenticator actors.
+    // Keep each ownership check and its write together across those actors.
+    private static let persistenceLock = NSLock()
     private let persistence: any SessionPersisting
     private let refresher: any TokenRefreshing
     private let expectedOrigin: ServerOrigin
@@ -47,21 +50,16 @@ actor SessionAuthenticator: RequestAuthorizing {
         try await loadIfNeeded()
     }
 
-    func install(_ session: AuthSession) async throws {
+    func install(_ session: AuthSession) throws {
         guard matchesExpectedOrigin(session) else {
             throw SessionError.workspaceMismatch
         }
-        let previous = loaded ? currentSession : (try? persistence.load())
-        try persistence.save(session)
+        try Self.persistenceLock.withLock { try persistence.save(session) }
         refreshOperation?.task.cancel()
         refreshOperation = nil
         generation &+= 1
         currentSession = session
         loaded = true
-        if let previous,
-           previous.workspace.cacheNamespace != session.workspace.cacheNamespace || previous.sessionID != session.sessionID {
-            await notifySessionEnded(previous)
-        }
     }
 
     func bearerToken() async throws -> String? {
@@ -108,11 +106,17 @@ actor SessionAuthenticator: RequestAuthorizing {
 
     func invalidate() async {
         guard !loaded || currentSession != nil else { return }
-        let outgoing = loaded ? currentSession : (try? persistence.load())
+        let outgoing = Self.persistenceLock.withLock {
+            let stored = try? persistence.load()
+            let ending = loaded ? currentSession : stored
+            if let ending, ownsStoredSession(ending, stored) {
+                try? persistence.delete()
+            }
+            return ending
+        }
         refreshOperation?.task.cancel()
         refreshOperation = nil
         generation &+= 1
-        try? persistence.delete()
         currentSession = nil
         loaded = true
         await notifySessionEnded(outgoing)
@@ -204,7 +208,13 @@ actor SessionAuthenticator: RequestAuthorizing {
             }
 
             do {
-                try persistence.save(refreshed)
+                // An earlier window can still use its own refreshed session
+                // after another window has installed a different login.
+                try Self.persistenceLock.withLock {
+                    if ownsStoredSession(previous, try persistence.load()) {
+                        try persistence.save(refreshed)
+                    }
+                }
             } catch {
                 // The server already consumed the old refresh token. Keeping the
                 // stale Keychain value would trigger reuse detection on the next try.
@@ -235,6 +245,14 @@ actor SessionAuthenticator: RequestAuthorizing {
         if refreshOperation?.id == id {
             refreshOperation = nil
         }
+    }
+
+    private func ownsStoredSession(_ session: AuthSession, _ stored: AuthSession?) -> Bool {
+        guard let stored, session.workspace.cacheNamespace == stored.workspace.cacheNamespace,
+              session.sessionID == stored.sessionID else { return false }
+        // Older credentials have no session ID. Require the exact original token.
+        if let id = session.sessionID, !id.isEmpty { return true }
+        return session.accessToken == stored.accessToken
     }
 
     private func matchesExpectedOrigin(_ session: AuthSession) -> Bool {

@@ -93,6 +93,8 @@ only an opaque generation identifier after completion and keep existing pending
 drafts readable. Signing out or ending the session clears its private reply
 text, including when a gallery request discovers the session has expired.
 A temporary network or server failure preserves the draft.
+Signing into the same studio from a second window can leave the first session
+active. Each window keeps its original reply key until its session actually ends.
 The owner can reopen to see current state. These guarantees apply within the
 existing authenticated session.
 
