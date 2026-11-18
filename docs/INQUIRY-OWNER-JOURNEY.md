@@ -86,10 +86,13 @@ Cancelling preserves the saved attempt and sends nothing.
 Draft preparation must return only the text the owner confirmed. Concurrent
 identical first attempts share one key. A different first attempt that loses a
 race, or an edit based on a saved attempt which has since changed or disappeared,
-must stop before sending. A stale composer cannot recreate a consumed draft.
+must stop before sending. This includes a composer that opened on an empty
+draft before another composer sent its reply. Remember the completed attempt
+locally so that only a newly opened composer can start the next email. Retain
+only the attempt identifier after completion and keep existing pending drafts
+readable. Signing out or ending the session clears its private reply text.
 The owner can reopen to see current state. These guarantees apply within the
-existing authenticated session and use the existing local draft format and
-server replay contract.
+existing authenticated session.
 
 ### Acceptance evidence
 
@@ -98,8 +101,10 @@ post-provider commit failure, missing configuration/recipient, invalid input,
 read-only/guest refusal, and concurrent identical commands. Assert one provider call,
 one outbound row, one emails_log row, one reply-state transition, and no sensitive
 receipt content. Swift tests cover exact request encoding, sent/unknown decoding,
-and cache invalidation/failure preservation. Run full Python and macOS gates with
-provider-faked sends only.
+cache invalidation, retry after a lost response, competing composers, and removal
+of private draft text when the session ends. Include replay after inquiry deletion
+and a transient database connection failure after provider acceptance. Run full
+Python and macOS gates with provider-faked sends only.
 
 ## Phase 2 — native records and compressed navigation
 

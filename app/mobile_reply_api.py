@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import sqlite3
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -82,7 +83,10 @@ def _result(
     con = db.connect()
     try:
         con.execute("BEGIN")
-        detail = _inquiry_detail_payload(_inquiry_record(inquiry_id, con=con), con=con)
+        inquiry = _inquiry_record(inquiry_id, con=con)
+        if inquiry is None:
+            raise mobile_auth.MobileAuthError(404, "inquiry.not_found", "Inquiry not found.")
+        detail = _inquiry_detail_payload(inquiry, con=con)
     finally:
         con.close()
     return InquiryReplyResult(
@@ -219,7 +223,12 @@ def _send_reply(
     except Exception:
         return _unknown(inquiry_id), 202
 
-    con = db.connect()
+    try:
+        con = db.connect()
+    except sqlite3.Error:
+        # The pending receipt already owns this send, even if the database
+        # is briefly unavailable when we go to record the provider's response.
+        return _unknown(inquiry_id), 202
     con.isolation_level = None
     try:
         con.execute("BEGIN IMMEDIATE")

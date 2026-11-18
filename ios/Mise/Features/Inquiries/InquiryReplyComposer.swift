@@ -8,8 +8,7 @@ struct InquiryReplyComposer: View {
     @Binding private var isPresented: Bool
     @State private var subject: String
     @State private var replyBody = ""
-    @State private var attempt: InquiryReplyDraft?
-    @State private var draftLoaded = false
+    @State private var snapshot: InquiryReplySnapshot?
     @State private var isSending = false
     @State private var confirmSend = false
     @State private var notice: String?
@@ -42,7 +41,7 @@ struct InquiryReplyComposer: View {
                         .frame(minHeight: 220)
                         .accessibilityLabel("Reply body")
                 }
-                .disabled(!draftLoaded || isSending)
+                .disabled(snapshot == nil || isSending)
                 if attempt != nil {
                     Section {
                         Text("Delivery is unconfirmed. The customer may already have received the original email.")
@@ -95,14 +94,14 @@ struct InquiryReplyComposer: View {
             }
             .interactiveDismissDisabled(isSending)
             .task {
-                guard !draftLoaded else { return }
+                guard snapshot == nil else { return }
                 do {
-                    if let saved = try await repository.pendingInquiryReply(id: summary.id) {
-                        attempt = saved
+                    let observed = try await repository.inquiryReplySnapshot(id: summary.id)
+                    if let saved = observed.draft {
                         subject = saved.subject
                         replyBody = saved.body
                     }
-                    draftLoaded = true
+                    snapshot = observed
                 } catch {
                     notice = "The saved reply draft could not be read. \(error.localizedDescription)"
                 }
@@ -110,8 +109,10 @@ struct InquiryReplyComposer: View {
         }
     }
 
+    private var attempt: InquiryReplyDraft? { snapshot?.draft }
+
     private var canSend: Bool {
-        draftLoaded && !isSending
+        snapshot != nil && !isSending
             && !subject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !replyBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -133,7 +134,7 @@ struct InquiryReplyComposer: View {
     }
 
     private func send() async {
-        guard canSend else { return }
+        guard canSend, let observed = snapshot else { return }
         isSending = true
         notice = nil
         defer { isSending = false }
@@ -142,17 +143,17 @@ struct InquiryReplyComposer: View {
                 id: summary.id,
                 subject: subject,
                 body: replyBody,
-                replacing: attempt
+                observing: observed
             )
-            attempt = prepared
+            snapshot = observed.withPending(prepared)
             let result = try await repository.replyToInquiry(draft: prepared)
             if result.code == "inquiry.reply_sent" {
                 replyBody = ""
-                attempt = nil
+                snapshot = nil
                 await onSent(result)
             }
         } catch OwnerRepositoryError.pendingInquiryReplyConflict {
-            draftLoaded = false
+            snapshot = nil
             notice = "The saved reply changed. Close and reopen to review it before sending."
         } catch {
             notice = "The reply was not confirmed. \(error.localizedDescription)"

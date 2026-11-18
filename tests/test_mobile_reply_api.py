@@ -2,6 +2,7 @@
 
 import datetime as dt
 import json
+import sqlite3
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier, Event
@@ -180,6 +181,50 @@ def test_reply_commit_failure_after_smtp_stays_unknown(owner, monkeypatch):
     assert db.one("SELECT emailed FROM inquiries WHERE id=?", (inquiry_id,))["emailed"] == 0
     assert db.one("SELECT COUNT(*) AS n FROM audit_log WHERE entity_type='inquiry'")["n"] == 0
     assert db.one("SELECT response_status FROM api_idempotency_replays")["response_status"] == 202
+
+
+def test_reply_connection_failure_after_smtp_stays_unknown(owner, monkeypatch):
+    client, headers = owner
+    inquiry_id = _inquiry()
+    key = uuid.uuid4()
+    calls = []
+    original_connect = db.connect
+
+    def accept(*args, **kwargs):
+        calls.append((args, kwargs))
+
+        def fail_once(*args, **kwargs):
+            monkeypatch.setattr(db, "connect", original_connect)
+            raise sqlite3.OperationalError("database temporarily unavailable")
+
+        monkeypatch.setattr(db, "connect", fail_once)
+
+    monkeypatch.setattr(mailer, "send", accept)
+    for _ in range(2):
+        response = _post(client, headers, inquiry_id, key)
+        assert response.status_code == 202
+        assert response.json()["code"] == "inquiry.delivery_unknown"
+    assert len(calls) == 1
+    assert db.one("SELECT COUNT(*) AS n FROM messages")["n"] == 0
+
+
+def test_reply_replay_after_inquiry_deletion_returns_not_found(owner, monkeypatch):
+    client, headers = owner
+    inquiry_id = _inquiry()
+    key = uuid.uuid4()
+    calls = []
+
+    def ambiguous(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise TimeoutError("simulated provider timeout")
+
+    monkeypatch.setattr(mailer, "send", ambiguous)
+    assert _post(client, headers, inquiry_id, key).status_code == 202
+    db.run("DELETE FROM inquiries WHERE id=?", (inquiry_id,))
+    replay = _post(client, headers, inquiry_id, key)
+    assert replay.status_code == 404
+    assert replay.json()["code"] == "inquiry.not_found"
+    assert len(calls) == 1
 
 
 def test_reply_validation_and_authority(owner, monkeypatch):
