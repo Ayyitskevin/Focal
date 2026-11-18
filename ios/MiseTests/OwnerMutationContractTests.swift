@@ -1289,6 +1289,123 @@ final class OwnerMutationContractTests: XCTestCase {
         XCTAssertNotNil(cachedDashboard)
     }
 
+    func testInquiryConversionSuccessInvalidatesAffectedSnapshotsOnly() async throws {
+        let context = makeCache()
+        defer { try? FileManager.default.removeItem(at: context.root) }
+        try await context.cache.write(Self.dashboard, key: "dashboard.v1", etag: nil)
+        try await context.cache.write([Self.openInquirySummary], key: "inquiries.v1", etag: nil)
+        try await context.cache.write([ClientSummary](), key: "clients.v1", etag: nil)
+        try await context.cache.write([ProjectSummary](), key: "projects.v1", etag: nil)
+        try await context.cache.write([Self.confirmedBooking], key: "bookings.v1", etag: nil)
+        let client = OwnerMutationContractClient([
+            .value(Data(Self.convertedInquiryDetailJSON.utf8)),
+        ])
+        let repository = OwnerRepository(client: client, cache: context.cache)
+
+        let detail = try await repository.convertInquiry(id: 123)
+        let cachedInquiries = try await context.cache.read(
+            "inquiries.v1",
+            as: [InquirySummary].self
+        )
+        let cachedDashboard = try await context.cache.read(
+            "dashboard.v1",
+            as: DashboardSummary.self
+        )
+        let cachedClients = try await context.cache.read("clients.v1", as: [ClientSummary].self)
+        let cachedProjects = try await context.cache.read("projects.v1", as: [ProjectSummary].self)
+        let cachedBookings = try await context.cache.read("bookings.v1", as: [Booking].self)
+        let requests = await client.capturedRequests()
+
+        XCTAssertEqual(detail.summary.status, .converted)
+        XCTAssertEqual(detail.summary.convertedClientID, 77)
+        XCTAssertEqual(detail.summary.convertedProjectID, 88)
+        XCTAssertNil(cachedInquiries)
+        XCTAssertNil(cachedDashboard)
+        XCTAssertNil(cachedClients)
+        XCTAssertNil(cachedProjects)
+        XCTAssertNotNil(cachedBookings)
+        XCTAssertEqual(requests.map(\.method), [.put])
+        XCTAssertEqual(requests.map(\.path), ["/api/v1/inquiries/123/conversion"])
+        XCTAssertNil(requests.first?.body)
+        XCTAssertNil(requests.first?.idempotencyKey)
+    }
+
+    func testInquiryConversionFailurePreservesAffectedSnapshots() async throws {
+        let context = makeCache()
+        defer { try? FileManager.default.removeItem(at: context.root) }
+        try await context.cache.write(Self.dashboard, key: "dashboard.v1", etag: nil)
+        try await context.cache.write([Self.openInquirySummary], key: "inquiries.v1", etag: nil)
+        try await context.cache.write([ClientSummary](), key: "clients.v1", etag: nil)
+        try await context.cache.write([ProjectSummary](), key: "projects.v1", etag: nil)
+        let client = OwnerMutationContractClient([
+            .failure(.server(status: 503, problem: nil)),
+        ])
+        let repository = OwnerRepository(client: client, cache: context.cache)
+
+        do {
+            _ = try await repository.convertInquiry(id: 123)
+            XCTFail("Expected the failed conversion to throw.")
+        } catch let APIError.server(status, _) {
+            XCTAssertEqual(status, 503)
+        }
+
+        let cachedInquiries = try await context.cache.read(
+            "inquiries.v1",
+            as: [InquirySummary].self
+        )
+        let cachedDashboard = try await context.cache.read(
+            "dashboard.v1",
+            as: DashboardSummary.self
+        )
+        let cachedClients = try await context.cache.read("clients.v1", as: [ClientSummary].self)
+        let cachedProjects = try await context.cache.read("projects.v1", as: [ProjectSummary].self)
+        XCTAssertNotNil(cachedInquiries)
+        XCTAssertNotNil(cachedDashboard)
+        XCTAssertNotNil(cachedClients)
+        XCTAssertNotNil(cachedProjects)
+    }
+
+    func testInvalidInquiryConversionResponsePreservesAffectedSnapshots() async throws {
+        let context = makeCache()
+        defer { try? FileManager.default.removeItem(at: context.root) }
+        try await context.cache.write(Self.dashboard, key: "dashboard.v1", etag: nil)
+        try await context.cache.write([Self.openInquirySummary], key: "inquiries.v1", etag: nil)
+        try await context.cache.write([ClientSummary](), key: "clients.v1", etag: nil)
+        try await context.cache.write([ProjectSummary](), key: "projects.v1", etag: nil)
+        let invalidPayloads = [
+            Self.convertedInquiryDetailJSON
+                .replacingOccurrences(of: #""status": "converted""#, with: #""status": "open""#),
+            Self.convertedInquiryDetailJSON
+                .replacingOccurrences(of: #""converted_client_id": 77"#, with: #""converted_client_id": null"#),
+        ]
+        let client = OwnerMutationContractClient(invalidPayloads.map { .value(Data($0.utf8)) })
+        let repository = OwnerRepository(client: client, cache: context.cache)
+
+        for _ in invalidPayloads {
+            do {
+                _ = try await repository.convertInquiry(id: 123)
+                XCTFail("Expected an inconsistent conversion response to throw.")
+            } catch OwnerRepositoryError.invalidInquiryResponse {
+                // An unconverted or client-less success payload cannot evict confirmed data.
+            }
+        }
+
+        let cachedInquiries = try await context.cache.read(
+            "inquiries.v1",
+            as: [InquirySummary].self
+        )
+        let cachedDashboard = try await context.cache.read(
+            "dashboard.v1",
+            as: DashboardSummary.self
+        )
+        let cachedClients = try await context.cache.read("clients.v1", as: [ClientSummary].self)
+        let cachedProjects = try await context.cache.read("projects.v1", as: [ProjectSummary].self)
+        XCTAssertNotNil(cachedInquiries)
+        XCTAssertNotNil(cachedDashboard)
+        XCTAssertNotNil(cachedClients)
+        XCTAssertNotNil(cachedProjects)
+    }
+
     private func makeCache() -> (root: URL, cache: TenantJSONCache) {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("owner-mutation-tests-\(UUID().uuidString)")
@@ -1412,6 +1529,11 @@ final class OwnerMutationContractTests: XCTestCase {
       "has_older_messages": false
     }
     """
+
+    private static let convertedInquiryDetailJSON = dismissedInquiryDetailJSON
+        .replacingOccurrences(of: #""status": "dismissed""#, with: #""status": "converted""#)
+        .replacingOccurrences(of: #""converted_client_id": null"#, with: #""converted_client_id": 77"#)
+        .replacingOccurrences(of: #""converted_project_id": null"#, with: #""converted_project_id": 88"#)
 
     private static let dashboard = DashboardSummary(
         generatedAt: Date(timeIntervalSince1970: 1_700_000_000),

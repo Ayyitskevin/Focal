@@ -109,6 +109,11 @@ final class ResourceModel<Value: Codable & Sendable> {
             return false
         } catch {
             let failure = ResourceLoadFailure(error)
+            if case OwnerRepositoryError.staleRead = error {
+                sessionFallback = nil
+                state = .failed(nil, failure: failure)
+                return false
+            }
             if failure == .subscriptionRequired {
                 requiresSubscriptionRecovery = true
             }

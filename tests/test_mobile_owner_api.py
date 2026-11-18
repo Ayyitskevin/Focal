@@ -987,3 +987,246 @@ def test_inquiry_detail_reads_summary_and_messages_from_one_snapshot(owner, monk
     body = response.json()
     assert body["summary"]["is_replied"] is False
     assert [message["body"] for message in body["messages"]] == ["Original message"]
+
+
+@pytest.mark.parametrize("inquiry_id", [0, -1, 2**63])
+def test_conversion_rejects_out_of_range_ids(owner, inquiry_id):
+    client, headers, _ = owner
+    response = client.put(f"/api/v1/inquiries/{inquiry_id}/conversion", headers=headers)
+    assert response.status_code == 422
+    assert response.json()["code"] == "request.validation_failed"
+
+
+def test_booking_conversion_creates_records_once_and_is_idempotent(owner):
+    client, headers, _ = owner
+    inquiry_id = _insert_inquiry(
+        "Jordan Lee",
+        email="  jordan@example.test  ",
+        business="Jordan Weddings",
+        message="Our autumn wedding needs a photographer.",
+        kind="booking",
+        service="Wedding",
+        shoot_date="2026-10-03",
+    )
+    path = f"/api/v1/inquiries/{inquiry_id}/conversion"
+
+    response = client.put(path, headers=headers)
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    summary = response.json()["summary"]
+    assert summary["status"] == "converted"
+    assert summary["converted_client_id"] is not None
+    assert summary["converted_project_id"] is not None
+    client_row = db.one("SELECT * FROM clients WHERE id=?", (summary["converted_client_id"],))
+    assert client_row["name"] == "Jordan Lee"
+    assert client_row["company"] == "Jordan Weddings"
+    assert client_row["email"] == "jordan@example.test"
+    assert "Our autumn wedding needs a photographer." in client_row["notes"]
+    project_row = db.one("SELECT * FROM projects WHERE id=?", (summary["converted_project_id"],))
+    assert project_row["client_id"] == client_row["id"]
+    assert project_row["title"] == "Wedding — 2026-10-03"
+    assert project_row["status"] == "inquiry_received"
+    assert project_row["shoot_date"] == "2026-10-03"
+    first_converted_at = db.one("SELECT converted_at FROM inquiries WHERE id=?", (inquiry_id,))[
+        "converted_at"
+    ]
+    assert first_converted_at is not None
+    assert db.one("SELECT COUNT(*) AS n FROM proposals")["n"] == 0
+    audits = db.all_("SELECT action, actor, diff_json FROM audit_log WHERE entity_type='inquiry'")
+    assert len(audits) == 1
+    assert audits[0]["action"] == "convert"
+    assert audits[0]["actor"] == "owner"
+
+    repeated = client.put(path, headers=headers)
+
+    assert repeated.status_code == 200
+    assert repeated.json()["summary"] == summary
+    assert db.one("SELECT COUNT(*) AS n FROM clients")["n"] == 1
+    assert db.one("SELECT COUNT(*) AS n FROM projects")["n"] == 1
+    assert (
+        db.one("SELECT converted_at FROM inquiries WHERE id=?", (inquiry_id,))["converted_at"]
+        == first_converted_at
+    )
+    assert db.one("SELECT COUNT(*) AS n FROM audit_log WHERE entity_type='inquiry'")["n"] == 1
+
+
+def test_contact_conversion_reuses_nonblank_email_and_never_matches_blank(owner):
+    client, headers, _ = owner
+    existing_id = db.run(
+        "INSERT INTO clients (name,email) VALUES ('Existing Client','existing@example.test')"
+    )
+    blank_id = db.run("INSERT INTO clients (name,email) VALUES ('Blank Client','')")
+    matching_id = _insert_inquiry(
+        "Matching Lead",
+        email="  existing@example.test  ",
+        kind="contact",
+    )
+    blank_inquiry_id = _insert_inquiry("Blank Email Lead", email="", kind="contact")
+
+    matching = client.put(f"/api/v1/inquiries/{matching_id}/conversion", headers=headers)
+    blank = client.put(f"/api/v1/inquiries/{blank_inquiry_id}/conversion", headers=headers)
+
+    assert matching.status_code == 200
+    assert matching.json()["summary"]["converted_client_id"] == existing_id
+    assert matching.json()["summary"]["converted_project_id"] is None
+    assert blank.status_code == 200
+    new_client_id = blank.json()["summary"]["converted_client_id"]
+    assert new_client_id not in (existing_id, blank_id)
+    assert blank.json()["summary"]["converted_project_id"] is None
+    assert db.one("SELECT name FROM clients WHERE id=?", (new_client_id,))["name"] == (
+        "Blank Email Lead"
+    )
+    assert db.one("SELECT COUNT(*) AS n FROM clients")["n"] == 3
+    assert db.one("SELECT COUNT(*) AS n FROM projects")["n"] == 0
+    assert db.one("SELECT COUNT(*) AS n FROM audit_log WHERE entity_type='inquiry'")["n"] == 2
+
+
+def test_dismissed_or_unknown_inquiry_cannot_convert(owner):
+    client, headers, _ = owner
+    inquiry_id = _insert_inquiry("Dismissed Lead", dismissed_at="2026-07-02 10:00:00")
+
+    dismissed = client.put(f"/api/v1/inquiries/{inquiry_id}/conversion", headers=headers)
+    missing = client.put("/api/v1/inquiries/999999/conversion", headers=headers)
+
+    assert dismissed.status_code == 409
+    assert dismissed.json()["code"] == "inquiry.dismissed"
+    assert missing.status_code == 404
+    assert missing.json()["code"] == "inquiry.not_found"
+    assert db.one("SELECT COUNT(*) AS n FROM clients")["n"] == 0
+    assert db.one("SELECT COUNT(*) AS n FROM projects")["n"] == 0
+    assert db.one("SELECT COUNT(*) AS n FROM audit_log WHERE entity_type='inquiry'")["n"] == 0
+
+
+def test_conversion_requires_write_scope(owner, monkeypatch):
+    client, headers, _ = owner
+    inquiry_id = _insert_inquiry("Read Only Lead")
+    read_only = _principal(kind=mobile_auth.STUDIO_OWNER, scopes=frozenset({"studio:read"}))
+    monkeypatch.setattr(mobile_auth, "authenticate_request", lambda *args, **kwargs: read_only)
+
+    refused = client.put(f"/api/v1/inquiries/{inquiry_id}/conversion", headers=headers)
+
+    assert refused.status_code == 403
+    assert refused.json()["code"] == "auth.insufficient_scope"
+    assert client.get(f"/api/v1/inquiries/{inquiry_id}", headers=headers).status_code == 200
+    assert db.one("SELECT COUNT(*) AS n FROM clients")["n"] == 0
+    assert db.one("SELECT COUNT(*) AS n FROM audit_log WHERE entity_type='inquiry'")["n"] == 0
+
+    guest = _principal(kind=mobile_auth.GALLERY_GUEST, scopes=frozenset({"studio:write"}))
+    monkeypatch.setattr(mobile_auth, "authenticate_request", lambda *args, **kwargs: guest)
+    guest_refused = client.put(f"/api/v1/inquiries/{inquiry_id}/conversion", headers=headers)
+    assert guest_refused.status_code == 403
+    assert guest_refused.json()["code"] == "auth.insufficient_scope"
+    assert db.one("SELECT COUNT(*) AS n FROM clients")["n"] == 0
+    assert db.one("SELECT COUNT(*) AS n FROM audit_log WHERE entity_type='inquiry'")["n"] == 0
+
+
+def test_concurrent_conversion_creates_one_client_and_project(owner):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    _, headers, _ = owner
+    inquiry_id = _insert_inquiry(
+        "Concurrent Lead",
+        email="concurrent@example.test",
+        kind="booking",
+        service="Portrait",
+        shoot_date="2026-11-20",
+    )
+    barrier = Barrier(2)
+
+    def convert():
+        with TestClient(app, base_url="https://studio.test") as threaded_client:
+            barrier.wait()
+            return threaded_client.put(
+                f"/api/v1/inquiries/{inquiry_id}/conversion",
+                headers=headers,
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(lambda _: convert(), range(2)))
+
+    assert [response.status_code for response in responses] == [200, 200]
+    assert {response.json()["summary"]["converted_client_id"] for response in responses} == {
+        db.one("SELECT converted_client_id FROM inquiries WHERE id=?", (inquiry_id,))[
+            "converted_client_id"
+        ]
+    }
+    assert db.one("SELECT COUNT(*) AS n FROM clients")["n"] == 1
+    assert db.one("SELECT COUNT(*) AS n FROM projects")["n"] == 1
+    assert db.one("SELECT COUNT(*) AS n FROM audit_log WHERE entity_type='inquiry'")["n"] == 1
+
+
+def test_conversion_bounds_legacy_fields_for_native_reads(owner):
+    client, headers, _ = owner
+    inquiry_id = _insert_inquiry(
+        "N" * 2500,
+        email="bounded@example.test",
+        business="B" * 2500,
+        kind="booking",
+        service="S" * 2500,
+        shoot_date="2026-12-01",
+    )
+
+    converted = client.put(f"/api/v1/inquiries/{inquiry_id}/conversion", headers=headers)
+
+    assert converted.status_code == 200
+    summary = converted.json()["summary"]
+    client_row = db.one("SELECT * FROM clients WHERE id=?", (summary["converted_client_id"],))
+    project_row = db.one("SELECT * FROM projects WHERE id=?", (summary["converted_project_id"],))
+    assert len(client_row["name"]) == 2000
+    assert len(client_row["company"]) == 2000
+    assert len(project_row["title"]) == 2000
+    assert project_row["title"].endswith(" — 2026-12-01")
+
+    clients = client.get("/api/v1/clients", headers=headers)
+    projects = client.get("/api/v1/projects", headers=headers)
+    assert clients.status_code == 200
+    assert projects.status_code == 200
+    assert summary["converted_client_id"] in {row["id"] for row in clients.json()["items"]}
+    assert summary["converted_project_id"] in {row["id"] for row in projects.json()["items"]}
+
+    blank_id = _insert_inquiry("", email="blank-name@example.test", kind="contact")
+    blank = client.put(f"/api/v1/inquiries/{blank_id}/conversion", headers=headers)
+    assert blank.status_code == 200
+    blank_client = db.one(
+        "SELECT name FROM clients WHERE id=?",
+        (blank.json()["summary"]["converted_client_id"],),
+    )
+    assert blank_client["name"] == "Unnamed client"
+
+
+def test_conversion_rejects_oversized_email_before_any_write(owner):
+    client, headers, _ = owner
+    inquiry_id = _insert_inquiry(
+        "Oversized Email",
+        email=f"{'a' * 2000}@example.test",
+        kind="contact",
+    )
+
+    response = client.put(f"/api/v1/inquiries/{inquiry_id}/conversion", headers=headers)
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "inquiry.email_too_long"
+    assert db.one("SELECT COUNT(*) AS n FROM clients")["n"] == 0
+    assert db.one("SELECT COUNT(*) AS n FROM projects")["n"] == 0
+    assert db.one("SELECT COUNT(*) AS n FROM audit_log WHERE entity_type='inquiry'")["n"] == 0
+
+
+def test_conversion_rejects_malformed_shoot_date_before_any_write(owner):
+    client, headers, _ = owner
+    inquiry_id = _insert_inquiry(
+        "Bad Date",
+        email="date@example.test",
+        kind="booking",
+        service="Wedding",
+        shoot_date="next-summer",
+    )
+
+    response = client.put(f"/api/v1/inquiries/{inquiry_id}/conversion", headers=headers)
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "inquiry.shoot_date_invalid"
+    assert db.one("SELECT COUNT(*) AS n FROM clients")["n"] == 0
+    assert db.one("SELECT COUNT(*) AS n FROM projects")["n"] == 0
+    assert db.one("SELECT COUNT(*) AS n FROM audit_log WHERE entity_type='inquiry'")["n"] == 0

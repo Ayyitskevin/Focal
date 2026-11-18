@@ -248,6 +248,7 @@ consumers de-duplicate repeated IDs.
 | `DELETE /api/v1/tasks/{id}/completion` | owner: idempotently reopen a task; audited (implemented, M4a) |
 | `PUT /api/v1/inquiries/{id}/dismissal` | write-scoped owner: idempotently dismiss an unconverted inquiry; audited |
 | `DELETE /api/v1/inquiries/{id}/dismissal` | write-scoped owner: idempotently restore an inquiry without clearing conversion; audited on a real transition |
+| `PUT /api/v1/inquiries/{id}/conversion` | write-scoped owner: atomically ensure a client and, for dated bookings, a project; idempotent and audited on a real transition |
 | `POST /api/v1/galleries/{g}/assets/{a}/comments` | add video comment/reply |
 | `POST /api/v1/proposals/{id}/accept` | server-authoritative transition |
 | `POST /api/v1/proposals/{id}/decline` | server-authoritative transition |
@@ -276,6 +277,18 @@ not dismissed. Only a real transition writes an `inquiry`/`dismiss`|`undismiss`
 audit row as actor `owner`. Dismissing a converted inquiry returns
 `409 inquiry.converted`; restore never clears conversion fields. Both commands
 return the current `InquiryDetail` with `Cache-Control: no-store`.
+
+Inquiry conversion is another naturally idempotent `PUT`: the stored conversion
+state is the retry boundary, so no `Idempotency-Key` is required and both first and
+repeat transitions return `200` with the current detail. `BEGIN IMMEDIATE`
+serializes concurrent attempts. Only a trimmed, non-empty exact email can reuse a
+client; blank emails never match. Dated booking inquiries also create an
+`inquiry_received` project, while other kinds intentionally leave
+`converted_project_id` null. Dismissed inquiries return `409 inquiry.dismissed`.
+Only real transitions change the timestamp and append an `inquiry`/`convert` audit
+row as actor `owner`; no proposal, message, or external delivery is created. Native
+converted-record links open the canonical web admin rather than duplicating those
+pages in Swift. See `INQUIRY-MOBILE-CONVERSION.md`.
 
 Booking cancellation is naturally idempotent; when it targets a
 replacement whose provider effect is already running, it returns

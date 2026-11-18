@@ -20,6 +20,7 @@ hosted and App Store plans below are not current launch claims.
 - [`MISE-SOLO-STUDIO-OS-RUNBOOK.md`](MISE-SOLO-STUDIO-OS-RUNBOOK.md) — operator runbook for it.
 - [`NICHE-STORY-DECISION.md`](NICHE-STORY-DECISION.md) — T10 decision packet comparing wedding-first, F&B-first, and neutral launch stories; Kevin's selection feeds reviewer-demo content and store copy, while [issue #185](https://github.com/Ayyitskevin/Focal/issues/185) independently holds T3's operator identity and lifecycle design.
 - [`INQUIRY-MOBILE-TRIAGE.md`](INQUIRY-MOBILE-TRIAGE.md) — scoped specification for native inquiry detail, conversation history, and idempotent dismiss/restore commands.
+- [`INQUIRY-MOBILE-CONVERSION.md`](INQUIRY-MOBILE-CONVERSION.md) — scoped specification for atomic inquiry-to-client/project conversion and converted-record navigation.
 
 ## Launch & hosting plans  _(status: historical intent — not deployed)_
 

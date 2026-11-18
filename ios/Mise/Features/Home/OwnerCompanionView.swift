@@ -218,7 +218,18 @@ struct OwnerCompanionView: View {
                 taskCoordinator: taskCoordinator
             ) { selection = $0 }
         case .inquiries:
-            InquiriesView(model: inquiries, repository: repository, canWrite: commands.canWrite)
+            InquiriesView(
+                model: inquiries,
+                repository: repository,
+                workspaceOrigin: session.workspace.apiBaseURL,
+                canWrite: commands.canWrite,
+                onTriage: {
+                    await inquiries.refreshAfterCurrent()
+                    await home.refreshAfterCurrent()
+                    await clients.refreshAfterCurrent()
+                    await projects.refreshAfterCurrent()
+                }
+            )
         case .clients:
             ClientsView(model: clients)
         case .projects:

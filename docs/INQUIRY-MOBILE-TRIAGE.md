@@ -1,7 +1,7 @@
 # Mobile inquiry detail and safe triage specification
 
-**Status:** Implemented locally; macOS/XCTest and independent cross-seat review pending  
-**Date:** 2026-11-17  
+**Status:** Merged after independent review and green macOS CI
+**Date:** 2026-11-17
 **Scope:** Focal owner companion, `/api/v1` inquiry resources, and the existing browser inquiry semantics.
 
 ## Review findings

@@ -4,6 +4,7 @@ struct InquiryDetailView: View {
     private let inquiryID: Int64
     private let initialSummary: InquirySummary
     private let repository: OwnerRepository
+    private let workspaceOrigin: URL
     private let canWrite: Bool
     private let onTriage: @MainActor () async -> Void
 
@@ -14,16 +15,19 @@ struct InquiryDetailView: View {
     @State private var isMutating = false
     @State private var mutationFailure: String?
     @State private var confirmDismissal = false
+    @State private var confirmConversion = false
 
     init(
         summary: InquirySummary,
         repository: OwnerRepository,
+        workspaceOrigin: URL,
         canWrite: Bool,
         onTriage: @escaping @MainActor () async -> Void
     ) {
         inquiryID = summary.id
         initialSummary = summary
         self.repository = repository
+        self.workspaceOrigin = workspaceOrigin
         self.canWrite = canWrite
         self.onTriage = onTriage
     }
@@ -64,6 +68,18 @@ struct InquiryDetailView: View {
         } message: {
             Text("It will leave the active pipeline. You can restore it later.")
         }
+        .confirmationDialog(
+            "Convert this inquiry?",
+            isPresented: $confirmConversion,
+            titleVisibility: .visible
+        ) {
+            Button("Convert to client / project") {
+                Task { await convert() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Create or link a client. Dated booking inquiries also create a project. No quote will be created.")
+        }
         .alert(
             "Inquiry update",
             isPresented: Binding(
@@ -81,6 +97,24 @@ struct InquiryDetailView: View {
         List {
             Section {
                 summary(detail.summary)
+            }
+
+            if detail.summary.status == .converted {
+                Section("Converted records") {
+                    if let clientID = detail.summary.convertedClientID {
+                        Link(destination: workspaceOrigin.appendingPathComponent("admin/studio/clients/\(clientID)")) {
+                            Label("Open client record", systemImage: "person")
+                        }
+                    }
+                    if let projectID = detail.summary.convertedProjectID {
+                        Link(destination: workspaceOrigin.appendingPathComponent("admin/studio/projects/\(projectID)")) {
+                            Label("Open project record", systemImage: "briefcase")
+                        }
+                    }
+                    Text("Opens the web admin. Your browser may ask you to sign in.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             if let loadFailure {
@@ -188,12 +222,18 @@ struct InquiryDetailView: View {
             }
             .frame(minHeight: 44)
         } else {
-            Button(role: .destructive) {
-                confirmDismissal = true
-            } label: {
-                Label("Dismiss inquiry", systemImage: "archivebox")
+            VStack(alignment: .leading, spacing: 8) {
+                Button("Convert to client / project", systemImage: "person.badge.plus") {
+                    confirmConversion = true
+                }
+                .frame(minHeight: 44)
+                Button(role: .destructive) {
+                    confirmDismissal = true
+                } label: {
+                    Label("Dismiss inquiry", systemImage: "archivebox")
+                }
+                .frame(minHeight: 44)
             }
-            .frame(minHeight: 44)
         }
     }
 
@@ -223,6 +263,25 @@ struct InquiryDetailView: View {
         } catch {
             guard generation == requestGeneration else { return }
             loadFailure = error.localizedDescription
+        }
+    }
+
+    private func convert() async {
+        guard canWrite, !isMutating else { return }
+        isMutating = true
+        mutationFailure = nil
+        requestGeneration &+= 1
+        let generation = requestGeneration
+        defer { isMutating = false }
+        do {
+            let updated = try await repository.convertInquiry(id: inquiryID)
+            guard generation == requestGeneration else { return }
+            detail = updated
+            await onTriage()
+        } catch {
+            guard generation == requestGeneration else { return }
+            mutationFailure = "The server didn’t confirm the conversion. "
+                + "Refresh before retrying so you can see the current records. \(error.localizedDescription)"
         }
     }
 

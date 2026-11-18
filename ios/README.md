@@ -79,8 +79,11 @@ and avoiding it in the foundation keeps auth/session behavior auditable.
 - Inquiry rows now open a network-first detail with the recorded conversation and
   write-scoped, confirmed dismiss/restore controls. Stored threads mirror the
   browser fallback semantics; bodies and omitted history carry honest bounds, and
-  full conversations are never added to the persisted summary-list cache. Quoting,
-  conversion, and email/SMS replies remain outside this slice.
+  full conversations are never added to the persisted summary-list cache. Open
+  inquiries can also convert atomically into a client and, for dated bookings, a
+  project; repeat commands do not duplicate records, blank emails never match a
+  client, and converted IDs open the canonical web-admin records. Quoting and
+  email/SMS replies remain outside these inquiry slices.
 - The owner companion's Home “Up next” area is a truthful six-row preview with
   a pushed, complete studio-task inbox. That feed aggregates every open Focal
   studio-operation row in session memory only, uses the workspace timezone for

@@ -131,6 +131,16 @@ final class InquiryInboxTests: XCTestCase {
         XCTAssertNil(restore.idempotencyKey)
     }
 
+    func testInquiryConversionEndpointUsesBodylessBearerPutWithoutIdempotencyKey() {
+        let endpoint = MiseEndpoints.Inquiries.conversion(id: 123)
+
+        XCTAssertEqual(endpoint.method, .put)
+        XCTAssertEqual(endpoint.path, "/api/v1/inquiries/123/conversion")
+        XCTAssertEqual(endpoint.authentication, .bearer)
+        XCTAssertNil(endpoint.body)
+        XCTAssertNil(endpoint.idempotencyKey)
+    }
+
     func testRefreshInquiriesAggregatesEveryPageIntoTheTenantCache() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("inquiry-tests-\(UUID().uuidString)", isDirectory: true)
@@ -242,6 +252,67 @@ final class InquiryInboxTests: XCTestCase {
         let cached = try await repository.cachedInquiries()
         XCTAssertNil(rawCached)
         XCTAssertNil(cached)
+    }
+
+    @MainActor
+    func testStaleInquiryReadCannotOverwriteConversion() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("inquiry-tests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = TenantJSONCache(cacheNamespace: "workspace_test", rootDirectory: root)
+        let convertedDetail = Self.openInquiryJSON
+            .replacingOccurrences(of: #""status": "open""#, with: #""status": "converted""#)
+            .replacingOccurrences(of: #""converted_client_id": null"#, with: #""converted_client_id": 77"#)
+        let client = RaceInquiryClient(
+            openPage: Data(
+                """
+                {
+                  "items": [\(Self.openInquiryJSON)],
+                  "next_cursor": null, "has_more": false
+                }
+                """.utf8
+            ),
+            convertedDetail: Data(
+                """
+                {
+                  "summary": \(convertedDetail),
+                  "messages": [],
+                  "has_older_messages": false
+                }
+                """.utf8
+            )
+        )
+        let repository = OwnerRepository(client: client, cache: cache)
+        let openInquiry = try MiseJSON.decoder().decode(
+            InquirySummary.self,
+            from: Data(Self.openInquiryJSON.utf8)
+        )
+        let model = ResourceModel<[InquirySummary]>(
+            staleAfter: 0,
+            cached: {
+                ResourceSnapshot(
+                    value: [openInquiry],
+                    storedAt: Date(timeIntervalSince1970: 1),
+                    source: .cache
+                )
+            },
+            remote: { try await repository.refreshInquiries() }
+        )
+
+        async let load: Void = model.load()
+        await client.waitUntilRefreshStarted()
+        _ = try await repository.convertInquiry(id: 123)
+        await client.finishRefresh()
+        await load
+
+        let cached = try await cache.read("inquiries.v1", as: [InquirySummary].self)
+        XCTAssertNil(cached)
+        XCTAssertNil(model.state.snapshot)
+        guard case let .failed(_, failure) = model.state else {
+            XCTFail("Expected the stale read to fail instead of publishing old data.")
+            return
+        }
+        XCTAssertEqual(failure.message, OwnerRepositoryError.staleRead.localizedDescription)
     }
 
     private static func date(_ value: String) throws -> Date {
@@ -359,5 +430,49 @@ private actor QueuedInquiryClient: APIClientProtocol {
 
     func capturedRequests() -> [CapturedInquiryRequest] {
         requests
+    }
+}
+
+private actor RaceInquiryClient: APIClientProtocol {
+    private let openPage: Data
+    private let convertedDetail: Data
+    private var refreshStarted = false
+    private var releaseRefresh = false
+
+    init(openPage: Data, convertedDetail: Data) {
+        self.openPage = openPage
+        self.convertedDetail = convertedDetail
+    }
+
+    func send<Response: Decodable & Sendable>(
+        _ endpoint: APIEndpoint<Response>
+    ) async throws -> Response {
+        try await sendWithMetadata(endpoint).value
+    }
+
+    func sendWithMetadata<Response: Decodable & Sendable>(
+        _ endpoint: APIEndpoint<Response>
+    ) async throws -> APIResponse<Response> {
+        if endpoint.method == .get {
+            refreshStarted = true
+            while !releaseRefresh {
+                await Task.yield()
+            }
+        }
+        let data = endpoint.method == .get ? openPage : convertedDetail
+        return APIResponse(
+            value: try MiseJSON.decoder().decode(Response.self, from: data),
+            metadata: APIResponseMetadata(etag: nil, lastModified: nil, receivedAt: Date())
+        )
+    }
+
+    func waitUntilRefreshStarted() async {
+        while !refreshStarted {
+            await Task.yield()
+        }
+    }
+
+    func finishRefresh() {
+        releaseRefresh = true
     }
 }
