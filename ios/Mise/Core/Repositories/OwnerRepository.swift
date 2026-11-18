@@ -169,6 +169,22 @@ actor OwnerRepository {
         return value
     }
 
+    func convertInquiry(id: Int64) async throws -> InquiryDetail {
+        let value = try await send(MiseEndpoints.Inquiries.conversion(id: id))
+        guard
+            value.summary.id == id,
+            value.summary.status == .converted,
+            value.summary.convertedClientID != nil
+        else {
+            throw OwnerRepositoryError.invalidInquiryResponse
+        }
+        try? await cache.remove(Key.inquiries)
+        try? await cache.remove(Key.dashboard)
+        try? await cache.remove(Key.clients)
+        try? await cache.remove(Key.projects)
+        return value
+    }
+
     func cachedGalleries() async throws -> ResourceSnapshot<[GallerySummary]>? {
         try await cached(Key.galleries, as: [GallerySummary].self)
     }

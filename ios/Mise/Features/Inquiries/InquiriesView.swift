@@ -4,7 +4,9 @@ struct InquiriesView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let model: ResourceModel<[InquirySummary]>
     let repository: OwnerRepository
+    let workspaceOrigin: URL
     let canWrite: Bool
+    let onTriage: @MainActor () async -> Void
     @State private var query = ""
 
     var body: some View {
@@ -36,8 +38,9 @@ struct InquiriesView: View {
                         InquiryDetailView(
                             summary: inquiry,
                             repository: repository,
+                            workspaceOrigin: workspaceOrigin,
                             canWrite: canWrite,
-                            onTriage: { await model.refreshAfterCurrent() }
+                            onTriage: onTriage
                         )
                     } label: {
                         VStack(alignment: .leading, spacing: 5) {

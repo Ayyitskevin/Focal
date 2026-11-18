@@ -904,6 +904,88 @@ def restore_inquiry(
     return result
 
 
+def _convert_inquiry(inquiry_id: int) -> InquiryDetail:
+    con = db.connect()
+    con.isolation_level = None
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        inquiry = con.execute("SELECT * FROM inquiries WHERE id=?", (inquiry_id,)).fetchone()
+        if inquiry is None:
+            raise mobile_auth.MobileAuthError(404, "inquiry.not_found", "Inquiry not found.")
+        if not inquiry["converted_at"]:
+            if inquiry["dismissed_at"]:
+                raise mobile_auth.MobileAuthError(
+                    409,
+                    "inquiry.dismissed",
+                    "Restore the inquiry before converting it.",
+                )
+            email = str(inquiry["email"] or "").strip()
+            existing = (
+                con.execute("SELECT id FROM clients WHERE email=?", (email,)).fetchone()
+                if email
+                else None
+            )
+            if existing:
+                client_id = int(existing["id"])
+            else:
+                client_id = int(
+                    con.execute(
+                        "INSERT INTO clients (name, company, email, notes) VALUES (?,?,?,?)",
+                        (
+                            inquiry["name"],
+                            inquiry["business"],
+                            email,
+                            f"From inquiry {inquiry['created_at'][:10]}:\n{inquiry['message']}",
+                        ),
+                    ).lastrowid
+                )
+            project_id = None
+            if inquiry["kind"] == "booking" and inquiry["shoot_date"]:
+                title = f"{inquiry['service'] or 'Shoot'} — {inquiry['shoot_date']}"
+                project_id = int(
+                    con.execute(
+                        "INSERT INTO projects (client_id, title, shoot_date) VALUES (?,?,?)",
+                        (client_id, title, inquiry["shoot_date"]),
+                    ).lastrowid
+                )
+            con.execute(
+                """UPDATE inquiries SET converted_at=datetime('now'),
+                      converted_client_id=?, converted_project_id=? WHERE id=?""",
+                (client_id, project_id, inquiry_id),
+            )
+            audit.log(
+                con,
+                "inquiry",
+                inquiry_id,
+                "convert",
+                diff={
+                    "converted_client_id": [None, client_id],
+                    "converted_project_id": [None, project_id],
+                },
+                actor="owner",
+            )
+        result = _inquiry_detail_payload(_inquiry_record(inquiry_id, con=con), con=con)
+        con.commit()
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
+    return result
+
+
+@router.put("/inquiries/{inquiry_id}/conversion", response_model=InquiryDetail)
+def convert_inquiry(
+    inquiry_id: Annotated[int, Path(ge=1, le=_INT64_MAX)],
+    principal: Annotated[mobile_auth.Principal, Depends(require_studio_owner)],
+    response: Response,
+) -> InquiryDetail:
+    _require_studio_write(principal)
+    result = _convert_inquiry(inquiry_id)
+    response.headers["Cache-Control"] = "no-store"
+    return result
+
+
 def _decode_task_cursor(cursor: str | None) -> tuple[int, str, int] | None:
     decoded = _decode_keyset_cursor(
         cursor,

@@ -191,6 +191,10 @@ enum MiseEndpoints {
             APIEndpoint(method: .get, path: "/api/v1/inquiries/\(id)")
         }
 
+        static func conversion(id: Int64) -> APIEndpoint<InquiryDetail> {
+            APIEndpoint(method: .put, path: "/api/v1/inquiries/\(id)/conversion")
+        }
+
         static func dismissal(id: Int64, dismissed: Bool) -> APIEndpoint<InquiryDetail> {
             APIEndpoint(
                 method: dismissed ? .put : .delete,

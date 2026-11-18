@@ -131,6 +131,16 @@ final class InquiryInboxTests: XCTestCase {
         XCTAssertNil(restore.idempotencyKey)
     }
 
+    func testInquiryConversionEndpointUsesBodylessBearerPutWithoutIdempotencyKey() {
+        let endpoint = MiseEndpoints.Inquiries.conversion(id: 123)
+
+        XCTAssertEqual(endpoint.method, .put)
+        XCTAssertEqual(endpoint.path, "/api/v1/inquiries/123/conversion")
+        XCTAssertEqual(endpoint.authentication, .bearer)
+        XCTAssertNil(endpoint.body)
+        XCTAssertNil(endpoint.idempotencyKey)
+    }
+
     func testRefreshInquiriesAggregatesEveryPageIntoTheTenantCache() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("inquiry-tests-\(UUID().uuidString)", isDirectory: true)
