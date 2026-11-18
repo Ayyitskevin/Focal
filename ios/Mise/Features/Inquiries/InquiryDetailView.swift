@@ -10,6 +10,7 @@ struct InquiryDetailView: View {
     @State private var detail: InquiryDetail?
     @State private var isLoading = false
     @State private var loadFailure: String?
+    @State private var requestGeneration: UInt64 = 0
     @State private var isMutating = false
     @State private var mutationFailure: String?
     @State private var confirmDismissal = false
@@ -206,17 +207,21 @@ struct InquiryDetailView: View {
     }
 
     private func load() async {
-        guard !isLoading else { return }
+        guard !isLoading, !isMutating else { return }
         isLoading = true
         loadFailure = nil
+        requestGeneration &+= 1
+        let generation = requestGeneration
         defer { isLoading = false }
         do {
             let loaded = try await repository.inquiryDetail(id: inquiryID)
             guard loaded.summary.id == inquiryID else {
                 throw OwnerRepositoryError.invalidInquiryResponse
             }
+            guard generation == requestGeneration else { return }
             detail = loaded
         } catch {
+            guard generation == requestGeneration else { return }
             loadFailure = error.localizedDescription
         }
     }
@@ -225,15 +230,19 @@ struct InquiryDetailView: View {
         guard canWrite, !isMutating else { return }
         isMutating = true
         mutationFailure = nil
+        requestGeneration &+= 1
+        let generation = requestGeneration
         defer { isMutating = false }
         do {
             let updated = try await repository.setInquiryDismissed(
                 id: inquiryID,
                 dismissed: dismissed
             )
+            guard generation == requestGeneration else { return }
             detail = updated
             await onTriage()
         } catch {
+            guard generation == requestGeneration else { return }
             mutationFailure = "The server didn’t confirm the change. "
                 + "Your last confirmed inquiry is still shown. \(error.localizedDescription)"
         }

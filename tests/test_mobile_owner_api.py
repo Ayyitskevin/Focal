@@ -897,3 +897,93 @@ def test_inquiry_routes_reject_out_of_range_ids(owner, method, inquiry_id):
     )
     assert response.status_code == 422
     assert response.json()["code"] == "request.validation_failed"
+
+
+def test_concurrent_dismissal_is_one_audited_transition(owner, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier, Event, Lock, Timer
+
+    _, headers, _ = owner
+    inquiry_id = _insert_inquiry("Concurrent Dismissal")
+    barrier = Barrier(2)
+    release = Event()
+    lock = Lock()
+    selected = 0
+    original_connect = db.connect
+
+    class PausingConnection:
+        def __init__(self, connection):
+            self._connection = connection
+            self.isolation_level = connection.isolation_level
+
+        def execute(self, sql, parameters=()):
+            nonlocal selected
+            result = self._connection.execute(sql, parameters)
+            if "SELECT converted_at, dismissed_at FROM inquiries" in sql:
+                with lock:
+                    selected += 1
+                    if selected == 1:
+                        Timer(0.2, release.set).start()
+                release.wait(timeout=5)
+            return result
+
+        def __getattr__(self, name):
+            return getattr(self._connection, name)
+
+    monkeypatch.setattr(
+        db, "connect", lambda *args, **kwargs: PausingConnection(original_connect())
+    )
+
+    def dismiss():
+        with TestClient(app, base_url="https://studio.test") as threaded_client:
+            barrier.wait()
+            return threaded_client.put(
+                f"/api/v1/inquiries/{inquiry_id}/dismissal",
+                headers=headers,
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(lambda _: dismiss(), range(2)))
+
+    assert [response.status_code for response in responses] == [200, 200]
+    assert db.one("SELECT COUNT(*) AS n FROM audit_log WHERE entity_type='inquiry'")["n"] == 1
+    assert db.one("SELECT COUNT(*) AS n FROM audit_log WHERE action='dismiss'")["n"] == 1
+
+
+def test_inquiry_detail_reads_summary_and_messages_from_one_snapshot(owner, monkeypatch):
+    from threading import Event, Thread
+
+    client, headers, _ = owner
+    inquiry_id = _insert_inquiry("Snapshot Lead", message="Original message")
+    record_read = Event()
+    resume_read = Event()
+    original_record = mobile_owner_api._inquiry_record
+
+    def paused_record(inquiry_id, con=None):
+        row = original_record(inquiry_id, con=con)
+        record_read.set()
+        assert resume_read.wait(timeout=5)
+        return row
+
+    monkeypatch.setattr(mobile_owner_api, "_inquiry_record", paused_record)
+    result = {}
+
+    def get_detail():
+        result["response"] = client.get(f"/api/v1/inquiries/{inquiry_id}", headers=headers)
+
+    thread = Thread(target=get_detail)
+    thread.start()
+    assert record_read.wait(timeout=2)
+    db.run(
+        "INSERT INTO messages (inquiry_id,direction,channel,body) VALUES (?,'out','email',?)",
+        (inquiry_id, "Concurrent outbound reply"),
+    )
+    resume_read.set()
+    thread.join(timeout=10)
+
+    assert not thread.is_alive()
+    response = result["response"]
+    assert response.status_code == 200
+    body = response.json()
+    assert body["summary"]["is_replied"] is False
+    assert [message["body"] for message in body["messages"]] == ["Original message"]

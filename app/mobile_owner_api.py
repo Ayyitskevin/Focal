@@ -767,12 +767,10 @@ def _inquiry_message(message_id: int, direction, channel, body, created_at) -> I
     )
 
 
-def _inquiry_detail_payload(row) -> InquiryDetail:
-    rows = db.all_(
-        """SELECT id, direction, channel, body, created_at FROM messages
-              WHERE inquiry_id=? ORDER BY created_at DESC, id DESC LIMIT 201""",
-        (row["id"],),
-    )
+def _inquiry_detail_payload(row, con=None) -> InquiryDetail:
+    sql = """SELECT id, direction, channel, body, created_at FROM messages
+                WHERE inquiry_id=? ORDER BY created_at DESC, id DESC LIMIT 201"""
+    rows = db.all_(sql, (row["id"],)) if con is None else con.execute(sql, (row["id"],)).fetchall()
     visible = list(reversed(rows[:200]))
     messages = [
         _inquiry_message(
@@ -801,19 +799,17 @@ def _inquiry_detail_payload(row) -> InquiryDetail:
     )
 
 
-def _inquiry_record(inquiry_id: int):
-    return db.one(
-        """SELECT i.id, i.name, i.email, i.business, i.message, i.phone, i.kind,
-                  i.service, i.shoot_date, i.created_at,
-                  i.converted_at, i.dismissed_at,
-                  i.converted_client_id, i.converted_project_id,
-                  EXISTS (
-                      SELECT 1 FROM messages m
-                       WHERE m.inquiry_id=i.id AND m.direction='out'
-                  ) AS is_replied
-             FROM inquiries i WHERE i.id=?""",
-        (inquiry_id,),
-    )
+def _inquiry_record(inquiry_id: int, con=None):
+    sql = """SELECT i.id, i.name, i.email, i.business, i.message, i.phone, i.kind,
+                    i.service, i.shoot_date, i.created_at,
+                    i.converted_at, i.dismissed_at,
+                    i.converted_client_id, i.converted_project_id,
+                    EXISTS (
+                        SELECT 1 FROM messages m
+                         WHERE m.inquiry_id=i.id AND m.direction='out'
+                    ) AS is_replied
+               FROM inquiries i WHERE i.id=?"""
+    return db.one(sql, (inquiry_id,)) if con is None else con.execute(sql, (inquiry_id,)).fetchone()
 
 
 @router.get("/inquiries/{inquiry_id}", response_model=InquiryDetail)
@@ -822,14 +818,23 @@ def inquiry_detail(
     response: Response,
     inquiry_id: Annotated[int, Path(ge=1, le=_INT64_MAX)],
 ) -> InquiryDetail | Response:
-    row = _inquiry_record(inquiry_id)
-    if row is None:
-        raise mobile_auth.MobileAuthError(404, "inquiry.not_found", "Inquiry not found.")
-    return _conditional(request, response, _inquiry_detail_payload(row))
+    con = db.connect()
+    try:
+        con.execute("BEGIN")
+        row = _inquiry_record(inquiry_id, con=con)
+        if row is None:
+            raise mobile_auth.MobileAuthError(404, "inquiry.not_found", "Inquiry not found.")
+        payload = _inquiry_detail_payload(row, con=con)
+    finally:
+        con.close()
+    return _conditional(request, response, payload)
 
 
 def _set_inquiry_dismissal(inquiry_id: int, *, dismissed: bool) -> InquiryDetail:
-    with db.tx() as con:
+    con = db.connect()
+    con.isolation_level = None
+    try:
+        con.execute("BEGIN IMMEDIATE")
         row = con.execute(
             "SELECT converted_at, dismissed_at FROM inquiries WHERE id=?",
             (inquiry_id,),
@@ -865,7 +870,14 @@ def _set_inquiry_dismissal(inquiry_id: int, *, dismissed: bool) -> InquiryDetail
                 diff={"dismissed": [True, False]},
                 actor="owner",
             )
-    return _inquiry_detail_payload(_inquiry_record(inquiry_id))
+        result = _inquiry_detail_payload(_inquiry_record(inquiry_id, con=con), con=con)
+        con.commit()
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
+    return result
 
 
 @router.put("/inquiries/{inquiry_id}/dismissal", response_model=InquiryDetail)
