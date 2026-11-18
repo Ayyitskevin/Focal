@@ -196,6 +196,40 @@ actor OwnerRepository {
         return value
     }
 
+    func replyToInquiry(
+        id: Int64,
+        subject: String,
+        body: String,
+        idempotencyKey: UUID
+    ) async throws -> InquiryReplyResult {
+        let value = try await send(
+            MiseEndpoints.Inquiries.reply(
+                id: id,
+                body: InquiryReplyRequest(subject: subject, body: body),
+                idempotencyKey: idempotencyKey
+            )
+        )
+        guard value.detail.summary.id == id else {
+            throw OwnerRepositoryError.invalidInquiryResponse
+        }
+        switch value.code {
+        case "inquiry.reply_sent":
+            guard value.deliveryStatus == "sent", value.messageID != nil else {
+                throw OwnerRepositoryError.invalidInquiryResponse
+            }
+            advanceMutationGeneration(for: [Key.inquiries, Key.dashboard])
+            try? await cache.remove(Key.inquiries)
+            try? await cache.remove(Key.dashboard)
+        case "inquiry.delivery_unknown":
+            guard value.deliveryStatus == "unknown", value.messageID == nil else {
+                throw OwnerRepositoryError.invalidInquiryResponse
+            }
+        default:
+            throw OwnerRepositoryError.invalidInquiryResponse
+        }
+        return value
+    }
+
     func cachedGalleries() async throws -> ResourceSnapshot<[GallerySummary]>? {
         try await cached(Key.galleries, as: [GallerySummary].self)
     }

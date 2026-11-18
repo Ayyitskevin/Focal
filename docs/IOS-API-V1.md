@@ -249,6 +249,7 @@ consumers de-duplicate repeated IDs.
 | `PUT /api/v1/inquiries/{id}/dismissal` | write-scoped owner: idempotently dismiss an unconverted inquiry; audited |
 | `DELETE /api/v1/inquiries/{id}/dismissal` | write-scoped owner: idempotently restore an inquiry without clearing conversion; audited on a real transition |
 | `PUT /api/v1/inquiries/{id}/conversion` | write-scoped owner: atomically ensure a client and, for dated bookings, a project; idempotent and audited on a real transition |
+| `POST /api/v1/inquiries/{id}/reply` | write-scoped owner + UUID idempotency key: manually send one email; 201 sent, 202 delivery unknown; exact replay never resends |
 | `POST /api/v1/galleries/{g}/assets/{a}/comments` | add video comment/reply |
 | `POST /api/v1/proposals/{id}/accept` | server-authoritative transition |
 | `POST /api/v1/proposals/{id}/decline` | server-authoritative transition |
@@ -289,6 +290,17 @@ Only real transitions change the timestamp and append an `inquiry`/`convert` aud
 row as actor `owner`; no proposal, message, or external delivery is created. Native
 converted-record links open the canonical web admin rather than duplicating those
 pages in Swift. See `INQUIRY-MOBILE-CONVERSION.md`.
+
+Inquiry reply requires a UUID `Idempotency-Key` and exact owner + `studio:write`.
+Before provider I/O the server records a session-bound `202 inquiry.delivery_unknown`
+receipt with only hashes and bounded status metadata. SMTP success upgrades that
+receipt to `201 inquiry.reply_sent` in the same transaction as the outbound message,
+`emails_log`, inquiry reply state, and owner audit row. Provider exceptions and
+post-SMTP commit failures remain `202` and are never automatically retried. Exact
+replays return the stored outcome without another send; key/content mismatches return
+`409 idempotency.key_conflict`. Pending attempts never appear as sent or set
+`is_replied`. SMTP acceptance is not a claim of inbox delivery. See
+`INQUIRY-OWNER-JOURNEY.md`.
 
 Booking cancellation is naturally idempotent; when it targets a
 replacement whose provider effect is already running, it returns

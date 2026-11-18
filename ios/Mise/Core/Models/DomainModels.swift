@@ -226,6 +226,25 @@ struct InquiryDetail: Codable, Hashable, Sendable {
     let hasOlderMessages: Bool
 }
 
+struct InquiryReplyRequest: Codable, Sendable {
+    let channel: String
+    let subject: String
+    let body: String
+
+    init(subject: String, body: String) {
+        channel = "email"
+        self.subject = subject
+        self.body = body
+    }
+}
+
+struct InquiryReplyResult: Codable, Hashable, Sendable {
+    let code: String
+    let deliveryStatus: String
+    let messageID: Int64?
+    let detail: InquiryDetail
+}
+
 struct GalleryDeliveryState: APIStringValue {
     let rawValue: String
     init(rawValue: String) { self.rawValue = rawValue }

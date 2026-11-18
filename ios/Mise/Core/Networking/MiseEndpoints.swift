@@ -195,6 +195,19 @@ enum MiseEndpoints {
             APIEndpoint(method: .put, path: "/api/v1/inquiries/\(id)/conversion")
         }
 
+        static func reply(
+            id: Int64,
+            body: InquiryReplyRequest,
+            idempotencyKey: UUID
+        ) throws -> APIEndpoint<InquiryReplyResult> {
+            try .json(
+                method: .post,
+                path: "/api/v1/inquiries/\(id)/reply",
+                body: body,
+                idempotencyKey: idempotencyKey
+            )
+        }
+
         static func dismissal(id: Int64, dismissed: Bool) -> APIEndpoint<InquiryDetail> {
             APIEndpoint(
                 method: dismissed ? .put : .delete,

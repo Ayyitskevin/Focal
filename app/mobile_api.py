@@ -29,6 +29,7 @@ from . import (
     mobile_gallery_calendar_api,
     mobile_media,
     mobile_owner_api,
+    mobile_reply_api,
     saas,
     urls,
 )
@@ -638,6 +639,7 @@ def revoke_session(request: Request, session_id: str) -> Response:
 # validation problems, and unexpected errors still pass through this mounted
 # application's single JSON/problem boundary.
 app.include_router(mobile_owner_api.router)
+app.include_router(mobile_reply_api.router)
 app.include_router(mobile_gallery_calendar_api.router)
 app.include_router(mobile_client_api.router)
 app.include_router(mobile_commercial_api.router)

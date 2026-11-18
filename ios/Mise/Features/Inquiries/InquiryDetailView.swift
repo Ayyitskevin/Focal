@@ -16,6 +16,7 @@ struct InquiryDetailView: View {
     @State private var mutationFailure: String?
     @State private var confirmDismissal = false
     @State private var confirmConversion = false
+    @State private var showReplyComposer = false
 
     init(
         summary: InquirySummary,
@@ -91,6 +92,21 @@ struct InquiryDetailView: View {
         } message: {
             Text(mutationFailure ?? "")
         }
+        .sheet(isPresented: $showReplyComposer) {
+            if let summary = detail?.summary {
+                InquiryReplyComposer(
+                    summary: summary,
+                    repository: repository,
+                    isPresented: $showReplyComposer,
+                    onSent: { result in
+                        requestGeneration &+= 1
+                        detail = result.detail
+                        showReplyComposer = false
+                        await onTriage()
+                    }
+                )
+            }
+        }
     }
 
     private func conversation(_ detail: InquiryDetail) -> some View {
@@ -133,6 +149,15 @@ struct InquiryDetailView: View {
                 }
                 ForEach(detail.messages) { message in
                     messageBubble(message)
+                }
+            }
+
+            if canWrite, let email = detail.summary.email, !email.isEmpty {
+                Section {
+                    Button("Reply by email", systemImage: "envelope") {
+                        showReplyComposer = true
+                    }
+                    .frame(minHeight: 44)
                 }
             }
 
