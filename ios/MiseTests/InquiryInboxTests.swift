@@ -254,6 +254,7 @@ final class InquiryInboxTests: XCTestCase {
         XCTAssertNil(cached)
     }
 
+    @MainActor
     func testStaleInquiryReadCannotOverwriteConversion() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("inquiry-tests-\(UUID().uuidString)", isDirectory: true)

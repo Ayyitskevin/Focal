@@ -655,6 +655,9 @@ actor OwnerRepository {
             ) else {
                 throw OwnerRepositoryError.missingConditionalValue
             }
+            if let expectedGeneration {
+                try requireMutationGeneration(expectedGeneration, for: key)
+            }
             return ResourceSnapshot(
                 value: touched.value,
                 storedAt: touched.storedAt,
