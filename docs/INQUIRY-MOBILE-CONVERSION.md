@@ -1,6 +1,6 @@
 # Mobile inquiry-to-client/project conversion specification
 
-**Status:** Independently reviewed with notes; backend verified, final macOS CI pending
+**Status:** Independently reviewed with notes; Python and macOS CI verified
 **Date:** 2026-11-17
 **Depends on:** `INQUIRY-MOBILE-TRIAGE.md`
 
@@ -161,8 +161,9 @@ Evidence at the final reviewed tree:
   and one audit row;
 - `git diff --check`: clean in both comparison scopes.
 
-Residual verification: Swift compilation and XCTest were not available locally.
-The dashboard 304 guard is source-reviewed without a dedicated dynamic regression
-case, and no live multi-process/production concurrency was exercised. Final macOS
-CI and an owner merge decision remain required. No production or live-data check
-was performed or claimed.
+Residual verification: hosted macOS build-test passed at `324f0b2` in 7m44s and
+hosted smoke passed in 3m24s; PR #226 is `CLEAN`. Swift compilation and XCTest were
+not run locally. The dashboard 304 guard is source-reviewed without a dedicated
+dynamic regression case, and no live multi-process/production concurrency was
+exercised. An owner merge decision remains. No production or live-data check was
+performed or claimed.
