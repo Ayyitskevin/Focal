@@ -21,10 +21,35 @@ protocol APIClientProtocol: Sendable {
     ) async throws -> APIResponse<Response>
 }
 
+/// The generation stays local to the request. Only the token goes on the wire.
+struct RequestBearer: Sendable {
+    let token: String
+    let generation: UInt64
+}
+
 protocol RequestAuthorizing: Sendable {
     func bearerToken() async throws -> String?
     func refreshBearerToken(rejectedToken: String) async throws -> String?
     func invalidate() async
+    func requestBearer() async throws -> RequestBearer?
+    func refreshBearer(_ bearer: RequestBearer) async throws -> RequestBearer?
+    func invalidate(ifRejected bearer: RequestBearer) async throws
+}
+
+extension RequestAuthorizing {
+    func requestBearer() async throws -> RequestBearer? {
+        try await bearerToken().map { RequestBearer(token: $0, generation: 0) }
+    }
+
+    func refreshBearer(_ bearer: RequestBearer) async throws -> RequestBearer? {
+        try await refreshBearerToken(rejectedToken: bearer.token).map {
+            RequestBearer(token: $0, generation: bearer.generation)
+        }
+    }
+
+    func invalidate(ifRejected bearer: RequestBearer) async throws {
+        await invalidate()
+    }
 }
 
 actor APIClient: APIClientProtocol {
@@ -64,29 +89,29 @@ actor APIClient: APIClientProtocol {
     func sendWithMetadata<Response: Decodable & Sendable>(
         _ endpoint: APIEndpoint<Response>
     ) async throws -> APIResponse<Response> {
-        let token: String?
+        let bearer: RequestBearer?
         switch endpoint.authentication {
         case .none:
-            token = nil
+            bearer = nil
         case .bearer:
             guard let authorizer else {
                 throw APIError.unauthenticated(nil)
             }
-            token = try await authorizer.bearerToken()
-            guard token != nil else {
+            bearer = try await authorizer.requestBearer()
+            guard bearer != nil else {
                 throw APIError.unauthenticated(nil)
             }
         }
 
-        return try await perform(endpoint, bearerToken: token, mayRefresh: true)
+        return try await perform(endpoint, bearer: bearer, mayRefresh: true)
     }
 
     private func perform<Response: Decodable & Sendable>(
         _ endpoint: APIEndpoint<Response>,
-        bearerToken: String?,
+        bearer: RequestBearer?,
         mayRefresh: Bool
     ) async throws -> APIResponse<Response> {
-        let request = try makeRequest(endpoint, bearerToken: bearerToken)
+        let request = try makeRequest(endpoint, bearerToken: bearer?.token)
 
         let data: Data
         let response: URLResponse
@@ -104,21 +129,11 @@ actor APIClient: APIClientProtocol {
             throw APIError.unexpectedResponse
         }
 
-        if httpResponse.statusCode == 401, endpoint.authentication == .bearer {
-            if mayRefresh,
-               let rejectedToken = bearerToken,
-               let authorizer,
-               let refreshedToken = try await authorizer.refreshBearerToken(
-                   rejectedToken: rejectedToken
-               )
-            {
-                return try await perform(
-                    endpoint,
-                    bearerToken: refreshedToken,
-                    mayRefresh: false
-                )
+        if httpResponse.statusCode == 401, let bearer, let authorizer {
+            if mayRefresh, let refreshed = try await authorizer.refreshBearer(bearer) {
+                return try await perform(endpoint, bearer: refreshed, mayRefresh: false)
             }
-            await authorizer?.invalidate()
+            try await authorizer.invalidate(ifRejected: bearer)
         }
 
         return try decode(

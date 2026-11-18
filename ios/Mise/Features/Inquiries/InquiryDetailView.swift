@@ -9,7 +9,8 @@ struct InquiryDetailView: View {
     private let onTriage: @MainActor () async -> Void
 
     @State private var detail: InquiryDetail?
-    @State private var isLoading = false
+    @State private var loadingGeneration: UInt64?
+    private var isLoading: Bool { loadingGeneration != nil }
     @State private var loadFailure: String?
     @State private var requestGeneration: UInt64 = 0
     @State private var isMutating = false
@@ -104,6 +105,7 @@ struct InquiryDetailView: View {
                         showReplyComposer = false
                         replyGeneration = nil
                         guard startedGeneration == requestGeneration else {
+                            await load(replacingCurrentRead: true)
                             await onTriage()
                             return
                         }
@@ -165,6 +167,7 @@ struct InquiryDetailView: View {
                         replyGeneration = requestGeneration
                         showReplyComposer = true
                     }
+                    .disabled(isMutating)
                     .frame(minHeight: 44)
                 }
             }
@@ -279,13 +282,15 @@ struct InquiryDetailView: View {
         return display
     }
 
-    private func load() async {
-        guard !isLoading, !isMutating else { return }
-        isLoading = true
+    private func load(replacingCurrentRead: Bool = false) async {
+        guard (!isLoading || replacingCurrentRead), !isMutating else { return }
         loadFailure = nil
         requestGeneration &+= 1
         let generation = requestGeneration
-        defer { isLoading = false }
+        loadingGeneration = generation
+        defer {
+            if loadingGeneration == generation { loadingGeneration = nil }
+        }
         do {
             let loaded = try await repository.inquiryDetail(id: inquiryID)
             guard loaded.summary.id == inquiryID else {

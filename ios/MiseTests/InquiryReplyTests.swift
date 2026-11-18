@@ -119,6 +119,28 @@ final class InquiryReplyTests: XCTestCase {
         try await assertRestoredRetry(root: context.root, client: client, draft: draft)
     }
 
+    func testLocalJournalFailureDoesNotReverseAConfirmedServerReceipt() async throws {
+        let context = makeCache()
+        let root = context.root
+        defer { try? FileManager.default.removeItem(at: root) }
+        let client = ReplyClient([.value(Data(Self.sentReplyJSON.utf8))]) {
+            // Simulate the local journal becoming unreadable after the request left the device.
+            let files = try FileManager.default.subpathsOfDirectory(atPath: root.path)
+            let journal = try XCTUnwrap(files.first { $0.hasSuffix(".json") })
+            try Data("unreadable journal".utf8).write(to: root.appendingPathComponent(journal), options: .atomic)
+        }
+        let repository = OwnerRepository(client: client, cache: context.cache, sessionID: "session-a")
+        let observed = try await repository.inquiryReplySnapshot(id: 123)
+        let draft = try await repository.prepareInquiryReply(
+            id: 123, subject: "Re: your inquiry", body: "Thanks — I can help.", observing: observed
+        )
+        let receipt = try await repository.replyToInquiry(draft: draft)
+        let requests = await client.capturedRequests()
+        XCTAssertEqual(receipt.code, "inquiry.reply_sent")
+        XCTAssertEqual(receipt.messageID, 51)
+        XCTAssertEqual(requests.map(\.idempotencyKey), [draft.idempotencyKey])
+    }
+
     func testTransportFailureRestoresExactReplyForExplicitRetry() async throws {
         let context = makeCache()
         defer { try? FileManager.default.removeItem(at: context.root) }
@@ -290,11 +312,16 @@ final class InquiryReplyTests: XCTestCase {
         let draftB = try await second.prepareInquiryReply(
             id: 123, subject: "Second session", body: "Second private reply", observing: secondView
         )
+        let unopened = InquiryReplyDraft(
+            sessionID: "session-a", inquiryID: 456, subject: "Legacy", body: "Unopened legacy message", idempotencyKey: UUID()
+        )
+        try await context.cache.writeCommandIfAbsent(unopened, key: "inquiry.reply.pending.v1.session-a.456", etag: nil)
 
         let reopenedA = reopenedRepository(root: context.root, client: client)
         let restored = try await reopenedA.pendingInquiryReply(id: 123)
         XCTAssertEqual(restored, draftA)
         XCTAssertTrue(try cacheContains(draftA.body, at: context.root))
+        XCTAssertTrue(try cacheContains(unopened.body, at: context.root))
         await reopenedA.purgeCache()
 
         let afterPurgeA = reopenedRepository(root: context.root, client: client)
@@ -304,6 +331,7 @@ final class InquiryReplyTests: XCTestCase {
         XCTAssertNil(removed)
         XCTAssertEqual(retained, draftB)
         XCTAssertFalse(try cacheContains(draftA.body, at: context.root))
+        XCTAssertFalse(try cacheContains(unopened.body, at: context.root))
     }
 
     private func cacheContains(_ text: String, at root: URL) throws -> Bool {
@@ -518,8 +546,12 @@ private actor ReplyClient: APIClientProtocol {
 
     private var replies: [Reply]
     private var requests: [CapturedReplyRequest] = []
+    private let onRequest: @Sendable () throws -> Void
 
-    init(_ replies: [Reply]) { self.replies = replies }
+    init(_ replies: [Reply], onRequest: @escaping @Sendable () throws -> Void = {}) {
+        self.replies = replies
+        self.onRequest = onRequest
+    }
 
     func send<Response: Decodable & Sendable>(
         _ endpoint: APIEndpoint<Response>
@@ -534,6 +566,7 @@ private actor ReplyClient: APIClientProtocol {
             XCTFail("Unexpected request to the reply transport.")
             throw APIError.transport(.badServerResponse)
         }
+        try onRequest()
         switch replies.removeFirst() {
         case let .value(data):
             return try MiseJSON.decoder().decode(Response.self, from: data)

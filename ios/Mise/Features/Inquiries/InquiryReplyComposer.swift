@@ -12,6 +12,7 @@ struct InquiryReplyComposer: View {
     @State private var isSending = false
     @State private var confirmSend = false
     @State private var notice: String?
+    @State private var deliveryReportedUnknown = false
 
     init(
         summary: InquirySummary,
@@ -42,9 +43,11 @@ struct InquiryReplyComposer: View {
                         .accessibilityLabel("Reply body")
                 }
                 .disabled(snapshot == nil || isSending)
-                if attempt != nil {
+                if attempt != nil && !isSending {
                     Section {
-                        Text("Delivery is unconfirmed. The customer may already have received the original email.")
+                        Text(deliveryReportedUnknown
+                            ? "Focal recorded the attempt, but delivery is still unknown. Check with the customer before sending a new email."
+                            : "Delivery is unconfirmed. The customer may already have received the original email.")
                             .font(.footnote)
                     }
                 }
@@ -137,6 +140,7 @@ struct InquiryReplyComposer: View {
         guard canSend, let observed = snapshot else { return }
         isSending = true
         notice = nil
+        deliveryReportedUnknown = false
         defer { isSending = false }
         do {
             let prepared = try await repository.prepareInquiryReply(
@@ -151,6 +155,8 @@ struct InquiryReplyComposer: View {
                 replyBody = ""
                 snapshot = nil
                 await onSent(result)
+            } else if result.code == "inquiry.delivery_unknown" {
+                deliveryReportedUnknown = true
             }
         } catch OwnerRepositoryError.pendingInquiryReplyConflict {
             snapshot = nil

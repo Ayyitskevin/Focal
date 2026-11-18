@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 struct AppEnvironment: Sendable {
     let configuration: AppConfiguration
@@ -32,7 +33,16 @@ struct AppEnvironment: Sendable {
         let session = SessionAuthenticator(
             persistence: persistence,
             refresher: refresher,
-            expectedBaseURL: origin
+            expectedBaseURL: origin,
+            onSessionEnded: { cacheNamespace, sessionID in
+                let cache = TenantJSONCache(cacheNamespace: cacheNamespace)
+                do {
+                    try await cache.removeInquiryReplies(sessionID: sessionID)
+                } catch {
+                    Logger(subsystem: "Mise", category: "SessionCleanup")
+                        .error("Could not remove the ended session's local inquiry replies.")
+                }
+            }
         )
         let apiClient = APIClient(
             configuration: .init(

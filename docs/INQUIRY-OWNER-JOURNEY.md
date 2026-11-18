@@ -89,8 +89,10 @@ race, or an edit based on a saved attempt which has since changed or disappeared
 must stop before sending. This includes a composer that opened on an empty
 draft before another composer sent its reply. Remember the completed attempt
 locally so that only a newly opened composer can start the next email. Retain
-only the attempt identifier after completion and keep existing pending drafts
-readable. Signing out or ending the session clears its private reply text.
+only an opaque generation identifier after completion and keep existing pending
+drafts readable. Signing out or ending the session clears its private reply
+text, including when a gallery request discovers the session has expired.
+A temporary network or server failure preserves the draft.
 The owner can reopen to see current state. These guarantees apply within the
 existing authenticated session.
 
@@ -101,8 +103,9 @@ post-provider commit failure, missing configuration/recipient, invalid input,
 read-only/guest refusal, and concurrent identical commands. Assert one provider call,
 one outbound row, one emails_log row, one reply-state transition, and no sensitive
 receipt content. Swift tests cover exact request encoding, sent/unknown decoding,
-cache invalidation, retry after a lost response, competing composers, and removal
-of private draft text when the session ends. Include replay after inquiry deletion
+cache invalidation, retry after a lost response, competing composers, confirmed
+delivery despite a local cleanup error, and removal of private draft text when
+the session ends. Include replay after inquiry deletion
 and a transient database connection failure after provider acceptance. Run full
 Python and macOS gates with provider-faked sends only.
 

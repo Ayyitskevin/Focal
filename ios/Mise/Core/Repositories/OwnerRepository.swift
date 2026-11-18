@@ -333,7 +333,15 @@ actor OwnerRepository {
             guard value.deliveryStatus == "sent", value.messageID != nil else {
                 throw OwnerRepositoryError.invalidInquiryResponse
             }
-            _ = try await discardPendingInquiryReply(ifMatches: draft)
+            do {
+                _ = try await discardPendingInquiryReply(ifMatches: draft)
+            } catch {
+                try await requireActiveCache()
+                // The server already confirmed the send. A local storage error
+                // cannot change that outcome or authorize a second email.
+                Logger(subsystem: "Mise", category: "OwnerRepository")
+                    .error("Could not clear a locally saved reply after a confirmed send.")
+            }
             advanceMutationGeneration(for: [Key.inquiries, Key.dashboard])
             try? await cache.remove(Key.inquiries)
             try? await cache.remove(Key.dashboard)
