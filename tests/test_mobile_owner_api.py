@@ -1155,3 +1155,78 @@ def test_concurrent_conversion_creates_one_client_and_project(owner):
     assert db.one("SELECT COUNT(*) AS n FROM clients")["n"] == 1
     assert db.one("SELECT COUNT(*) AS n FROM projects")["n"] == 1
     assert db.one("SELECT COUNT(*) AS n FROM audit_log WHERE entity_type='inquiry'")["n"] == 1
+
+
+def test_conversion_bounds_legacy_fields_for_native_reads(owner):
+    client, headers, _ = owner
+    inquiry_id = _insert_inquiry(
+        "N" * 2500,
+        email="bounded@example.test",
+        business="B" * 2500,
+        kind="booking",
+        service="S" * 2500,
+        shoot_date="2026-12-01",
+    )
+
+    converted = client.put(f"/api/v1/inquiries/{inquiry_id}/conversion", headers=headers)
+
+    assert converted.status_code == 200
+    summary = converted.json()["summary"]
+    client_row = db.one("SELECT * FROM clients WHERE id=?", (summary["converted_client_id"],))
+    project_row = db.one("SELECT * FROM projects WHERE id=?", (summary["converted_project_id"],))
+    assert len(client_row["name"]) == 2000
+    assert len(client_row["company"]) == 2000
+    assert len(project_row["title"]) == 2000
+    assert project_row["title"].endswith(" — 2026-12-01")
+
+    clients = client.get("/api/v1/clients", headers=headers)
+    projects = client.get("/api/v1/projects", headers=headers)
+    assert clients.status_code == 200
+    assert projects.status_code == 200
+    assert summary["converted_client_id"] in {row["id"] for row in clients.json()["items"]}
+    assert summary["converted_project_id"] in {row["id"] for row in projects.json()["items"]}
+
+    blank_id = _insert_inquiry("", email="blank-name@example.test", kind="contact")
+    blank = client.put(f"/api/v1/inquiries/{blank_id}/conversion", headers=headers)
+    assert blank.status_code == 200
+    blank_client = db.one(
+        "SELECT name FROM clients WHERE id=?",
+        (blank.json()["summary"]["converted_client_id"],),
+    )
+    assert blank_client["name"] == "Unnamed client"
+
+
+def test_conversion_rejects_oversized_email_before_any_write(owner):
+    client, headers, _ = owner
+    inquiry_id = _insert_inquiry(
+        "Oversized Email",
+        email=f"{'a' * 2000}@example.test",
+        kind="contact",
+    )
+
+    response = client.put(f"/api/v1/inquiries/{inquiry_id}/conversion", headers=headers)
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "inquiry.email_too_long"
+    assert db.one("SELECT COUNT(*) AS n FROM clients")["n"] == 0
+    assert db.one("SELECT COUNT(*) AS n FROM projects")["n"] == 0
+    assert db.one("SELECT COUNT(*) AS n FROM audit_log WHERE entity_type='inquiry'")["n"] == 0
+
+
+def test_conversion_rejects_malformed_shoot_date_before_any_write(owner):
+    client, headers, _ = owner
+    inquiry_id = _insert_inquiry(
+        "Bad Date",
+        email="date@example.test",
+        kind="booking",
+        service="Wedding",
+        shoot_date="next-summer",
+    )
+
+    response = client.put(f"/api/v1/inquiries/{inquiry_id}/conversion", headers=headers)
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "inquiry.shoot_date_invalid"
+    assert db.one("SELECT COUNT(*) AS n FROM clients")["n"] == 0
+    assert db.one("SELECT COUNT(*) AS n FROM projects")["n"] == 0
+    assert db.one("SELECT COUNT(*) AS n FROM audit_log WHERE entity_type='inquiry'")["n"] == 0

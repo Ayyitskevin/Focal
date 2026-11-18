@@ -27,6 +27,7 @@ enum OwnerRepositoryError: LocalizedError, Sendable {
     case pendingBookingRescheduleMismatch
     case invalidBookingRescheduleResponse
     case invalidInquiryResponse
+    case staleRead
     case inactiveSession
 
     var errorDescription: String? {
@@ -49,6 +50,8 @@ enum OwnerRepositoryError: LocalizedError, Sendable {
             "The server returned an inconsistent booking reschedule result."
         case .invalidInquiryResponse:
             "The server returned an inconsistent inquiry triage result."
+        case .staleRead:
+            "Newer studio changes are available. Refresh to load the current records."
         case .inactiveSession:
             "This signed-out repository can no longer update local state."
         }
@@ -92,6 +95,7 @@ actor OwnerRepository {
     private let cache: TenantJSONCache
     private let sessionID: String?
     private var cacheIsActive = true
+    private var mutationGenerations: [String: UInt64] = [:]
 
     init(
         client: any APIClientProtocol,
@@ -112,9 +116,11 @@ actor OwnerRepository {
     }
 
     func refreshDashboard() async throws -> ResourceSnapshot<DashboardSummary> {
-        try await refreshConditional(
+        let generation = mutationGenerations[Key.dashboard, default: 0]
+        return try await refreshConditional(
             key: Key.dashboard,
-            endpoint: MiseEndpoints.dashboard
+            endpoint: MiseEndpoints.dashboard,
+            expectedGeneration: generation
         )
     }
 
@@ -123,10 +129,11 @@ actor OwnerRepository {
     }
 
     func refreshClients() async throws -> ResourceSnapshot<[ClientSummary]> {
+        let generation = mutationGenerations[Key.clients, default: 0]
         let values = try await fetchAll { cursor in
             MiseEndpoints.Clients.list(cursor: cursor, limit: 100)
         }
-        return try await persist(values, key: Key.clients)
+        return try await persist(values, key: Key.clients, expectedGeneration: generation)
     }
 
     func cachedProjects() async throws -> ResourceSnapshot<[ProjectSummary]>? {
@@ -134,10 +141,11 @@ actor OwnerRepository {
     }
 
     func refreshProjects() async throws -> ResourceSnapshot<[ProjectSummary]> {
+        let generation = mutationGenerations[Key.projects, default: 0]
         let values = try await fetchAll { cursor in
             MiseEndpoints.Projects.list(cursor: cursor, limit: 100)
         }
-        return try await persist(values, key: Key.projects)
+        return try await persist(values, key: Key.projects, expectedGeneration: generation)
     }
 
     func cachedInquiries() async throws -> ResourceSnapshot<[InquirySummary]>? {
@@ -145,10 +153,11 @@ actor OwnerRepository {
     }
 
     func refreshInquiries() async throws -> ResourceSnapshot<[InquirySummary]> {
+        let generation = mutationGenerations[Key.inquiries, default: 0]
         let values = try await fetchAll { cursor in
             MiseEndpoints.Inquiries.list(cursor: cursor, limit: 100)
         }
-        return try await persist(values, key: Key.inquiries)
+        return try await persist(values, key: Key.inquiries, expectedGeneration: generation)
     }
 
     /// Full conversation bodies stay network-first and are never persisted.
@@ -164,6 +173,7 @@ actor OwnerRepository {
         guard value.summary.id == id, statusIsExpected else {
             throw OwnerRepositoryError.invalidInquiryResponse
         }
+        advanceMutationGeneration(for: [Key.inquiries, Key.dashboard])
         try? await cache.remove(Key.inquiries)
         try? await cache.remove(Key.dashboard)
         return value
@@ -178,6 +188,7 @@ actor OwnerRepository {
         else {
             throw OwnerRepositoryError.invalidInquiryResponse
         }
+        advanceMutationGeneration(for: [Key.inquiries, Key.dashboard, Key.clients, Key.projects])
         try? await cache.remove(Key.inquiries)
         try? await cache.remove(Key.dashboard)
         try? await cache.remove(Key.clients)
@@ -190,10 +201,11 @@ actor OwnerRepository {
     }
 
     func refreshGalleries() async throws -> ResourceSnapshot<[GallerySummary]> {
+        let generation = mutationGenerations[Key.galleries, default: 0]
         let values = try await fetchAll { cursor in
             MiseEndpoints.Galleries.list(cursor: cursor, limit: 100)
         }
-        return try await persist(values, key: Key.galleries)
+        return try await persist(values, key: Key.galleries, expectedGeneration: generation)
     }
 
     func cachedBookings() async throws -> ResourceSnapshot<[Booking]>? {
@@ -201,10 +213,11 @@ actor OwnerRepository {
     }
 
     func refreshBookings() async throws -> ResourceSnapshot<[Booking]> {
+        let generation = mutationGenerations[Key.bookings, default: 0]
         let values = try await fetchAll { cursor in
             MiseEndpoints.Scheduling.bookings(cursor: cursor, limit: 100)
         }
-        return try await persist(values, key: Key.bookings)
+        return try await persist(values, key: Key.bookings, expectedGeneration: generation)
     }
 
     /// The complete studio-task inbox is intentionally session-memory-only.
@@ -220,6 +233,7 @@ actor OwnerRepository {
         let value = try await send(
             MiseEndpoints.Tasks.completion(id: id, completed: completed)
         )
+        advanceMutationGeneration(for: [Key.dashboard])
         try? await cache.remove(Key.dashboard)
         return value
     }
@@ -252,6 +266,7 @@ actor OwnerRepository {
 
     func cancelBooking(id: Int64) async throws -> Booking {
         let value = try await send(MiseEndpoints.Scheduling.cancelBooking(id: id))
+        advanceMutationGeneration(for: [Key.bookings, Key.dashboard])
         try? await cache.remove(Key.bookings)
         try? await cache.remove(Key.dashboard)
         return value
@@ -569,13 +584,29 @@ actor OwnerRepository {
         )
     }
 
+    private func requireMutationGeneration(_ expected: UInt64, for key: String) throws {
+        guard mutationGenerations[key, default: 0] == expected else {
+            throw OwnerRepositoryError.staleRead
+        }
+    }
+
+    private func advanceMutationGeneration(for keys: [String]) {
+        for key in keys {
+            mutationGenerations[key, default: 0] &+= 1
+        }
+    }
+
     private func persist<Value: Codable & Sendable>(
         _ value: Value,
         key: String,
         etag: String? = nil,
-        storedAt: Date = Date()
+        storedAt: Date = Date(),
+        expectedGeneration: UInt64? = nil
     ) async throws -> ResourceSnapshot<Value> {
         try await requireActiveCache()
+        if let expectedGeneration {
+            try requireMutationGeneration(expectedGeneration, for: key)
+        }
         let record = try await cache.write(
             value,
             key: key,
@@ -583,6 +614,9 @@ actor OwnerRepository {
             storedAt: storedAt
         )
         try await requireActiveCache()
+        if let expectedGeneration {
+            try requireMutationGeneration(expectedGeneration, for: key)
+        }
         return ResourceSnapshot(
             value: record.value,
             storedAt: record.storedAt,
@@ -592,7 +626,8 @@ actor OwnerRepository {
 
     private func refreshConditional<Value: Codable & Sendable>(
         key: String,
-        endpoint: APIEndpoint<Value>
+        endpoint: APIEndpoint<Value>,
+        expectedGeneration: UInt64? = nil
     ) async throws -> ResourceSnapshot<Value> {
         let cached = try await cache.read(key, as: Value.self)
         do {
@@ -603,9 +638,13 @@ actor OwnerRepository {
                 response.value,
                 key: key,
                 etag: response.metadata.etag,
-                storedAt: response.metadata.receivedAt
+                storedAt: response.metadata.receivedAt,
+                expectedGeneration: expectedGeneration
             )
         } catch let APIError.notModified(responseETag) {
+            if let expectedGeneration {
+                try requireMutationGeneration(expectedGeneration, for: key)
+            }
             guard cached != nil else {
                 throw OwnerRepositoryError.missingConditionalValue
             }

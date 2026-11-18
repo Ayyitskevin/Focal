@@ -1,7 +1,7 @@
 # Mobile inquiry-to-client/project conversion specification
 
-**Status:** Implemented locally; backend verified, macOS/XCTest and independent review pending  
-**Date:** 2026-11-17  
+**Status:** Review fixes implemented locally; final CI and independent delta review pending
+**Date:** 2026-11-17
 **Depends on:** `INQUIRY-MOBILE-TRIAGE.md`
 
 ## Review findings
@@ -56,10 +56,15 @@ State transitions:
 3. Refuse a dismissed, unconverted inquiry with `409 inquiry.dismissed` and no writes.
 4. Find an existing client only by the inquiry's trimmed, non-empty exact email.
    Blank emails never match. Reuse that client or create one with the inquiry's name,
-   business, email, and original message context.
+   business, email, and original message context. Names are trimmed/bounded to 2,000
+   characters with `Unnamed client` as the blank fallback; business is bounded to
+   2,000. An email over 2,000 characters returns `422 inquiry.email_too_long` before
+   any write rather than being truncated into a different identity.
 5. For a `booking` inquiry with a shoot date, create one project titled
    `{service or "Shoot"} — {shoot_date}` using the schema's `inquiry_received`
-   default. Other inquiry kinds create no project.
+   default. Service is bounded so title plus separator/date cannot exceed 2,000
+   characters. A malformed stored date returns `422 inquiry.shoot_date_invalid`
+   before any write. Other inquiry kinds create no project.
 6. Stamp `converted_at` and both converted IDs and append one `convert` audit row as
    actor `owner` in the same transaction. The audit diff records the old/new converted
    IDs, not contact or message bodies.
@@ -87,7 +92,10 @@ No command sends messages, creates a proposal, or deletes any existing record.
   explicitly labeled as opening the web admin; they do not pretend native detail
   pages exist or transfer the native bearer session into a browser cookie.
 - Repository success invalidates only inquiry, dashboard, client, and project
-  snapshots. Unrelated snapshots remain untouched.
+  snapshots. Unrelated snapshots remain untouched. Each affected cache key also has
+  a mutation generation: a read that began before the mutation cannot persist or
+  publish its older response. `staleRead` discards the old view snapshot and requires
+  a fresh network read rather than presenting stale data as current.
 
 ## Acceptance criteria
 
@@ -105,6 +113,10 @@ No command sends messages, creates a proposal, or deletes any existing record.
 7. Converted IDs open the correct web-admin records on the current workspace origin.
 8. Backend tests use the public HTTP routes, including a concurrent-request case;
    Swift tests cover the exact endpoint, response validation, and cache behavior.
+9. Converted client/project fields always satisfy their native read DTO bounds;
+   invalid emails/dates fail before any write, and both native collections serialize.
+10. A delayed pre-conversion read cannot recreate an open inquiry or hide new records
+    after conversion; it fails as stale without publishing or persisting old data.
 
 ## Verification and rollback
 

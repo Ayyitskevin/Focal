@@ -920,6 +920,23 @@ def _convert_inquiry(inquiry_id: int) -> InquiryDetail:
                     "Restore the inquiry before converting it.",
                 )
             email = str(inquiry["email"] or "").strip()
+            if len(email) > 2000:
+                raise mobile_auth.MobileAuthError(
+                    422,
+                    "inquiry.email_too_long",
+                    "The inquiry email is too long to convert safely.",
+                )
+            name = _inquiry_text(inquiry["name"], maximum=2000, fallback="Unnamed client")
+            business = _inquiry_text(inquiry["business"], maximum=2000)
+            shoot_on = None
+            if inquiry["kind"] == "booking" and str(inquiry["shoot_date"] or "").strip():
+                shoot_on = _inquiry_date(inquiry["shoot_date"])
+                if shoot_on is None:
+                    raise mobile_auth.MobileAuthError(
+                        422,
+                        "inquiry.shoot_date_invalid",
+                        "The booking shoot date must be a valid ISO date.",
+                    )
             existing = (
                 con.execute("SELECT id FROM clients WHERE email=?", (email,)).fetchone()
                 if email
@@ -932,20 +949,21 @@ def _convert_inquiry(inquiry_id: int) -> InquiryDetail:
                     con.execute(
                         "INSERT INTO clients (name, company, email, notes) VALUES (?,?,?,?)",
                         (
-                            inquiry["name"],
-                            inquiry["business"],
-                            email,
+                            name,
+                            business,
+                            email or None,
                             f"From inquiry {inquiry['created_at'][:10]}:\n{inquiry['message']}",
                         ),
                     ).lastrowid
                 )
             project_id = None
-            if inquiry["kind"] == "booking" and inquiry["shoot_date"]:
-                title = f"{inquiry['service'] or 'Shoot'} — {inquiry['shoot_date']}"
+            if shoot_on is not None:
+                service = _inquiry_text(inquiry["service"], maximum=1987, fallback="Shoot")
+                title = f"{service} — {shoot_on.isoformat()}"
                 project_id = int(
                     con.execute(
                         "INSERT INTO projects (client_id, title, shoot_date) VALUES (?,?,?)",
-                        (client_id, title, inquiry["shoot_date"]),
+                        (client_id, title, shoot_on.isoformat()),
                     ).lastrowid
                 )
             con.execute(
