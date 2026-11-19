@@ -578,6 +578,15 @@ def dashboard(request: Request, response: Response) -> DashboardSummary | Respon
     return _conditional(request, response, summary, exclude={"generated_at"})
 
 
+_CLIENT_SUMMARY_SELECT = """
+    SELECT c.id, c.name, c.company, c.email, c.phone, c.market, c.created_at,
+           (SELECT COUNT(*) FROM projects p WHERE p.client_id=c.id) AS project_count,
+           EXISTS(SELECT 1 FROM portals po WHERE po.client_id=c.id AND po.published=1)
+             AS portal_published
+      FROM clients c
+"""
+
+
 def _client_summary(row) -> ClientSummary:
     return ClientSummary(
         id=int(row["id"]),
@@ -603,15 +612,7 @@ def clients(
     where = "WHERE c.id < ?" if last_id is not None else ""
     params = (last_id, limit + 1) if last_id is not None else (limit + 1,)
     rows = db.all_(
-        f"""SELECT c.id, c.name, c.company, c.email, c.phone, c.market, c.created_at,
-                   (SELECT COUNT(*) FROM projects p WHERE p.client_id=c.id)
-                     AS project_count,
-                   EXISTS(SELECT 1 FROM portals po
-                          WHERE po.client_id=c.id AND po.published=1)
-                     AS portal_published
-              FROM clients c
-              {where}
-              ORDER BY c.id DESC LIMIT ?""",
+        f"{_CLIENT_SUMMARY_SELECT} {where} ORDER BY c.id DESC LIMIT ?",
         params,
     )
     has_more = len(rows) > limit
@@ -624,6 +625,18 @@ def clients(
         has_more=has_more,
     )
     return _conditional(request, response, payload)
+
+
+@router.get("/clients/{client_id}", response_model=ClientSummary)
+def client_detail(
+    request: Request,
+    response: Response,
+    client_id: Annotated[int, Path(ge=1, le=_INT64_MAX)],
+) -> ClientSummary | Response:
+    row = db.one(_CLIENT_SUMMARY_SELECT + " WHERE c.id=?", (client_id,))
+    if row is None:
+        raise mobile_auth.MobileAuthError(404, "client.not_found", "Client not found.")
+    return _conditional(request, response, _client_summary(row))
 
 
 def _project_summary(row) -> ProjectSummary:

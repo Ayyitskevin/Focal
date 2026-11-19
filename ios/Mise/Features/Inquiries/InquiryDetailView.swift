@@ -76,7 +76,7 @@ struct InquiryDetailView: View {
             isPresented: $confirmConversion,
             titleVisibility: .visible
         ) {
-            Button("Convert to client / project") {
+            Button("Confirm conversion") {
                 Task { await convert() }
             }
             Button("Cancel", role: .cancel) {}
@@ -127,7 +127,11 @@ struct InquiryDetailView: View {
             if detail.summary.status == .converted {
                 Section("Converted records") {
                     if let clientID = detail.summary.convertedClientID {
-                        Link(destination: workspaceOrigin.appendingPathComponent("admin/studio/clients/\(clientID)")) {
+                        NavigationLink {
+                            ClientRecordView(clientID: clientID, repository: repository)
+                                .id(clientID)
+                                .id(ObjectIdentifier(repository))
+                        } label: {
                             Label("Open client record", systemImage: "person")
                         }
                     }
@@ -135,10 +139,10 @@ struct InquiryDetailView: View {
                         Link(destination: workspaceOrigin.appendingPathComponent("admin/studio/projects/\(projectID)")) {
                             Label("Open project record", systemImage: "briefcase")
                         }
+                        Text("The project opens in web admin. Your browser may ask you to sign in.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    Text("Opens the web admin. Your browser may ask you to sign in.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
             }
 

@@ -50,7 +50,19 @@ actor SessionAuthenticator: RequestAuthorizing {
         try await loadIfNeeded()
     }
 
-    func install(_ session: AuthSession) throws {
+    /// Capture the restored login and its local generation together. Token refresh
+    /// preserves this generation even when it upgrades a legacy, ID-less login.
+    func loginSnapshot() async throws -> (session: AuthSession, generation: UInt64)? {
+        _ = try await loadIfNeeded()
+        return currentSession.map { ($0, generation) }
+    }
+
+    func isCurrentLogin(generation expected: UInt64) -> Bool {
+        currentSession != nil && generation == expected
+    }
+
+    @discardableResult
+    func install(_ session: AuthSession) throws -> UInt64 {
         guard matchesExpectedOrigin(session) else {
             throw SessionError.workspaceMismatch
         }
@@ -60,6 +72,7 @@ actor SessionAuthenticator: RequestAuthorizing {
         generation &+= 1
         currentSession = session
         loaded = true
+        return generation
     }
 
     func bearerToken() async throws -> String? {

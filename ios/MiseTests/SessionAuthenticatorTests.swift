@@ -347,6 +347,70 @@ final class SessionAuthenticatorTests: XCTestCase {
         XCTAssertTrue(ended.withValue { $0.isEmpty })
     }
 
+    func testRestoredLegacyLoginCanReadClientThroughRefreshUntilReplaced() async throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let origin = try XCTUnwrap(URL(string: "https://studio.example.com"))
+        let legacy = Self.session(
+            origin: origin.absoluteString, accessToken: "legacy", refreshToken: "refresh-legacy",
+            accessExpiresAt: now.addingTimeInterval(-1)
+        )
+        let upgraded = Self.session(
+            origin: origin.absoluteString, accessToken: "upgraded", refreshToken: "refresh-upgraded",
+            accessExpiresAt: now.addingTimeInterval(900), sessionID: "assigned-by-refresh"
+        )
+        let persistence = InMemorySessionPersistence(legacy)
+        let authenticator = SessionAuthenticator(
+            persistence: persistence, refresher: SlowRefresher(response: upgraded),
+            expectedBaseURL: origin, now: { now }
+        )
+        let snapshot = try await authenticator.loginSnapshot()
+        let login = try XCTUnwrap(snapshot)
+        XCTAssertNil(login.session.sessionID)
+
+        let requests = LockedBox<[String]>([])
+        MockURLProtocol.setHandler { request in
+            let url = try XCTUnwrap(request.url)
+            requests.withValue { $0.append(url.path) }
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer upgraded")
+            let response = try XCTUnwrap(HTTPURLResponse(
+                url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"]
+            ))
+            return (response, Data("""
+                {"id":7,"name":"Fixture client","market":"general","project_count":0,
+                 "portal_published":false,"created_at":"2026-11-19T00:00:00Z"}
+                """.utf8))
+        }
+        defer { MockURLProtocol.clearHandler() }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let network = URLSession(configuration: config)
+        defer { network.invalidateAndCancel() }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = OwnerRepository(
+            client: APIClient(configuration: .init(baseURL: origin, clientVersion: "test"),
+                              session: network, authorizer: authenticator),
+            cache: TenantJSONCache(cacheNamespace: "tenant_42", rootDirectory: root),
+            sessionID: login.session.sessionID,
+            isCurrentLogin: { await authenticator.isCurrentLogin(generation: login.generation) }
+        )
+        let record = try await repository.clientRecord(id: 7)
+        XCTAssertEqual(record.name, "Fixture client")
+        XCTAssertEqual(try persistence.load()?.sessionID, upgraded.sessionID)
+
+        // Even installing the same credentials again is a distinct login.
+        let replacement = try await authenticator.install(upgraded)
+        XCTAssertNotEqual(replacement, login.generation)
+        do {
+            _ = try await repository.clientRecord(id: 7)
+            XCTFail("The old repository must not use the newly installed login.")
+        } catch OwnerRepositoryError.clientRecordSessionChanged {}
+        XCTAssertEqual(requests.withValue { $0 }, ["/api/v1/clients/7"])
+        await authenticator.invalidate()
+        let stillActive = await authenticator.isCurrentLogin(generation: replacement)
+        XCTAssertFalse(stillActive)
+    }
+
     private static func session(
         origin: String,
         accessToken: String,

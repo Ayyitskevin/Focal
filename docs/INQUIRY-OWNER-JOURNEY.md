@@ -1,7 +1,7 @@
 # Inquiry owner-journey specification
 
-**Status:** Phase 1 active implementation; later phases specified, not started
-**Date:** 2026-11-18
+**Status:** Phase 1 merged in #228. Phase 2 starts with the converted client record.
+**Updated:** 2026-11-19
 **Depends on:** merged inquiry detail/triage (#225) and conversion (#226)
 
 ## Product decision
@@ -17,9 +17,9 @@ this journey remains incomplete.
 Inquiry detail, conversation history, dismiss/restore, and atomic client/project
 conversion are merged. Before public release, run a real-device or simulator smoke
 pass with synthetic data covering navigation, conversion, repeat idempotency, and
-web-admin links. This validation is not claimed by repository tests alone.
+the actions that open converted records.
 
-## Phase 1 — manual email reply (this implementation)
+## Phase 1 — manual email reply
 
 ### Goal and non-goals
 
@@ -118,6 +118,35 @@ converted-record links from web admin to those native pages. Simplify iPhone tab
 **Home, Inquiries, Calendar, More**, keeping Clients, Projects, Galleries, and
 Commercial under More. Preserve capability-aware client navigation and accessibility.
 Resolve current native navigation correctness issues before adding more surfaces.
+
+### First slice — open the converted client
+
+An owner who converts an inquiry can tap **Open client record**, read that client
+inside Focal and use Back to return to the same inquiry and its converted state.
+This works for both a newly created client and an existing client linked by
+conversion. The destination uses the returned `converted_client_id`. A linked
+client can have a different name and contact details from the original inquiry.
+The project action still opens web admin.
+
+The app reads `GET /api/v1/clients/{client_id}` with its existing owner session.
+The response uses the same `ClientSummary` fields as the owner client directory.
+The screen shows the client's name, available contact details and project count.
+An owner with `studio:read` can open the record. Missing, guest and revoked
+credentials receive the existing authorization errors, including conditional
+requests. A valid owner login restored from an older app version can also read
+the record. Refreshing that login preserves access, while replacing it or signing
+out during a request discards the late response. A missing client has a visible
+unavailable state. On a failed read,
+the owner can retry or go back. Load by the exact ID and surface a mismatched
+response as an error. Keep private record details out of persistent client-side
+storage for this route.
+
+Acceptance requires an iPhone simulator UI test through workspace sign-in,
+conversion, native detail and Back with synthetic data on an isolated service.
+Assert a client-only value on the detail screen and the identity of the original
+inquiry after Back. Cover the authorization, missing-record and identity cases
+at the API or repository boundary. Keep project detail and tab reorganization
+for separate changes.
 
 ## Phase 3 — notifications and exact deep links
 
