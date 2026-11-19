@@ -23,13 +23,10 @@ struct ProjectRecordView: View {
                     Text(project.title)
                         .font(.headline)
                         .accessibilityIdentifier("project-record-title")
-                    LabeledContent("Client") {
-                        Text(project.clientDisplayName)
-                            .accessibilityIdentifier("project-record-client")
-                    }
-                    LabeledContent("Status", value: project.status.ownerDisplayName)
+                    field("Client", value: project.clientDisplayName, id: "project-record-client")
+                    field("Status", value: project.status.ownerDisplayName, id: "project-record-status")
                     if let shootOn = project.shootOn {
-                        LabeledContent("Shoot date", value: shootOn.rawValue)
+                        field("Shoot date", value: shootOn.rawValue, id: "project-record-shoot-date")
                     }
                 }
             case .failed(let message):
@@ -56,5 +53,13 @@ struct ProjectRecordView: View {
                 state = .failed(error.localizedDescription)
             }
         }
+    }
+
+    private func field(_ label: LocalizedStringKey, value: String, id: String) -> some View {
+        LabeledContent(label, value: value)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(label))
+            .accessibilityValue(Text(verbatim: value))
+            .accessibilityIdentifier(id)
     }
 }

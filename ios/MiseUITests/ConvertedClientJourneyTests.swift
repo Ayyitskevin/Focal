@@ -63,17 +63,36 @@ final class ConvertedClientJourneyTests: XCTestCase {
         XCTAssertTrue(openClient.waitForExistence(timeout: 10), app.debugDescription)
 
         let openProject = app.buttons["Open project record"]
-        XCTAssertTrue(openProject.waitForExistence(timeout: 10), app.debugDescription)
-        openProject.tap()
         let project = app.navigationBars["Project record"]
-        XCTAssertTrue(project.waitForExistence(timeout: 10), app.debugDescription)
         let projectTitle = app.staticTexts["project-record-title"]
-        XCTAssertTrue(projectTitle.waitForExistence(timeout: 15), app.debugDescription)
-        XCTAssertEqual(projectTitle.label, expectedProjectTitle)
+        let fields = [
+            ("project-record-client", "Client", "Juniper Portrait Studio"),
+            ("project-record-status", "Status", "Inquiry Received"),
+            ("project-record-shoot-date", "Shoot date", "2030-10-13")
+        ]
+        for needsRetry in [false, true] {
+            XCTAssertTrue(openProject.waitForExistence(timeout: 10), app.debugDescription)
+            openProject.tap()
+            XCTAssertTrue(project.waitForExistence(timeout: 10), app.debugDescription)
+            if needsRetry {
+                let retry = app.buttons["Try Again"]
+                XCTAssertTrue(retry.waitForExistence(timeout: 15), app.debugDescription)
+                XCTAssertFalse(projectTitle.exists, "An unavailable project must not show stale details")
+                retry.tap()
+            }
+            XCTAssertTrue(projectTitle.waitForExistence(timeout: 15), app.debugDescription)
+            XCTAssertEqual(projectTitle.label, expectedProjectTitle)
+            for (identifier, label, value) in fields {
+                let row = app.descendants(matching: .any)[identifier]
+                XCTAssertTrue(row.isHittable, app.debugDescription)
+                XCTAssertEqual(row.label, label)
+                XCTAssertEqual(row.value as? String, value)
+            }
 
-        project.buttons.firstMatch.tap()
-        XCTAssertTrue(original.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(openClient.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(openProject.waitForExistence(timeout: 10), app.debugDescription)
+            project.buttons.firstMatch.tap()
+            XCTAssertTrue(original.waitForExistence(timeout: 10), app.debugDescription)
+            XCTAssertTrue(openClient.waitForExistence(timeout: 10), app.debugDescription)
+            XCTAssertTrue(openProject.waitForExistence(timeout: 10), app.debugDescription)
+        }
     }
 }

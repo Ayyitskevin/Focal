@@ -166,9 +166,10 @@ detail stays in memory.
 
 On an iPhone simulator, sign in to a synthetic studio, convert a dated booking
 inquiry, then open its project. Distinguish the stored project from another
-project, even for the same client, and assert project-specific details. Use Back
-and verify the original inquiry and its converted actions. Keep the existing
-converted-client journey covered.
+project for the same client. Check the title, client, status, and shoot date on
+screen, then use Back to verify the original inquiry and its converted actions.
+On a second visit, simulate one failed read. Verify Retry opens the same project
+and Back still returns to that inquiry. Keep the converted-client journey covered.
 
 ## Phase 3 — notifications and exact deep links
 

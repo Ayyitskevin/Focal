@@ -20,6 +20,7 @@ from pathlib import Path
 from uuid import UUID
 
 import uvicorn
+from starlette.responses import Response
 
 ROOT = Path(__file__).resolve().parents[2]
 INQUIRY_ID = 73
@@ -110,18 +111,21 @@ def synthetic_studio():
         )
         from app.main import app
 
-        project_reads: set[str] = set()
+        project_reads: list[tuple[str, int]] = []
 
         @app.middleware("http")
         async def record_project_read(request, call_next):
             response = await call_next(request)
             path = request.url.path
-            if (
-                request.method == "GET"
-                and response.status_code == 200
-                and path.startswith("/api/v1/projects/")
-            ):
-                project_reads.add(path)
+            if request.method == "GET" and path.startswith("/api/v1/projects/"):
+                # Only interrupt the second successful read of the actual converted project.
+                if response.status_code == 200 and project_reads == [(path, 200)]:
+                    linked = db.one(
+                        "SELECT converted_project_id FROM inquiries WHERE id=?", (INQUIRY_ID,)
+                    )
+                    if path == f"/api/v1/projects/{linked['converted_project_id']}":
+                        response = Response(status_code=503, headers={"Cache-Control": "no-store"})
+                project_reads.append((path, response.status_code))
             return response
 
         # Keep this exact socket bound until shutdown. Concurrent runs get distinct origins.
@@ -179,9 +183,13 @@ def main(reference_udid: str) -> int:
             raise RuntimeError(
                 "The simulator did not convert the booking into the expected records."
             )
-        if project_reads != {f"/api/v1/projects/{row['project_id']}"}:
-            raise RuntimeError(f"The simulator did not read the linked project: {project_reads!r}")
-        print(f"Verified inquiry {INQUIRY_ID} opened its stored project {row['project_id']}.")
+        path = f"/api/v1/projects/{row['project_id']}"
+        if project_reads != [(path, 200), (path, 503), (path, 200)]:
+            raise RuntimeError(f"Unexpected simulator project reads: {project_reads!r}")
+        print(
+            f"Verified inquiry {INQUIRY_ID} opened its stored project {row['project_id']}, "
+            "then recovered from the synthetic 503 on the second visit."
+        )
         return 0
 
 
