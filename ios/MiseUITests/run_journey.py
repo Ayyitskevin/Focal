@@ -2,10 +2,13 @@
 
 On macOS, install requirements.txt, run xcodegen generate in ios/, then run
 python ios/MiseUITests/run_journey.py <available-iPhone-simulator-UDID>.
+That device supplies the hardware type and runtime for a new, empty simulator.
 """
 
+import json
 import os
 import secrets
+import signal
 import socket
 import subprocess
 import sys
@@ -14,12 +17,43 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from uuid import UUID
 
 import uvicorn
 
 ROOT = Path(__file__).resolve().parents[2]
 INQUIRY_ID = 73
 CLIENT_ID = 402
+
+
+@contextmanager
+def empty_iphone(reference_udid: str):
+    simctl = ["xcrun", "simctl"]
+    inventory = json.loads(subprocess.check_output([*simctl, "list", "devices", "--json"]))
+    devices = {
+        device["udid"].upper(): (runtime, device)
+        for runtime, entries in inventory["devices"].items()
+        for device in entries
+    }
+    reference = devices.get(reference_udid.upper())
+    if reference is None:
+        raise ValueError(f"Unknown iPhone simulator {reference_udid}")
+    runtime, device = reference
+    model = device.get("deviceTypeIdentifier", "")
+    if not device.get("isAvailable") or not model.startswith(
+        "com.apple.CoreSimulator.SimDeviceType.iPhone-"
+    ):
+        raise ValueError(f"An available iPhone simulator is required: {reference_udid}")
+    name = f"Focal journey {secrets.token_hex(6)}"
+    created = subprocess.check_output([*simctl, "create", name, model, runtime], text=True)
+    udid = str(UUID(created.strip())).upper()
+    if udid in devices:
+        raise RuntimeError(f"simctl create returned an existing simulator: {udid}")
+    try:
+        print(f"Testing on new simulator {udid} ({model}, {runtime}).", flush=True)
+        yield udid
+    finally:
+        subprocess.run([*simctl, "delete", udid], check=True)
 
 
 @contextmanager
@@ -70,8 +104,8 @@ def synthetic_studio():
             thread.join()
 
 
-def main(udid: str) -> int:
-    with synthetic_studio() as (port, password):
+def main(reference_udid: str) -> int:
+    with empty_iphone(reference_udid) as udid, synthetic_studio() as (port, password):
         env = {key: value for key, value in os.environ.items() if not key.startswith("MISE_")}
         env["TEST_RUNNER_FOCAL_JOURNEY_PORT"] = str(port)
         env["TEST_RUNNER_FOCAL_JOURNEY_PASSWORD"] = password
@@ -103,4 +137,6 @@ def main(udid: str) -> int:
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         raise SystemExit("Usage: run_journey.py <iPhone simulator UDID>")
+    # Unwind the fixture and simulator contexts when a CI job is cancelled.
+    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(128 + signum))
     sys.exit(main(sys.argv[1]))

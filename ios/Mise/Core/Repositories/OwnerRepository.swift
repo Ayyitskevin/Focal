@@ -137,7 +137,7 @@ actor OwnerRepository {
     private let client: any APIClientProtocol
     private let cache: TenantJSONCache
     private let sessionID: String?
-    private let currentSessionID: @Sendable () async throws -> String?
+    private let isCurrentLogin: @Sendable () async -> Bool
     private var cacheIsActive = true
     private var mutationGenerations: [String: UInt64] = [:]
 
@@ -145,12 +145,12 @@ actor OwnerRepository {
         client: any APIClientProtocol,
         cache: TenantJSONCache,
         sessionID: String? = nil,
-        currentSessionID: @escaping @Sendable () async throws -> String? = { nil }
+        isCurrentLogin: @escaping @Sendable () async -> Bool = { false }
     ) {
         self.client = client
         self.cache = cache
         self.sessionID = sessionID
-        self.currentSessionID = currentSessionID
+        self.isCurrentLogin = isCurrentLogin
     }
 
     func currentSession() async throws -> CurrentSession {
@@ -191,9 +191,9 @@ actor OwnerRepository {
     }
 
     private func requireClientRecordSession() async throws {
-        guard let sessionID, !sessionID.isEmpty,
-              try await currentSessionID() == sessionID, cacheIsActive
-        else { throw OwnerRepositoryError.clientRecordSessionChanged }
+        guard await isCurrentLogin(), cacheIsActive else {
+            throw OwnerRepositoryError.clientRecordSessionChanged
+        }
     }
 
     func cachedProjects() async throws -> ResourceSnapshot<[ProjectSummary]>? {

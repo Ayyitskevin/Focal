@@ -93,14 +93,14 @@ final class AuthenticationCoordinator {
 
         let workspace = environment.workspace(at: origin)
         do {
-            guard let session = try await workspace.session.sessionSnapshot() else {
+            guard let login = try await workspace.session.loginSnapshot() else {
                 originStore.clear()
                 phase = .signedOut
                 return
             }
             activeWorkspace = workspace
-            configureRepositories(for: session.context, workspace: workspace)
-            await enterRestoredSession(session.context)
+            configureRepositories(for: login.session.context, workspace: workspace, loginGeneration: login.generation)
+            await enterRestoredSession(login.session.context)
         } catch {
             await workspace.session.invalidate()
             ownerRepository = nil
@@ -198,8 +198,8 @@ final class AuthenticationCoordinator {
                 expectedPrincipal: .studioOwner,
                 expectedScopePrefix: "studio:"
             )
-            try await workspace.session.install(session)
-            completeAuthentication(session, workspace: workspace)
+            let generation = try await workspace.session.install(session)
+            completeAuthentication(session, workspace: workspace, loginGeneration: generation)
         } catch {
             present(error)
         }
@@ -267,8 +267,8 @@ final class AuthenticationCoordinator {
                 expectedPrincipal: target.capability.expectedPrincipal,
                 expectedScopePrefix: target.capability.scopePrefix
             )
-            try await workspace.session.install(session)
-            completeAuthentication(session, workspace: workspace)
+            let generation = try await workspace.session.install(session)
+            completeAuthentication(session, workspace: workspace, loginGeneration: generation)
         } catch {
             present(error)
         }
@@ -403,10 +403,11 @@ final class AuthenticationCoordinator {
 
     private func completeAuthentication(
         _ session: AuthSession,
-        workspace: WorkspaceEnvironment
+        workspace: WorkspaceEnvironment,
+        loginGeneration: UInt64
     ) {
         activeWorkspace = workspace
-        configureRepositories(for: session.context, workspace: workspace)
+        configureRepositories(for: session.context, workspace: workspace, loginGeneration: loginGeneration)
         originStore.save(workspace.origin)
         clearCredentialInputs(keepingSharedAccessInput: false)
         if applicationIsActive {
@@ -424,7 +425,8 @@ final class AuthenticationCoordinator {
 
     private func configureRepositories(
         for context: CurrentSession,
-        workspace: WorkspaceEnvironment
+        workspace: WorkspaceEnvironment,
+        loginGeneration: UInt64
     ) {
         mediaLoader = workspace.mediaLoader
         if context.principal.kind == .studioOwner,
@@ -434,7 +436,7 @@ final class AuthenticationCoordinator {
                 client: workspace.apiClient,
                 cache: TenantJSONCache(cacheNamespace: context.workspace.cacheNamespace),
                 sessionID: context.sessionID,
-                currentSessionID: { try await workspace.session.sessionSnapshot()?.sessionID }
+                isCurrentLogin: { await workspace.session.isCurrentLogin(generation: loginGeneration) }
             )
             clientRepository = nil
             return

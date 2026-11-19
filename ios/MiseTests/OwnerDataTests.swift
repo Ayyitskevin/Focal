@@ -152,7 +152,7 @@ final class OwnerDataTests: XCTestCase {
             response, response, .failure(.notFound(nil)), .failure(.forbidden(nil)),
         ])
         let repository = OwnerRepository(
-            client: client, cache: cache, sessionID: "owner", currentSessionID: { "owner" }
+            client: client, cache: cache, sessionID: "owner", isCurrentLogin: { true }
         )
 
         let record = try await repository.clientRecord(id: 7)
@@ -187,7 +187,7 @@ final class OwnerDataTests: XCTestCase {
         let cache = TenantJSONCache(cacheNamespace: "tenant", rootDirectory: root)
         let client = QueuedOwnerClient(replies: [try Self.clientReply()])
         let repository = OwnerRepository(
-            client: client, cache: cache, sessionID: "owner", currentSessionID: { "owner" }
+            client: client, cache: cache, sessionID: "owner", isCurrentLogin: { true }
         )
         // Local purge starts sign-out before the authenticator clears its bearer.
         await client.beforeNextReply { await repository.purgeCache() }
@@ -200,14 +200,14 @@ final class OwnerDataTests: XCTestCase {
     func testClientRecordRejectsReplacedSessionWhileRequestIsInFlight() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let active = LockedBox("owner")
+        let active = LockedBox(true)
         let cache = TenantJSONCache(cacheNamespace: "tenant", rootDirectory: root)
         let client = QueuedOwnerClient(replies: [try Self.clientReply()])
         let repository = OwnerRepository(
             client: client, cache: cache, sessionID: "owner",
-            currentSessionID: { active.withValue { $0 } }
+            isCurrentLogin: { active.withValue { $0 } }
         )
-        await client.beforeNextReply { active.withValue { $0 = "replacement" } }
+        await client.beforeNextReply { active.withValue { $0 = false } }
         do {
             _ = try await repository.clientRecord(id: 7)
             XCTFail("The former session must not deliver a record after its login changes.")

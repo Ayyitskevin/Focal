@@ -8,8 +8,6 @@ final class ConvertedClientJourneyTests: XCTestCase {
         let port = try XCTUnwrap(environment["FOCAL_JOURNEY_PORT"].flatMap(UInt16.init))
         let password = try XCTUnwrap(environment["FOCAL_JOURNEY_PASSWORD"])
         let app = XCUIApplication()
-        // Ignore any last workspace saved on a developer's simulator.
-        app.launchArguments = ["-mise.last-workspace-origin", "no-saved-origin"]
         app.launch()
 
         let workspace = app.textFields["Studio URL or slug"]

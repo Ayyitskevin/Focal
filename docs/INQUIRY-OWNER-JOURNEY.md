@@ -133,7 +133,10 @@ The response uses the same `ClientSummary` fields as the owner client directory.
 The screen shows the client's name, available contact details and project count.
 An owner with `studio:read` can open the record. Missing, guest and revoked
 credentials receive the existing authorization errors, including conditional
-requests. A missing client has a visible unavailable state. On a failed read,
+requests. A valid owner login restored from an older app version can also read
+the record. Refreshing that login preserves access, while replacing it or signing
+out during a request discards the late response. A missing client has a visible
+unavailable state. On a failed read,
 the owner can retry or go back. Load by the exact ID and surface a mismatched
 response as an error. Keep private record details out of persistent client-side
 storage for this route.

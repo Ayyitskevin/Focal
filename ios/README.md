@@ -35,8 +35,9 @@ the compatibility-preserving namespace migration is planned separately.
 For the converted-client UI journey, choose an available iPhone UDID from
 `xcrun simctl list devices available`. With the Xcode project generated and
 `requirements.txt` installed in a Python 3.12 environment, run this from the
-repository root. It starts a disposable studio on loopback and runs the
-`FocalSimulator` scheme with the unit and UI test targets.
+repository root. The selected UDID supplies the iPhone model and OS version.
+The runner creates an empty simulator for the test, starts a disposable studio
+on loopback, and runs the `FocalSimulator` scheme with the unit and UI targets.
 
     python ios/MiseUITests/run_journey.py "$SIMULATOR_UDID"
 
