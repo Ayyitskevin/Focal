@@ -76,7 +76,7 @@ struct InquiryDetailView: View {
             isPresented: $confirmConversion,
             titleVisibility: .visible
         ) {
-            Button("Convert to client / project") {
+            Button("Confirm conversion") {
                 Task { await convert() }
             }
             Button("Cancel", role: .cancel) {}

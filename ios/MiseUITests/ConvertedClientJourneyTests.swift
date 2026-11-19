@@ -37,18 +37,18 @@ final class ConvertedClientJourneyTests: XCTestCase {
         let convertLabel = "Convert to client / project"
         let convert = app.buttons[convertLabel]
         for _ in 0..<5 {
-            if convert.isHittable { break }
+            if convert.exists && convert.isHittable { break }
             app.swipeUp()
         }
         XCTAssertTrue(convert.isHittable, app.debugDescription)
         convert.tap()
-        let confirm = app.sheets.buttons[convertLabel]
+        let confirm = app.buttons["Confirm conversion"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 10), app.debugDescription)
         confirm.tap()
 
         let openClient = app.buttons["Open client record"]
         for _ in 0..<5 {
-            if openClient.isHittable { break }
+            if openClient.exists && openClient.isHittable { break }
             app.swipeDown()
         }
         XCTAssertTrue(openClient.waitForExistence(timeout: 10), app.debugDescription)

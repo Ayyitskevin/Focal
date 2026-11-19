@@ -34,6 +34,8 @@ def synthetic_studio():
         os.environ.update(
             MISE_ENV_FILE=str(Path(data_dir) / "no-env-file"),
             MISE_DATA_DIR=data_dir,
+            MISE_HOST="127.0.0.1",
+            MISE_PORT=str(port),
             MISE_BASE_URL=f"http://127.0.0.1:{port}",
             MISE_ADMIN_PASSWORD=password,
             MISE_SECRET_KEY=secrets.token_hex(32),
