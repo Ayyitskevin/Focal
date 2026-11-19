@@ -165,7 +165,7 @@ not become a client-wide session.
 | `GET /api/v1/inquiries` | `Page<InquirySummary>` containing the read-only owner lead inbox |
 | `GET /api/v1/inquiries/{id}` | `InquiryDetail` with summary and recorded conversation |
 | `GET /api/v1/clients` | `Page<ClientSummary>` |
-| `GET /api/v1/clients/{id}` | client detail |
+| `GET /api/v1/clients/{client_id}` | `ClientSummary` for the requested client |
 | `GET /api/v1/projects` | `Page<ProjectSummary>` |
 | `GET /api/v1/projects/{id}` | project detail and links |
 | `GET /api/v1/galleries` | `Page<GallerySummary>` |
@@ -180,8 +180,15 @@ not become a client-wide session.
 | `GET /api/v1/galleries/{id}/cull` | paged cull deck/results |
 
 The Milestone 2 endpoints are available only to the exact `studio_owner`
-principal with `studio:read`. Client/project detail, AI-run, and
+principal with `studio:read`. Project detail, AI-run, and
 cull-result reads remain reserved contract surface until their delivery slices.
+
+For the converted-client screen, `GET /api/v1/clients/{client_id}` reads the
+record identified by the inquiry’s `converted_client_id`. A conversion may link
+an existing client. The response uses the owner directory’s projection, including
+contact information, project count and published portal status. Conditional reads
+revalidate the owner before returning 304. A missing record returns 404
+with code `client.not_found`.
 
 `GET /api/v1/inquiries` includes open, converted, and dismissed rows newest-first.
 It returns bounded contact fields and a whitespace-collapsed message preview rather

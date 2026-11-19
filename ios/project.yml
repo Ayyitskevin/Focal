@@ -70,3 +70,28 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ayyitskevin.mise.tests
         GENERATE_INFOPLIST_FILE: YES
+
+  MiseUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: MiseUITests
+        includes: ["*.swift"]
+    dependencies:
+      - target: Mise
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ayyitskevin.mise.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Mise
+
+schemes:
+  FocalSimulator:
+    build:
+      targets:
+        Mise: all
+    test:
+      gatherCoverageData: true
+      targets:
+        - MiseTests
+        - MiseUITests

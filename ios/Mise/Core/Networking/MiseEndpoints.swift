@@ -109,6 +109,10 @@ enum MiseEndpoints {
     }
 
     enum Clients {
+        static func detail(id: Int64) -> APIEndpoint<ClientSummary> {
+            APIEndpoint(method: .get, path: "/api/v1/clients/\(id)")
+        }
+
         static func list(
             cursor: String? = nil,
             limit: Int = 25

@@ -135,6 +135,103 @@ def test_safe_cursor_pages_revalidate_and_reauthorize(owner):
     )
 
 
+def test_client_detail_matches_directory_and_revalidates_owner_fields(owner):
+    client, headers, _ = owner
+    client_id = db.run(
+        "INSERT INTO clients (name,company,email,phone,notes) VALUES (?,?,?,?,?)",
+        ("Studio Client", "Studio Co", "client@example.test", "202-555-0100", "Private notes"),
+    )
+    db.run("INSERT INTO clients (name) VALUES ('Other client')")
+    db.run("INSERT INTO projects (client_id,title) VALUES (?,?)", (client_id, "Client project"))
+    db.run(
+        "INSERT INTO portals (client_id,slug,pin,published) VALUES (?,?,?,1)",
+        (client_id, "studio-client", "2853"),
+    )
+    path = f"/api/v1/clients/{client_id}"
+    response = client.get(path, headers=headers)
+    assert response.status_code == 200
+    record = response.json()
+    items = client.get("/api/v1/clients", headers=headers).json()["items"]
+    assert record == next(item for item in items if item["id"] == client_id)
+    assert set(record) == {
+        "id",
+        "name",
+        "company",
+        "email",
+        "phone",
+        "market",
+        "project_count",
+        "portal_published",
+        "created_at",
+    }
+    assert record["phone"] == "202-555-0100"
+    assert record["project_count"] == 1
+    assert record["portal_published"] is True
+    conditional = {**headers, "If-None-Match": response.headers["etag"]}
+    cached = client.get(path, headers=conditional)
+    assert cached.status_code == 304
+    assert not cached.content
+    for item in (response, cached):
+        assert item.headers["cache-control"] == "private, no-cache"
+        assert "authorization" in item.headers["vary"].lower()
+    assert client.get(path, headers={**headers, "If-None-Match": "invalid"}).status_code == 200
+    db.run("UPDATE clients SET phone=NULL WHERE id=?", (client_id,))
+    updated = client.get(path, headers=conditional)
+    assert updated.status_code == 200
+    assert updated.json()["phone"] is None
+    assert updated.headers["etag"] != response.headers["etag"]
+
+
+def test_client_detail_reauthorizes_conditional_reads(owner):
+    client, headers, _ = owner
+    client_id = db.run("INSERT INTO clients (name) VALUES ('Private client')")
+    db.run(
+        "INSERT INTO portals (client_id,slug,pin,published) VALUES (?,?,?,1)",
+        (client_id, "client-portal", "2853"),
+    )
+    path = f"/api/v1/clients/{client_id}"
+    db.run(
+        """UPDATE api_sessions SET scopes_json='["studio:read"]' WHERE principal_kind='studio_owner'"""
+    )
+    record = client.get(path, headers=headers)
+    assert record.status_code == 200
+    conditional = {"If-None-Match": record.headers["etag"]}
+    assert client.get(path, headers=conditional).status_code == 401
+    guest = client.post(
+        "/api/v1/client-auth/portal/unlock",
+        json={
+            "kind": "portal",
+            "slug": "client-portal",
+            "pin": "2853",
+            "device": {
+                "installation_id": "test-client-record",
+                "name": "Test phone",
+                "platform": "ios",
+                "app_version": "1.0",
+            },
+        },
+    )
+    assert guest.status_code == 200
+    guest_headers = {"Authorization": f"Bearer {guest.json()['access_token']}", **conditional}
+    denied = client.get(path, headers=guest_headers)
+    assert denied.status_code == 403
+    assert denied.json()["code"] == "auth.insufficient_scope"
+    assert client.post("/api/v1/auth/logout", headers=headers).status_code == 204
+    assert client.get(path, headers={**headers, **conditional}).status_code == 401
+
+
+def test_client_detail_missing_and_out_of_range(owner):
+    client, headers, _ = owner
+    conditional = {**headers, "If-None-Match": "*"}
+    missing = client.get("/api/v1/clients/123", headers=conditional)
+    assert missing.status_code == 404
+    assert missing.json()["code"] == "client.not_found"
+    for invalid in (0, -1, 2**63, "abc"):
+        invalid_id = client.get(f"/api/v1/clients/{invalid}", headers=conditional)
+        assert invalid_id.status_code == 422
+        assert invalid_id.json()["code"] == "request.validation_failed"
+
+
 def test_owner_collection_cursor_wire_is_unchanged(owner):
     assert (
         mobile_owner_api._encode_cursor("clients", 42) == "djE6Y2xpZW50czo0MhZyvWITAsrLfMWlbQdd8E0"
@@ -1074,6 +1171,11 @@ def test_contact_conversion_reuses_nonblank_email_and_never_matches_blank(owner)
     new_client_id = blank.json()["summary"]["converted_client_id"]
     assert new_client_id not in (existing_id, blank_id)
     assert blank.json()["summary"]["converted_project_id"] is None
+    for result, expected_name in ((matching, "Existing Client"), (blank, "Blank Email Lead")):
+        linked_id = result.json()["summary"]["converted_client_id"]
+        linked = client.get(f"/api/v1/clients/{linked_id}", headers=headers)
+        assert linked.status_code == 200
+        assert (linked.json()["id"], linked.json()["name"]) == (linked_id, expected_name)
     assert db.one("SELECT name FROM clients WHERE id=?", (new_client_id,))["name"] == (
         "Blank Email Lead"
     )

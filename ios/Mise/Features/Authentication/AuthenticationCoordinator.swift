@@ -433,7 +433,8 @@ final class AuthenticationCoordinator {
             ownerRepository = OwnerRepository(
                 client: workspace.apiClient,
                 cache: TenantJSONCache(cacheNamespace: context.workspace.cacheNamespace),
-                sessionID: context.sessionID
+                sessionID: context.sessionID,
+                currentSessionID: { try await workspace.session.sessionSnapshot()?.sessionID }
             )
             clientRepository = nil
             return

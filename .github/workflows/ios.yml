@@ -57,12 +57,15 @@ jobs:
           echo "Using simulator UDID $UDID"
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
 
-      - name: Build and run MiseTests
-        working-directory: ios
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install synthetic studio dependencies
         run: |
-          set -o pipefail
-          xcodebuild test \
-            -project Mise.xcodeproj \
-            -scheme Mise \
-            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
-            CODE_SIGNING_ALLOWED=NO
+          python -m venv "$RUNNER_TEMP/focal-ui-venv"
+          "$RUNNER_TEMP/focal-ui-venv/bin/pip" install -r requirements.txt
+
+      - name: Build app and run simulator unit and UI tests
+        run: |
+          "$RUNNER_TEMP/focal-ui-venv/bin/python" ios/MiseUITests/run_journey.py "${{ steps.sim.outputs.udid }}"

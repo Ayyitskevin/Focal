@@ -86,11 +86,10 @@ No command sends messages, creates a proposal, or deletes any existing record.
   dashboard, clients, and projects. Failure preserves the last confirmed detail and
   caches. The repository rejects a success payload that is not converted or lacks a
   converted client ID.
-- Converted client/project IDs render **Open client record** and **Open project
-  record** links to the canonical `/admin/studio/clients/{id}` and
-  `/admin/studio/projects/{id}` pages on the current workspace origin. The links are
-  explicitly labeled as opening the web admin; they do not pretend native detail
-  pages exist or transfer the native bearer session into a browser cookie.
+- **Open client record** uses the converted client ID and the owner's existing
+  session to show the [native client record](INQUIRY-OWNER-JOURNEY.md#first-slice--open-the-converted-client).
+  **Open project record** opens `/admin/studio/projects/{id}` in web admin on the
+  current workspace origin and may require browser sign-in.
 - Repository success invalidates only inquiry, dashboard, client, and project
   snapshots. Unrelated snapshots remain untouched. Each affected cache key also has
   a mutation generation: a read that began before the mutation cannot persist or
@@ -110,7 +109,7 @@ No command sends messages, creates a proposal, or deletes any existing record.
    delivery occurs.
 6. The iOS mutation validates the response and invalidates exactly the four affected
    snapshots only after success. Failure and malformed success preserve all snapshots.
-7. Converted IDs open the correct web-admin records on the current workspace origin.
+7. Converted IDs open the correct native client and web-admin project in the current workspace.
 8. Backend tests use the public HTTP routes, including a concurrent-request case;
    Swift tests cover the exact endpoint, response validation, and cache behavior.
 9. Converted client/project fields always satisfy their native read DTO bounds;

@@ -24,13 +24,21 @@ the compatibility-preserving namespace migration is planned separately.
        xcodegen generate
        open Mise.xcodeproj
 
-4. Select the Focal scheme and an iOS 17+ destination.
+4. Select the Mise scheme and an iOS 17+ destination.
 5. Run the MiseTests test plan from Xcode or:
 
        xcodebuild test \
          -project Mise.xcodeproj \
-         -scheme Focal \
-         -destination 'platform=iOS Simulator,name=iPhone 16'
+         -scheme Mise \
+         -destination "platform=iOS Simulator,id=$SIMULATOR_UDID"
+
+For the converted-client UI journey, choose an available iPhone UDID from
+`xcrun simctl list devices available`. With the Xcode project generated and
+`requirements.txt` installed in a Python 3.12 environment, run this from the
+repository root. It starts a disposable studio on loopback and runs the
+`FocalSimulator` scheme with the unit and UI test targets.
+
+    python ios/MiseUITests/run_journey.py "$SIMULATOR_UDID"
 
 The core foundation intentionally uses URLSession, Security, LocalAuthentication,
 SwiftUI, and Observation with no third-party runtime dependency. Swift Charts is
@@ -82,7 +90,8 @@ and avoiding it in the foundation keeps auth/session behavior auditable.
   full conversations are never added to the persisted summary-list cache. Open
   inquiries can also convert atomically into a client and, for dated bookings, a
   project; repeat commands do not duplicate records, blank emails never match a
-  client, and converted IDs open the canonical web-admin records. Manual email
+  client. The converted client opens inside the app using the owner's existing
+  session. The linked project opens in web admin. Manual email
   replies use a session-bound idempotency receipt: 201 means SMTP accepted and the
   conversation committed; 202 means delivery is unknown and the draft is preserved
   without an automatic retry. Quoting and SMS replies remain outside these slices.

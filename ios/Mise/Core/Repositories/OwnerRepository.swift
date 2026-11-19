@@ -28,6 +28,8 @@ enum OwnerRepositoryError: LocalizedError, Sendable {
     case pendingBookingRescheduleMismatch
     case invalidBookingRescheduleResponse
     case invalidInquiryResponse
+    case invalidClientRecord
+    case clientRecordSessionChanged
     case inquiryReplySessionMismatch
     case pendingInquiryReplyConflict
     case staleRead
@@ -53,6 +55,10 @@ enum OwnerRepositoryError: LocalizedError, Sendable {
             "The server returned an inconsistent booking reschedule result."
         case .invalidInquiryResponse:
             "The server returned an inconsistent inquiry triage result."
+        case .invalidClientRecord:
+            "The server returned a different client record."
+        case .clientRecordSessionChanged:
+            "Sign in again to open this client record."
         case .inquiryReplySessionMismatch:
             "The saved reply draft belongs to a different session."
         case .pendingInquiryReplyConflict:
@@ -131,17 +137,20 @@ actor OwnerRepository {
     private let client: any APIClientProtocol
     private let cache: TenantJSONCache
     private let sessionID: String?
+    private let currentSessionID: @Sendable () async throws -> String?
     private var cacheIsActive = true
     private var mutationGenerations: [String: UInt64] = [:]
 
     init(
         client: any APIClientProtocol,
         cache: TenantJSONCache,
-        sessionID: String? = nil
+        sessionID: String? = nil,
+        currentSessionID: @escaping @Sendable () async throws -> String? = { nil }
     ) {
         self.client = client
         self.cache = cache
         self.sessionID = sessionID
+        self.currentSessionID = currentSessionID
     }
 
     func currentSession() async throws -> CurrentSession {
@@ -171,6 +180,20 @@ actor OwnerRepository {
             MiseEndpoints.Clients.list(cursor: cursor, limit: 100)
         }
         return try await persist(values, key: Key.clients, expectedGeneration: generation)
+    }
+
+    func clientRecord(id: Int64) async throws -> ClientSummary {
+        try await requireClientRecordSession()
+        let record = try await send(MiseEndpoints.Clients.detail(id: id))
+        try await requireClientRecordSession()
+        guard record.id == id else { throw OwnerRepositoryError.invalidClientRecord }
+        return record
+    }
+
+    private func requireClientRecordSession() async throws {
+        guard let sessionID, !sessionID.isEmpty,
+              try await currentSessionID() == sessionID, cacheIsActive
+        else { throw OwnerRepositoryError.clientRecordSessionChanged }
     }
 
     func cachedProjects() async throws -> ResourceSnapshot<[ProjectSummary]>? {

@@ -143,6 +143,90 @@ final class OwnerDataTests: XCTestCase {
         XCTAssertNil(cached)
     }
 
+    func testClientRecordReadsExactIDAndDoesNotSubstituteCachedDirectoryData() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = TenantJSONCache(cacheNamespace: "tenant", rootDirectory: root)
+        let response = try Self.clientReply()
+        let client = QueuedOwnerClient(replies: [
+            response, response, .failure(.notFound(nil)), .failure(.forbidden(nil)),
+        ])
+        let repository = OwnerRepository(
+            client: client, cache: cache, sessionID: "owner", currentSessionID: { "owner" }
+        )
+
+        let record = try await repository.clientRecord(id: 7)
+        XCTAssertEqual(record, Self.client)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+
+        do {
+            _ = try await repository.clientRecord(id: 9)
+            XCTFail("A reply for client 7 must never be displayed as client 9.")
+        } catch OwnerRepositoryError.invalidClientRecord {}
+
+        try await cache.write([record], key: "clients.v1", etag: nil)
+        do {
+            _ = try await repository.clientRecord(id: 7)
+            XCTFail("A deleted record must stay unavailable even if its directory entry exists.")
+        } catch APIError.notFound(_) {}
+        do {
+            _ = try await repository.clientRecord(id: 7)
+            XCTFail("An authorization failure must be returned even if the directory entry exists.")
+        } catch APIError.forbidden(_) {}
+
+        let requests = await client.requestPaths()
+        XCTAssertEqual(requests, ["/api/v1/clients/7", "/api/v1/clients/9", "/api/v1/clients/7", "/api/v1/clients/7"])
+        let endpoint = MiseEndpoints.Clients.detail(id: 7)
+        XCTAssertEqual(endpoint.authentication, .bearer)
+        XCTAssertEqual(endpoint.method, .get)
+    }
+
+    func testClientRecordRejectsLateSuccessDuringSignOut() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = TenantJSONCache(cacheNamespace: "tenant", rootDirectory: root)
+        let client = QueuedOwnerClient(replies: [try Self.clientReply()])
+        let repository = OwnerRepository(
+            client: client, cache: cache, sessionID: "owner", currentSessionID: { "owner" }
+        )
+        // Local purge starts sign-out before the authenticator clears its bearer.
+        await client.beforeNextReply { await repository.purgeCache() }
+        do {
+            _ = try await repository.clientRecord(id: 7)
+            XCTFail("A successful response returned after sign-out must be discarded.")
+        } catch OwnerRepositoryError.clientRecordSessionChanged {}
+    }
+
+    func testClientRecordRejectsReplacedSessionWhileRequestIsInFlight() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let active = LockedBox("owner")
+        let cache = TenantJSONCache(cacheNamespace: "tenant", rootDirectory: root)
+        let client = QueuedOwnerClient(replies: [try Self.clientReply()])
+        let repository = OwnerRepository(
+            client: client, cache: cache, sessionID: "owner",
+            currentSessionID: { active.withValue { $0 } }
+        )
+        await client.beforeNextReply { active.withValue { $0 = "replacement" } }
+        do {
+            _ = try await repository.clientRecord(id: 7)
+            XCTFail("The former session must not deliver a record after its login changes.")
+        } catch OwnerRepositoryError.clientRecordSessionChanged {}
+        do {
+            _ = try await repository.clientRecord(id: 7)
+            XCTFail("The former repository must not send another request with the replacement login.")
+        } catch OwnerRepositoryError.clientRecordSessionChanged {}
+        let paths = await client.requestPaths()
+        XCTAssertEqual(paths, ["/api/v1/clients/7"])
+    }
+
+    private static func clientReply() throws -> QueuedOwnerClient.Reply {
+        .value(
+            try MiseJSON.encoder().encode(client),
+            APIResponseMetadata(etag: nil, lastModified: nil, receivedAt: Date())
+        )
+    }
+
     private static let dashboard = DashboardSummary(
         generatedAt: Date(timeIntervalSince1970: 1_700_000_000),
         newInquiries: 3,
@@ -192,6 +276,8 @@ private actor QueuedOwnerClient: APIClientProtocol {
 
     private var replies: [Reply]
     private var etags: [String?] = []
+    private var paths: [String] = []
+    private var beforeReply: (@Sendable () async -> Void)?
 
     init(replies: [Reply]) { self.replies = replies }
 
@@ -204,7 +290,13 @@ private actor QueuedOwnerClient: APIClientProtocol {
     func sendWithMetadata<Response: Decodable & Sendable>(
         _ endpoint: APIEndpoint<Response>
     ) async throws -> APIResponse<Response> {
+        paths.append(endpoint.path)
         etags.append(endpoint.etag)
+        if let run = beforeReply {
+            beforeReply = nil
+            await run()
+        }
+        guard !replies.isEmpty else { throw APIError.unexpectedResponse }
         let reply = replies.removeFirst()
         switch reply {
         case let .value(data, metadata):
@@ -218,4 +310,9 @@ private actor QueuedOwnerClient: APIClientProtocol {
     }
 
     func requestETags() -> [String?] { etags }
+    func requestPaths() -> [String] { paths }
+
+    func beforeNextReply(_ action: @escaping @Sendable () async -> Void) {
+        beforeReply = action
+    }
 }
