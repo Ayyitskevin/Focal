@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 enum ResourceSnapshotSource: Equatable, Sendable {
     case cache
@@ -27,6 +28,8 @@ enum OwnerRepositoryError: LocalizedError, Sendable {
     case pendingBookingRescheduleMismatch
     case invalidBookingRescheduleResponse
     case invalidInquiryResponse
+    case inquiryReplySessionMismatch
+    case pendingInquiryReplyConflict
     case staleRead
     case inactiveSession
 
@@ -50,6 +53,10 @@ enum OwnerRepositoryError: LocalizedError, Sendable {
             "The server returned an inconsistent booking reschedule result."
         case .invalidInquiryResponse:
             "The server returned an inconsistent inquiry triage result."
+        case .inquiryReplySessionMismatch:
+            "The saved reply draft belongs to a different session."
+        case .pendingInquiryReplyConflict:
+            "The saved reply has changed or was cleared. Reopen the composer to check its current state."
         case .staleRead:
             "Newer studio changes are available. Refresh to load the current records."
         case .inactiveSession:
@@ -61,6 +68,36 @@ enum OwnerRepositoryError: LocalizedError, Sendable {
 private struct StoredBookingRescheduleResult: Codable, Equatable, Sendable {
     let sessionID: String
     let result: BookingRescheduleResult
+}
+
+struct InquiryReplySnapshot: Codable, Equatable, Sendable {
+    private enum State: Codable, Equatable, Sendable {
+        case empty
+        case pending(reply: InquiryReplyDraft)
+    }
+
+    let sessionID: String
+    let inquiryID: Int64
+    let generation: UUID
+    private var state: State
+
+    init(sessionID: String, inquiryID: Int64, generation: UUID = UUID()) {
+        self.sessionID = sessionID
+        self.inquiryID = inquiryID
+        self.generation = generation
+        state = .empty
+    }
+
+    var draft: InquiryReplyDraft? {
+        guard case let .pending(value) = state else { return nil }
+        return value
+    }
+
+    func withPending(_ value: InquiryReplyDraft) -> Self {
+        var result = self
+        result.state = .pending(reply: value)
+        return result
+    }
 }
 
 /// Owner data access. Every persisted value is scoped to the workspace's opaque
@@ -193,6 +230,128 @@ actor OwnerRepository {
         try? await cache.remove(Key.dashboard)
         try? await cache.remove(Key.clients)
         try? await cache.remove(Key.projects)
+        return value
+    }
+
+    private func requireInquiryReplySession() async throws -> String {
+        guard cacheIsActive else {
+            throw OwnerRepositoryError.inactiveSession
+        }
+        guard let sessionID, !sessionID.isEmpty else {
+            throw OwnerRepositoryError.inquiryReplySessionMismatch
+        }
+        return sessionID
+    }
+
+    func inquiryReplySnapshot(id: Int64) async throws -> InquiryReplySnapshot {
+        let currentSessionID = try await requireInquiryReplySession()
+        let snapshot = try await cache.inquiryReplySnapshot(sessionID: currentSessionID, inquiryID: id)
+        try await requireActiveCache()
+        return snapshot
+    }
+
+    func pendingInquiryReply(id: Int64) async throws -> InquiryReplyDraft? {
+        try await inquiryReplySnapshot(id: id).draft
+    }
+
+    func prepareInquiryReply(
+        id: Int64,
+        subject: String,
+        body: String,
+        observing observed: InquiryReplySnapshot
+    ) async throws -> InquiryReplyDraft {
+        let currentSessionID = try await requireInquiryReplySession()
+        guard observed.sessionID == currentSessionID else {
+            throw OwnerRepositoryError.inquiryReplySessionMismatch
+        }
+        guard observed.inquiryID == id else { throw OwnerRepositoryError.pendingInquiryReplyConflict }
+        let normalizedSubject = subject.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prepared = try await cache.inquiryReplySnapshot(sessionID: currentSessionID, inquiryID: id) { current in
+            guard current.generation == observed.generation else {
+                throw OwnerRepositoryError.pendingInquiryReplyConflict
+            }
+            if let expected = observed.draft, current.draft != expected {
+                throw OwnerRepositoryError.pendingInquiryReplyConflict
+            }
+            if let winner = current.draft,
+               winner.subject == normalizedSubject, winner.body == normalizedBody {
+                return current
+            }
+            guard current == observed else {
+                throw OwnerRepositoryError.pendingInquiryReplyConflict
+            }
+            return current.withPending(InquiryReplyDraft(
+                sessionID: currentSessionID,
+                inquiryID: id,
+                subject: normalizedSubject,
+                body: normalizedBody,
+                idempotencyKey: UUID()
+            ))
+        }
+        try await requireActiveCache()
+        guard let draft = prepared.draft else { throw OwnerRepositoryError.pendingInquiryReplyConflict }
+        return draft
+    }
+
+    @discardableResult
+    func discardPendingInquiryReply(ifMatches draft: InquiryReplyDraft) async throws -> Bool {
+        let currentSessionID = try await requireInquiryReplySession()
+        guard currentSessionID == draft.sessionID else { return false }
+        do {
+            _ = try await cache.inquiryReplySnapshot(sessionID: currentSessionID, inquiryID: draft.inquiryID) { current in
+                guard current.draft == draft else { throw OwnerRepositoryError.pendingInquiryReplyConflict }
+                return InquiryReplySnapshot(sessionID: currentSessionID, inquiryID: draft.inquiryID)
+            }
+            try await requireActiveCache()
+            return true
+        } catch OwnerRepositoryError.pendingInquiryReplyConflict {
+            return false
+        }
+    }
+
+    func replyToInquiry(draft: InquiryReplyDraft) async throws -> InquiryReplyResult {
+        let currentSessionID = try await requireInquiryReplySession()
+        guard draft.sessionID == currentSessionID else {
+            throw OwnerRepositoryError.inquiryReplySessionMismatch
+        }
+        guard try await pendingInquiryReply(id: draft.inquiryID) == draft else {
+            throw OwnerRepositoryError.pendingInquiryReplyConflict
+        }
+        let value = try await send(
+            MiseEndpoints.Inquiries.reply(
+                id: draft.inquiryID,
+                body: InquiryReplyRequest(subject: draft.subject, body: draft.body),
+                idempotencyKey: draft.idempotencyKey
+            )
+        )
+        guard value.detail.summary.id == draft.inquiryID else {
+            throw OwnerRepositoryError.invalidInquiryResponse
+        }
+        switch value.code {
+        case "inquiry.reply_sent":
+            guard value.deliveryStatus == "sent", value.messageID != nil else {
+                throw OwnerRepositoryError.invalidInquiryResponse
+            }
+            do {
+                _ = try await discardPendingInquiryReply(ifMatches: draft)
+            } catch {
+                try await requireActiveCache()
+                // The server already confirmed the send. A local storage error
+                // cannot change that outcome or authorize a second email.
+                Logger(subsystem: "Mise", category: "OwnerRepository")
+                    .error("Could not clear a locally saved reply after a confirmed send.")
+            }
+            advanceMutationGeneration(for: [Key.inquiries, Key.dashboard])
+            try? await cache.remove(Key.inquiries)
+            try? await cache.remove(Key.dashboard)
+        case "inquiry.delivery_unknown":
+            guard value.deliveryStatus == "unknown", value.messageID == nil else {
+                throw OwnerRepositoryError.invalidInquiryResponse
+            }
+        default:
+            throw OwnerRepositoryError.invalidInquiryResponse
+        }
         return value
     }
 
@@ -716,15 +875,21 @@ actor OwnerRepository {
 
     private func requireActiveCache() async throws {
         guard cacheIsActive else {
-            // A sign-out can interleave while an API request is suspended. Remove
-            // only disposable snapshots; durable session journals stay available
-            // to another scene that may still be resolving the exact command.
+            // A sign-out can interleave with a suspended request or cache write.
             await removeLocalState()
             throw OwnerRepositoryError.inactiveSession
         }
     }
 
     private func removeLocalState() async {
+        if let sessionID, !sessionID.isEmpty {
+            do {
+                try await cache.removeInquiryReplies(sessionID: sessionID)
+            } catch {
+                Logger(subsystem: "Mise", category: "OwnerRepository")
+                    .error("Could not remove the signed-out session's local inquiry replies.")
+            }
+        }
         try? await cache.removeAll()
     }
 

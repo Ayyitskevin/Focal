@@ -105,6 +105,7 @@ def test_tenant_discovery_and_openapi_are_scoped_native_contracts(mobile_client)
         "/inquiries/{inquiry_id}",
         "/inquiries/{inquiry_id}/dismissal",
         "/inquiries/{inquiry_id}/conversion",
+        "/inquiries/{inquiry_id}/reply",
         "/projects",
         "/galleries",
         "/galleries/{gallery_id}",
@@ -133,6 +134,9 @@ def test_tenant_discovery_and_openapi_are_scoped_native_contracts(mobile_client)
         "/media/galleries/{gallery_id}/assets/{asset_id}/{variant}",
     }
     assert all("admin" not in path for path in schema["paths"])
+    reply_responses = schema["paths"]["/inquiries/{inquiry_id}/reply"]["post"]["responses"]
+    assert {"201", "202"} <= set(reply_responses)
+    assert "200" not in reply_responses
 
     slots = schema["paths"]["/event-types/{event_type_id}/slots"]["get"]
     slot_parameters = {parameter["name"]: parameter for parameter in slots["parameters"]}

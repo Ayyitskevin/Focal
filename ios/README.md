@@ -82,8 +82,10 @@ and avoiding it in the foundation keeps auth/session behavior auditable.
   full conversations are never added to the persisted summary-list cache. Open
   inquiries can also convert atomically into a client and, for dated bookings, a
   project; repeat commands do not duplicate records, blank emails never match a
-  client, and converted IDs open the canonical web-admin records. Quoting and
-  email/SMS replies remain outside these inquiry slices.
+  client, and converted IDs open the canonical web-admin records. Manual email
+  replies use a session-bound idempotency receipt: 201 means SMTP accepted and the
+  conversation committed; 202 means delivery is unknown and the draft is preserved
+  without an automatic retry. Quoting and SMS replies remain outside these slices.
 - The owner companion's Home “Up next” area is a truthful six-row preview with
   a pushed, complete studio-task inbox. That feed aggregates every open Focal
   studio-operation row in session memory only, uses the workspace timezone for

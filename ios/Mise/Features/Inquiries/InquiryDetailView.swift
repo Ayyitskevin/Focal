@@ -9,13 +9,16 @@ struct InquiryDetailView: View {
     private let onTriage: @MainActor () async -> Void
 
     @State private var detail: InquiryDetail?
-    @State private var isLoading = false
+    @State private var loadingGeneration: UInt64?
+    private var isLoading: Bool { loadingGeneration != nil }
     @State private var loadFailure: String?
     @State private var requestGeneration: UInt64 = 0
     @State private var isMutating = false
     @State private var mutationFailure: String?
     @State private var confirmDismissal = false
     @State private var confirmConversion = false
+    @State private var showReplyComposer = false
+    @State private var replyGeneration: UInt64?
 
     init(
         summary: InquirySummary,
@@ -91,6 +94,28 @@ struct InquiryDetailView: View {
         } message: {
             Text(mutationFailure ?? "")
         }
+        .sheet(isPresented: $showReplyComposer) {
+            if let summary = detail?.summary {
+                InquiryReplyComposer(
+                    summary: summary,
+                    repository: repository,
+                    isPresented: $showReplyComposer,
+                    onSent: { result in
+                        let startedGeneration = replyGeneration
+                        showReplyComposer = false
+                        replyGeneration = nil
+                        guard startedGeneration == requestGeneration else {
+                            await load(replacingCurrentRead: true)
+                            await onTriage()
+                            return
+                        }
+                        requestGeneration &+= 1
+                        detail = result.detail
+                        await onTriage()
+                    }
+                )
+            }
+        }
     }
 
     private func conversation(_ detail: InquiryDetail) -> some View {
@@ -133,6 +158,17 @@ struct InquiryDetailView: View {
                 }
                 ForEach(detail.messages) { message in
                     messageBubble(message)
+                }
+            }
+
+            if canWrite, let email = detail.summary.email, !email.isEmpty {
+                Section {
+                    Button("Reply by email", systemImage: "envelope") {
+                        replyGeneration = requestGeneration
+                        showReplyComposer = true
+                    }
+                    .disabled(isMutating)
+                    .frame(minHeight: 44)
                 }
             }
 
@@ -246,13 +282,15 @@ struct InquiryDetailView: View {
         return display
     }
 
-    private func load() async {
-        guard !isLoading, !isMutating else { return }
-        isLoading = true
+    private func load(replacingCurrentRead: Bool = false) async {
+        guard (!isLoading || replacingCurrentRead), !isMutating else { return }
         loadFailure = nil
         requestGeneration &+= 1
         let generation = requestGeneration
-        defer { isLoading = false }
+        loadingGeneration = generation
+        defer {
+            if loadingGeneration == generation { loadingGeneration = nil }
+        }
         do {
             let loaded = try await repository.inquiryDetail(id: inquiryID)
             guard loaded.summary.id == inquiryID else {

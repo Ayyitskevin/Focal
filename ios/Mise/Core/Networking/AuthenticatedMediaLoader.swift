@@ -16,15 +16,15 @@ actor AuthenticatedMediaLoader {
     }
 
     func data(for url: URL) async throws -> Data {
-        guard let token = try await authorizer.bearerToken() else {
+        guard let bearer = try await authorizer.requestBearer() else {
             throw APIError.unauthenticated(nil)
         }
-        return try await fetch(url: url, bearerToken: token, mayRefresh: true)
+        return try await fetch(url: url, bearer: bearer, mayRefresh: true)
     }
 
-    private func fetch(url: URL, bearerToken: String, mayRefresh: Bool) async throws -> Data {
+    private func fetch(url: URL, bearer: RequestBearer, mayRefresh: Bool) async throws -> Data {
         var request = URLRequest(url: url)
-        request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(bearer.token)", forHTTPHeaderField: "Authorization")
 
         let data: Data
         let response: URLResponse
@@ -43,12 +43,10 @@ actor AuthenticatedMediaLoader {
         }
 
         if httpResponse.statusCode == 401 {
-            if mayRefresh,
-               let refreshed = try await authorizer.refreshBearerToken(rejectedToken: bearerToken)
-            {
-                return try await fetch(url: url, bearerToken: refreshed, mayRefresh: false)
+            if mayRefresh, let refreshed = try await authorizer.refreshBearer(bearer) {
+                return try await fetch(url: url, bearer: refreshed, mayRefresh: false)
             }
-            await authorizer.invalidate()
+            try await authorizer.invalidate(ifRejected: bearer)
             throw APIError.unauthenticated(nil)
         }
 

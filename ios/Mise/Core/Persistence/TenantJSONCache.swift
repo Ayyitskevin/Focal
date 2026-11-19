@@ -17,6 +17,11 @@ struct TenantCacheRecord<Value: Codable & Sendable>: Sendable {
     let etag: String?
 }
 
+private struct LegacyInquiryReplyIdentity: Codable, Sendable {
+    let sessionID: String?
+    let inquiryID: Int64?
+}
+
 /// A small cache for server snapshots, isolated by the backend-provided tenant namespace.
 ///
 /// Raw tenant names and resource keys never become path components. The namespace is
@@ -129,6 +134,85 @@ actor TenantJSONCache {
             etag: etag,
             storedAt: storedAt
         )
+    }
+
+    /// Observing, changing and consuming a reply each use the same critical section
+    /// across cache instances. Even an empty journal has a stable generation.
+    func inquiryReplySnapshot(
+        sessionID: String,
+        inquiryID: Int64,
+        updating transition: @Sendable (InquiryReplySnapshot) throws -> InquiryReplySnapshot = { $0 }
+    ) throws -> InquiryReplySnapshot {
+        Self.commandLock.lock()
+        defer { Self.commandLock.unlock() }
+        let url = inquiryReplyDirectory(sessionID: sessionID)
+            .appendingPathComponent(Self.digest(String(inquiryID)))
+            .appendingPathExtension("json")
+        let legacyURL = legacyInquiryReplyURL(sessionID: sessionID, inquiryID: inquiryID)
+        let stored = try readStrict(url, as: InquiryReplySnapshot.self)?.value
+        let current: InquiryReplySnapshot
+        if let stored {
+            current = stored
+        } else {
+            let empty = InquiryReplySnapshot(sessionID: sessionID, inquiryID: inquiryID)
+            if let legacy = try readStrict(legacyURL, as: InquiryReplyDraft.self) {
+                current = empty.withPending(legacy.value)
+            } else {
+                current = empty
+            }
+        }
+        guard current.sessionID == sessionID, current.inquiryID == inquiryID else {
+            throw OwnerRepositoryError.inquiryReplySessionMismatch
+        }
+        if let draft = current.draft, draft.sessionID != sessionID || draft.inquiryID != inquiryID {
+            throw OwnerRepositoryError.inquiryReplySessionMismatch
+        }
+        let next = try transition(current)
+        if stored != next {
+            _ = try writeUnlocked(next, at: url, etag: nil, storedAt: Date())
+        }
+        // A migration interrupted after the atomic write resumes with the new
+        // record authoritative, including a marker that already consumed the draft.
+        if fileManager.fileExists(atPath: legacyURL.path) {
+            try fileManager.removeItem(at: legacyURL)
+        }
+        return next
+    }
+
+    func removeInquiryReplies(sessionID: String) throws {
+        Self.commandLock.lock()
+        defer { Self.commandLock.unlock() }
+        guard fileManager.fileExists(atPath: commandDirectory.path) else { return }
+        // V1 stored replies alongside other command types under opaque filenames.
+        // Read just the identity, then verify the reply key before deleting.
+        var failure: Error?
+        for url in try fileManager.contentsOfDirectory(at: commandDirectory, includingPropertiesForKeys: nil)
+            where url.pathExtension == "json" {
+            do {
+                guard let identity = try readStrict(url, as: LegacyInquiryReplyIdentity.self)?.value,
+                      identity.sessionID == sessionID, let inquiryID = identity.inquiryID,
+                      url.lastPathComponent == legacyInquiryReplyURL(
+                          sessionID: sessionID, inquiryID: inquiryID
+                      ).lastPathComponent
+                else { continue }
+                try fileManager.removeItem(at: url)
+            } catch {
+                failure = error
+            }
+        }
+        let directory = inquiryReplyDirectory(sessionID: sessionID)
+        if fileManager.fileExists(atPath: directory.path) {
+            try fileManager.removeItem(at: directory)
+        }
+        if let failure { throw failure }
+    }
+
+    private func inquiryReplyDirectory(sessionID: String) -> URL {
+        commandDirectory.appendingPathComponent("inquiry-replies.\(Self.digest(sessionID))", isDirectory: true)
+    }
+
+    private func legacyInquiryReplyURL(sessionID: String, inquiryID: Int64) -> URL {
+        commandFileURL(for: "inquiry.reply.pending.v1.\(sessionID).\(inquiryID)")
     }
 
     /// Moves an owned legacy journal into session-scoped command storage without
