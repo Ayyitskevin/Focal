@@ -84,7 +84,10 @@ def main(udid: str) -> int:
             "FocalSimulator",
             "-destination",
             f"platform=iOS Simulator,id={udid}",
-            "CODE_SIGNING_ALLOWED=NO",
+            "-parallel-testing-enabled",
+            "NO",
+            # The signed simulator app uses its own Keychain for the real owner login.
+            "CODE_SIGN_IDENTITY=-",
         ]
         result = subprocess.run(command, cwd=ROOT / "ios", env=env)
         if result.returncode:
