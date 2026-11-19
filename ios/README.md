@@ -91,8 +91,8 @@ and avoiding it in the foundation keeps auth/session behavior auditable.
   full conversations are never added to the persisted summary-list cache. Open
   inquiries can also convert atomically into a client and, for dated bookings, a
   project; repeat commands do not duplicate records, blank emails never match a
-  client. The converted client opens inside the app using the owner's existing
-  session. The linked project opens in web admin. Manual email
+  client. Both the converted client and its linked project open inside the app using
+  the owner’s existing session. Back returns to the converted inquiry. Manual email
   replies use a session-bound idempotency receipt: 201 means SMTP accepted and the
   conversation committed; 202 means delivery is unknown and the draft is preserved
   without an automatic retry. Quoting and SMS replies remain outside these slices.

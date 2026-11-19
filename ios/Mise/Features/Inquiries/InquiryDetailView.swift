@@ -4,7 +4,6 @@ struct InquiryDetailView: View {
     private let inquiryID: Int64
     private let initialSummary: InquirySummary
     private let repository: OwnerRepository
-    private let workspaceOrigin: URL
     private let canWrite: Bool
     private let onTriage: @MainActor () async -> Void
 
@@ -23,14 +22,12 @@ struct InquiryDetailView: View {
     init(
         summary: InquirySummary,
         repository: OwnerRepository,
-        workspaceOrigin: URL,
         canWrite: Bool,
         onTriage: @escaping @MainActor () async -> Void
     ) {
         inquiryID = summary.id
         initialSummary = summary
         self.repository = repository
-        self.workspaceOrigin = workspaceOrigin
         self.canWrite = canWrite
         self.onTriage = onTriage
     }
@@ -136,12 +133,13 @@ struct InquiryDetailView: View {
                         }
                     }
                     if let projectID = detail.summary.convertedProjectID {
-                        Link(destination: workspaceOrigin.appendingPathComponent("admin/studio/projects/\(projectID)")) {
+                        NavigationLink {
+                            ProjectRecordView(projectID: projectID, repository: repository)
+                                .id(projectID)
+                                .id(ObjectIdentifier(repository))
+                        } label: {
                             Label("Open project record", systemImage: "briefcase")
                         }
-                        Text("The project opens in web admin. Your browser may ask you to sign in.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -274,6 +272,8 @@ struct InquiryDetailView: View {
                 }
                 .frame(minHeight: 44)
             }
+            // Both actions share one List row; each button needs its own hit target.
+            .buttonStyle(.borderless)
         }
     }
 

@@ -639,6 +639,14 @@ def client_detail(
     return _conditional(request, response, _client_summary(row))
 
 
+_PROJECT_SUMMARY_SELECT = """
+    SELECT p.id, p.client_id, p.title, p.status, p.gallery_id,
+           p.shoot_date, p.workspace_published, p.created_at,
+           COALESCE(NULLIF(c.company, ''), c.name) AS client_display_name
+      FROM projects p JOIN clients c ON c.id=p.client_id
+"""
+
+
 def _project_summary(row) -> ProjectSummary:
     return ProjectSummary(
         id=int(row["id"]),
@@ -664,12 +672,7 @@ def projects(
     where = "WHERE p.id < ?" if last_id is not None else ""
     params = (last_id, limit + 1) if last_id is not None else (limit + 1,)
     rows = db.all_(
-        f"""SELECT p.id, p.client_id, p.title, p.status, p.gallery_id,
-                   p.shoot_date, p.workspace_published, p.created_at,
-                   COALESCE(NULLIF(c.company, ''), c.name) AS client_display_name
-              FROM projects p JOIN clients c ON c.id=p.client_id
-              {where}
-              ORDER BY p.id DESC LIMIT ?""",
+        f"{_PROJECT_SUMMARY_SELECT} {where} ORDER BY p.id DESC LIMIT ?",
         params,
     )
     has_more = len(rows) > limit
@@ -682,6 +685,18 @@ def projects(
         has_more=has_more,
     )
     return _conditional(request, response, payload)
+
+
+@router.get("/projects/{project_id}", response_model=ProjectSummary)
+def project_detail(
+    request: Request,
+    response: Response,
+    project_id: Annotated[int, Path(ge=1, le=_INT64_MAX)],
+) -> ProjectSummary | Response:
+    row = db.one(_PROJECT_SUMMARY_SELECT + " WHERE p.id=?", (project_id,))
+    if row is None:
+        raise mobile_auth.MobileAuthError(404, "project.not_found", "Project not found.")
+    return _conditional(request, response, _project_summary(row))
 
 
 def _inquiry_text(value: object, *, maximum: int, fallback: str | None = None) -> str | None:

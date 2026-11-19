@@ -4,7 +4,6 @@ struct InquiriesView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let model: ResourceModel<[InquirySummary]>
     let repository: OwnerRepository
-    let workspaceOrigin: URL
     let canWrite: Bool
     let onTriage: @MainActor () async -> Void
     @State private var query = ""
@@ -38,7 +37,6 @@ struct InquiriesView: View {
                         InquiryDetailView(
                             summary: inquiry,
                             repository: repository,
-                            workspaceOrigin: workspaceOrigin,
                             canWrite: canWrite,
                             onTriage: onTriage
                         )

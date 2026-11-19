@@ -2,11 +2,12 @@ import XCTest
 
 final class ConvertedClientJourneyTests: XCTestCase {
     @MainActor
-    func testConvertOpenLinkedClientAndReturnToInquiry() throws {
+    func testConvertOpenLinkedClientAndProjectAndReturnToInquiry() throws {
         continueAfterFailure = false
         let environment = ProcessInfo.processInfo.environment
         let port = try XCTUnwrap(environment["FOCAL_JOURNEY_PORT"].flatMap(UInt16.init))
         let password = try XCTUnwrap(environment["FOCAL_JOURNEY_PASSWORD"])
+        let expectedProjectTitle = try XCTUnwrap(environment["FOCAL_JOURNEY_PROJECT_TITLE"])
         let app = XCUIApplication()
         app.launch()
 
@@ -60,5 +61,19 @@ final class ConvertedClientJourneyTests: XCTestCase {
         record.buttons.firstMatch.tap()
         XCTAssertTrue(original.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(openClient.waitForExistence(timeout: 10), app.debugDescription)
+
+        let openProject = app.buttons["Open project record"]
+        XCTAssertTrue(openProject.waitForExistence(timeout: 10), app.debugDescription)
+        openProject.tap()
+        let project = app.navigationBars["Project record"]
+        XCTAssertTrue(project.waitForExistence(timeout: 10), app.debugDescription)
+        let projectTitle = app.staticTexts["project-record-title"]
+        XCTAssertTrue(projectTitle.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertEqual(projectTitle.label, expectedProjectTitle)
+
+        project.buttons.firstMatch.tap()
+        XCTAssertTrue(original.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(openClient.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(openProject.waitForExistence(timeout: 10), app.debugDescription)
     }
 }

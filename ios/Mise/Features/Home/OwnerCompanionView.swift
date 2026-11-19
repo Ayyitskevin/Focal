@@ -221,7 +221,6 @@ struct OwnerCompanionView: View {
             InquiriesView(
                 model: inquiries,
                 repository: repository,
-                workspaceOrigin: session.workspace.apiBaseURL,
                 canWrite: commands.canWrite,
                 onTriage: {
                     await inquiries.refreshAfterCurrent()
