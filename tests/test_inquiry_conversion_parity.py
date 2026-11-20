@@ -196,15 +196,23 @@ def test_blank_email_contacts_never_share_clients_or_create_projects(owners):
 def test_deleted_conversion_links_are_not_recreated(owners):
     browser, iphone = owners
     iid = booking()
-    # Deleting the linked records preserves converted_at and clears both foreign keys.
+    client_id, project_id = phone_convert(iphone, iid)
     stamp = "2001-02-03 04:05:06"
     db.run("UPDATE inquiries SET converted_at=? WHERE id=?", (stamp, iid))
-    assert web_convert(browser, iid) == f"/admin/inbox?tab=archived&sel={iid}"
+    db.run("DELETE FROM projects WHERE id=?", (project_id,))
+    assert web_convert(browser, iid) == f"/admin/studio/clients/{client_id}"
+    assert phone_convert(iphone, iid) == (client_id, None)
+    db.run("DELETE FROM clients WHERE id=?", (client_id,))
+    for form in ({}, {"return_to": f"/admin/inbox?tab=all&sel={iid}"}):
+        replay = browser.post(f"/admin/studio/inquiries/{iid}/client", data=form)
+        assert replay.status_code == 410
+        assert "linked records are no longer available" in replay.text
+        assert "location" not in replay.headers
     assert phone_convert(iphone, iid) == (None, None)
     assert db.one("SELECT converted_at FROM inquiries WHERE id=?", (iid,))["converted_at"] == stamp
     assert db.all_("SELECT id FROM clients") == []
     assert db.all_("SELECT id FROM projects") == []
-    assert db.all_("SELECT id FROM audit_log WHERE action='convert'") == []
+    assert len(db.all_("SELECT id FROM audit_log WHERE action='convert'")) == 1
 
 
 @pytest.mark.parametrize("surface", ["browser", "iphone"])

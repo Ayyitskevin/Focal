@@ -668,7 +668,10 @@ def inquiry_to_client(inquiry_id: int, return_to: str = Form("")):
     elif client_id is not None:
         destination = f"/admin/studio/clients/{client_id}"
     else:
-        destination = f"/admin/inbox?tab=archived&sel={inquiry_id}"
+        raise HTTPException(
+            status_code=410,
+            detail="This inquiry was already converted. Its linked records are no longer available.",
+        )
     return _redirect(return_to, destination)
 
 

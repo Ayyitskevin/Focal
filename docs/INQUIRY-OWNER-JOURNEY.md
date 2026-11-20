@@ -198,8 +198,9 @@ Contact inquiries create no projects.
 
 The browser preserves its 303 redirect to the original project or client and
 honors its existing local admin return destination. If linked records have
-since been deleted, a retry keeps the surviving links and never recreates a
-deleted record. The iPhone keeps its current owner-write requirement and returns
+since been deleted, a retry keeps the surviving links. When both links are gone,
+the browser returns 410 and explains that the records are unavailable. The
+iPhone keeps its current owner-write requirement and returns
 the converted inquiry from the same transaction. Quote creation and explicit
 Undo retain their own workflows.
 
