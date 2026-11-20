@@ -45,6 +45,16 @@ final class ConvertedClientJourneyTests: XCTestCase {
         XCTAssertTrue(confirm.waitForExistence(timeout: 10), app.debugDescription)
         confirm.tap()
 
+        // The studio submitted the browser form concurrently, then withheld the first
+        // successful response. Replay the owner's original action from the same screen.
+        let update = app.alerts["Inquiry update"]
+        XCTAssertTrue(update.waitForExistence(timeout: 20), app.debugDescription)
+        update.buttons["OK"].tap()
+        XCTAssertTrue(convert.waitForExistence(timeout: 10), app.debugDescription)
+        convert.tap()
+        XCTAssertTrue(confirm.waitForExistence(timeout: 10), app.debugDescription)
+        confirm.tap()
+
         let openClient = app.buttons["Open client record"]
         for _ in 0..<5 {
             if openClient.exists && openClient.isHittable { break }
