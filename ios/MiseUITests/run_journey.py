@@ -118,14 +118,19 @@ def synthetic_studio():
             response = await call_next(request)
             path = request.url.path
             if request.method == "GET" and path.startswith("/api/v1/projects/"):
-                # Only interrupt the second successful read of the actual converted project.
-                if response.status_code == 200 and project_reads == [(path, 200)]:
+                # URLSession may revalidate the first response with If-None-Match.
+                origin_status = response.status_code
+                if origin_status in (200, 304) and project_reads == [(path, 200)]:
                     linked = db.one(
                         "SELECT converted_project_id FROM inquiries WHERE id=?", (INQUIRY_ID,)
                     )
                     if path == f"/api/v1/projects/{linked['converted_project_id']}":
                         response = Response(status_code=503, headers={"Cache-Control": "no-store"})
                 project_reads.append((path, response.status_code))
+                print(
+                    f"Simulator GET {path}: studio {origin_status}, sent {response.status_code}",
+                    flush=True,
+                )
             return response
 
         # Keep this exact socket bound until shutdown. Concurrent runs get distinct origins.
@@ -184,7 +189,10 @@ def main(reference_udid: str) -> int:
                 "The simulator did not convert the booking into the expected records."
             )
         path = f"/api/v1/projects/{row['project_id']}"
-        if project_reads != [(path, 200), (path, 503), (path, 200)]:
+        if project_reads not in (
+            [(path, 200), (path, 503), (path, 200)],
+            [(path, 200), (path, 503), (path, 304)],
+        ):
             raise RuntimeError(f"Unexpected simulator project reads: {project_reads!r}")
         print(
             f"Verified inquiry {INQUIRY_ID} opened its stored project {row['project_id']}, "
