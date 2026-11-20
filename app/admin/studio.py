@@ -17,6 +17,7 @@ from .. import (
     config,
     crm_fields,
     db,
+    inquiries,
     jobs,
     mailer,
     platekit,
@@ -655,46 +656,20 @@ async def inquiry_undismiss(inquiry_id: int, return_to: str = Form("")):
 
 
 @router.post("/inquiries/{inquiry_id}/client")
-async def inquiry_to_client(inquiry_id: int, return_to: str = Form("")):
-    inq = db.one("SELECT * FROM inquiries WHERE id=?", (inquiry_id,))
-    if not inq:
-        raise HTTPException(status_code=404)
-    existing = db.one("SELECT id FROM clients WHERE email=?", (inq["email"],))
-    cid = (
-        existing["id"]
-        if existing
-        else db.run(
-            "INSERT INTO clients (name, company, email, notes) VALUES (?,?,?,?)",
-            (
-                inq["name"],
-                inq["business"],
-                inq["email"],
-                f"From inquiry {inq['created_at'][:10]}:\n{inq['message']}",
-            ),
-        )
-    )
-    if not existing:
-        log.info("client %s created from inquiry %s", cid, inquiry_id)
-    pid = None
-    # Bookings carry a date + service → lift straight into an 'inquiry_received' project so
-    # Kevin can spawn a proposal without re-typing the date.
-    if inq["kind"] == "booking" and inq["shoot_date"]:
-        title = f"{inq['service'] or 'Shoot'} — {inq['shoot_date']}"
-        pid = db.run(
-            """INSERT INTO projects (client_id, title, shoot_date)
-                        VALUES (?,?,?)""",
-            (cid, title, inq["shoot_date"]),
-        )
-        log.info("project %s spawned from booking %s", pid, inquiry_id)
-    # Stamp the inquiry as converted so the studio list can fade it out.
-    db.run(
-        """UPDATE inquiries SET converted_at=datetime('now'),
-              converted_client_id=?, converted_project_id=? WHERE id=?""",
-        (cid, pid, inquiry_id),
-    )
-    if pid:
-        return _redirect(return_to, f"/admin/studio/projects/{pid}")
-    return _redirect(return_to, f"/admin/studio/clients/{cid}")
+def inquiry_to_client(inquiry_id: int, return_to: str = Form("")):
+    try:
+        with db.tx() as con:
+            client_id, project_id = inquiries.convert_to_records(con, inquiry_id)
+    except inquiries.ConversionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    if project_id is not None:
+        destination = f"/admin/studio/projects/{project_id}"
+    elif client_id is not None:
+        destination = f"/admin/studio/clients/{client_id}"
+    else:
+        destination = f"/admin/inbox?tab=archived&sel={inquiry_id}"
+    return _redirect(return_to, destination)
 
 
 @router.post("/inquiries/{inquiry_id}/quote")
