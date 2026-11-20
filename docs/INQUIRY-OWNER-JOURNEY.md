@@ -202,7 +202,10 @@ since been deleted, a retry keeps the surviving links. When both links are gone,
 the browser returns 410 and explains that the records are unavailable. The
 iPhone keeps its current owner-write requirement and returns
 the converted inquiry from the same transaction. Quote creation and explicit
-Undo retain their own workflows.
+Undo retain their own workflows. Automated booking confirmation also links
+records separately. When it creates an inquiry, an owner can convert it before
+the scheduler finishes linking the booking. The scheduler can then replace the
+owner’s project link. Coordinating those two operations is a follow-up.
 
 **Acceptance.** Submit the browser and iPhone requests in both orders, retry each
 surface, and overlap their first requests for a fresh booking. Compare both
