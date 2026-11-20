@@ -168,6 +168,59 @@ def test_confirm_replay_reuses_generated_mirror_and_project(browser):
     assert [row["id"] for row in db.all_("SELECT id FROM projects")] == [pid]
 
 
+def test_failed_mirror_can_be_retried(browser, caplog):
+    bid, _ = booking()
+    db.run("""CREATE TRIGGER fail_mirror BEFORE INSERT ON inquiries
+              BEGIN SELECT RAISE(ABORT, 'injected mirror failure'); END""")
+    booking_notify.confirm(bid)
+    assert "injected mirror failure" in caplog.text
+    assert booking_links(bid) == (None, None, None)
+    assert db.all_("SELECT id FROM inquiries") == []
+    assert db.all_("SELECT id FROM clients") == []
+    assert db.all_("SELECT id FROM projects") == []
+    db.run("DROP TRIGGER fail_mirror")
+
+    booking_notify.confirm(bid)
+    iid, cid, pid = booking_links(bid)
+    assert all((iid, cid, pid))
+    assert inquiry_links(iid) == (cid, pid)
+    assert owner_convert(browser, iid) == f"/admin/studio/projects/{pid}"
+    assert [row["id"] for row in db.all_("SELECT id FROM projects")] == [pid]
+
+
+@pytest.mark.parametrize("old_inquiry", [None, 912])
+def test_new_mirror_adopts_existing_booking_records(browser, old_inquiry):
+    # Older confirmations could finish linking a project after their mirror failed.
+    bid, _ = booking()
+    cid = db.run("INSERT INTO clients(name) VALUES ('Existing client')")
+    pid = db.run("INSERT INTO projects(client_id,title) VALUES (?,'Edited shoot')", (cid,))
+    db.run(
+        "UPDATE bookings SET inquiry_id=?,client_id=?,project_id=? WHERE id=?",
+        (old_inquiry, cid, pid, bid),
+    )
+    booking_notify.confirm(bid)
+    iid, linked_client, linked_project = booking_links(bid)
+    assert iid and iid != old_inquiry
+    assert (linked_client, linked_project) == inquiry_links(iid) == (cid, pid)
+    assert owner_convert(browser, iid) == f"/admin/studio/projects/{pid}"
+    assert [tuple(r) for r in db.all_("SELECT id,title FROM projects")] == [(pid, "Edited shoot")]
+
+
+def test_scheduler_replay_respects_an_explicit_owner_undo(browser):
+    bid, _ = booking()
+    booking_notify.confirm(bid)
+    iid, cid, pid = booking_links(bid)
+    assert all((iid, cid, pid))
+    assert browser.post(f"/admin/studio/inquiries/{iid}/unconvert").status_code == 303
+    booking_notify.confirm(bid)
+    assert booking_links(bid) == (iid, cid, pid)
+    assert inquiry_links(iid) == (None, None)
+    assert db.one("SELECT converted_at FROM inquiries WHERE id=?", (iid,))[0] is None
+    assert owner_convert(browser, iid) == f"/admin/studio/projects/{pid}"
+    assert inquiry_links(iid) == (cid, pid)
+    assert [row["id"] for row in db.all_("SELECT id FROM projects")] == [pid]
+
+
 @pytest.mark.parametrize("first", ["scheduler", "owner"])
 def test_consultation_waits_for_explicit_promotion(browser, first):
     bid, iid = booking(shoot=False, mirror=True)
