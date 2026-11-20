@@ -11,7 +11,7 @@ import hashlib
 import logging
 from zoneinfo import ZoneInfo
 
-from . import config, db, features, gcal, ics, mailer, notion_sync, urls
+from . import config, db, features, gcal, ics, inquiries, mailer, notion_sync, urls
 from .booking_workflow import NotApplicable
 
 log = logging.getLogger("mise.booking")
@@ -59,73 +59,42 @@ def _manage_url(token: str) -> str:
     return f"{urls.public_base_url()}/booking/{token}"
 
 
-def _link_studio(booking_id: int, inquiry_id: int | None) -> None:
-    """Find-or-create the Studio client (always) and, for real-shoot event types,
-    a project — so the booking, inquiry, client, project and Notion Session share one
-    identity instead of spawning duplicate leads. Best-effort: the booking is already
-    committed, so a CRM hiccup here must never lose it (fail loud, not lost).
-
-    Runs before the Notion Session sync so the session-create branch can stamp the
-    new project's notion_page_id, unifying project <-> Session for the pipeline."""
-    b = db.one(
-        """SELECT b.*, e.name AS event_name, e.creates_notion_session
-                  FROM bookings b JOIN event_types e ON e.id=b.event_type_id
-                  WHERE b.id=?""",
-        (booking_id,),
-    )
-    if not b or b["client_id"]:  # idempotent on re-run
-        return
-
-    # A reschedule inherits the original booking's client/project — never a new lead.
-    if b["reschedule_of"]:
-        prev = db.one(
-            "SELECT client_id, project_id FROM bookings WHERE id=?", (b["reschedule_of"],)
-        )
-        if prev and prev["client_id"]:
-            db.run(
-                "UPDATE bookings SET client_id=?, project_id=? WHERE id=?",
-                (prev["client_id"], prev["project_id"], booking_id),
-            )
-            return
-
-    existing = db.one("SELECT id FROM clients WHERE email=?", (b["email"],))
-    cid = (
-        existing["id"]
-        if existing
-        else db.run(
-            "INSERT INTO clients (name, email, phone, notes) VALUES (?,?,?,?)",
+def _mirror_inquiry(b, biz_when: str, emailed: bool) -> int:
+    """Publish the inbox entry once, even if two confirmations are running."""
+    with db.tx() as con:
+        con.execute("BEGIN IMMEDIATE")
+        current = con.execute(
+            """SELECT i.id AS inquiry_id, b.client_id, b.project_id FROM bookings b
+                 LEFT JOIN inquiries i ON i.id=b.inquiry_id WHERE b.id=?""",
+            (b["id"],),
+        ).fetchone()
+        if current is None:
+            raise ValueError(f"Booking {b['id']} vanished before publishing its inquiry")
+        if current["inquiry_id"] is not None:
+            return current["inquiry_id"]
+        inquiry_id = con.execute(
+            """INSERT INTO inquiries (name, email, message, kind, shoot_date, service, emailed)
+               VALUES (?,?,?,'booking',?,?,?)""",
             (
                 b["name"],
                 b["email"],
-                b["phone"] or "",
-                f"Auto-created from a Mise booking {b['created_at'][:10]}.",
+                f"Booked {b['event_name']} for {biz_when}.\n\n{b['notes']}",
+                b["start_utc"][:10],
+                b["event_name"],
+                int(emailed),
             ),
-        )
-    )
-    if not existing:
-        log.info("booking %s created client %s", booking_id, cid)
+        ).lastrowid
+        if current["project_id"] is not None:
+            inquiries.stamp_conversion(con, inquiry_id, current["client_id"], current["project_id"])
+        con.execute("UPDATE bookings SET inquiry_id=? WHERE id=?", (inquiry_id, b["id"]))
+        return inquiry_id
 
-    pid = None
-    # Only real shoots (the same opt-in that spawns a Notion Session) get a project;
-    # discovery/consult calls stay client-only so Kevin promotes them by hand if needed.
-    if b["creates_notion_session"]:
-        title = f"{b['event_name']} — {b['start_utc'][:10]}"
-        pid = db.run(
-            """INSERT INTO projects (client_id, title, shoot_date, notes)
-                        VALUES (?,?,?,?)""",
-            (cid, title, b["start_utc"][:10], notion_sync.intake_summary(b) or None),
-        )
-        log.info("booking %s spawned project %s", booking_id, pid)
-        # Fade the mirrored inquiry out of the studio 'to convert' list so Kevin's
-        # manual convert button can't double-create the same project.
-        if inquiry_id:
-            db.run(
-                """UPDATE inquiries SET converted_at=datetime('now'),
-                      converted_client_id=?, converted_project_id=? WHERE id=?""",
-                (cid, pid, inquiry_id),
-            )
 
-    db.run("UPDATE bookings SET client_id=?, project_id=? WHERE id=?", (cid, pid, booking_id))
+def _link_studio(booking_id: int, inquiry_id: int) -> None:
+    """Commit the Studio identity before its project is mirrored to Notion."""
+    with db.tx() as con:
+        con.execute("BEGIN IMMEDIATE")
+        inquiries.link_booking_records(con, booking_id, inquiry_id, promote=False)
 
 
 def confirm(booking_id: int) -> None:
@@ -204,32 +173,11 @@ def confirm(booking_id: int) -> None:
             log.error("booking %s kevin email failed: %s", booking_id, e)
 
     # Mise-side inquiry row keeps the admin inquiry list + Odysseus consistent.
-    iid = None
     try:
-        iid = db.run(
-            """INSERT INTO inquiries (name, email, business, message, kind,
-                                      shoot_date, service, emailed)
-               VALUES (?,?,?,?,?,?,?,?)""",
-            (
-                b["name"],
-                b["email"],
-                None,
-                f"Booked {b['event_name']} for {biz_when}.\n\n{b['notes']}",
-                "booking",
-                b["start_utc"][:10],
-                b["event_name"],
-                1 if mailer.configured() else 0,
-            ),
-        )
-        db.run("UPDATE bookings SET inquiry_id=? WHERE id=?", (iid, booking_id))
-    except Exception as e:
-        log.error("booking %s inquiry-row mirror failed: %s", booking_id, e)
-
-    # Link the booking into the Studio CRM (client always; project for real shoots).
-    try:
+        iid = _mirror_inquiry(b, biz_when, mailer.configured())
         _link_studio(booking_id, iid)
     except Exception as e:
-        log.error("booking %s studio link failed: %s", booking_id, e)
+        log.error("booking %s studio inquiry linking failed: %s", booking_id, e)
 
     try:
         notion_sync.sync_booking(booking_id)

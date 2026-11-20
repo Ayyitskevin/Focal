@@ -3,7 +3,7 @@
 import datetime as dt
 import sqlite3
 
-from . import audit
+from . import audit, notion_sync
 
 
 class ConversionError(Exception):
@@ -26,6 +26,115 @@ def parse_date(value: object) -> dt.date | None:
         return dt.date.fromisoformat(raw)
     except ValueError:
         return None
+
+
+def _reschedule_records(con, booking_id, client_id):
+    """Find compatible records via booking links, including later replacements.
+
+    UNION visits each booking ID once, even if imported links contain a cycle.
+    Two different existing projects are ambiguous and need an owner's decision.
+    """
+    candidates = con.execute(
+        """WITH RECURSIVE chain(id) AS (
+               VALUES (?)
+               UNION
+               SELECT b.reschedule_of FROM bookings b JOIN chain ON chain.id=b.id
+                WHERE b.reschedule_of IS NOT NULL
+               UNION
+               SELECT b.id FROM bookings b JOIN chain ON b.reschedule_of=chain.id
+           )
+           SELECT DISTINCT coalesce(p.client_id, b.client_id) AS linked_client, p.id AS project_id
+             FROM chain JOIN bookings b ON b.id=chain.id
+             LEFT JOIN projects p ON p.id=b.project_id
+            WHERE coalesce(p.client_id, b.client_id) IS NOT NULL
+              AND (? IS NULL OR coalesce(p.client_id, b.client_id)=?)
+            ORDER BY project_id IS NULL, project_id, linked_client LIMIT 2""",
+        (booking_id, client_id, client_id),
+    ).fetchall()
+    if len(candidates) == 2 and candidates[1]["project_id"] is not None:
+        raise ConversionError(
+            409,
+            "inquiry.booking_project_conflict",
+            "These rescheduled bookings already link to different projects.",
+        )
+    return candidates[0] if candidates else None
+
+
+def link_booking_records(
+    con: sqlite3.Connection, booking_id: int, inquiry_id: int, *, promote: bool
+) -> tuple[int | None, int | None]:
+    """Resolve and publish a booking's IDs inside the caller's immediate transaction.
+
+    A converted mirror is authoritative, including links cleared by a deletion.
+    Otherwise reuse the booking or its reschedule source before allocating records.
+    A consultation only gains a project when an owner explicitly promotes it.
+    """
+    b = con.execute(
+        """SELECT b.*, e.name AS event_name, e.creates_notion_session,
+                  original.client_id AS original_client_id, original.project_id AS original_project_id,
+                  i.converted_at, i.converted_client_id, i.converted_project_id
+             FROM bookings b JOIN event_types e ON e.id=b.event_type_id
+             LEFT JOIN bookings original ON original.id=b.reschedule_of
+             JOIN inquiries i ON i.id=b.inquiry_id WHERE b.id=?""",
+        (booking_id,),
+    ).fetchone()
+    if b is None or b["inquiry_id"] != inquiry_id:
+        raise ValueError(f"Booking {booking_id} no longer has the expected mirror inquiry")
+    if b["converted_at"]:
+        client_id, project_id = b["converted_client_id"], b["converted_project_id"]
+    else:
+        client_id, project_id = b["client_id"], b["project_id"]
+        if client_id is None and project_id is None:
+            client_id, project_id = b["original_client_id"], b["original_project_id"]
+        # Rescheduling cancels the source in the same transaction as the replacement.
+        # A confirmed first appointment has neither an ancestor nor a replacement.
+        if project_id is None and (b["reschedule_of"] is not None or b["status"] == "cancelled"):
+            related = _reschedule_records(con, booking_id, client_id)
+            if related is not None:
+                client_id, project_id = related["linked_client"], related["project_id"]
+        if client_id is None and project_id is not None:
+            client_id = con.execute(
+                "SELECT client_id FROM projects WHERE id=?", (project_id,)
+            ).fetchone()["client_id"]
+        if client_id is None:
+            client_id = _find_or_create_client(
+                con,
+                name=b["name"],
+                email=(b["email"] or "").strip(),
+                phone=b["phone"] or "",
+                notes=f"Auto-created from a Mise booking {b['created_at'][:10]}.",
+            )
+        if project_id is None and (b["creates_notion_session"] or promote):
+            shoot_date = b["start_utc"][:10]
+            project_id = con.execute(
+                "INSERT INTO projects (client_id, title, shoot_date, notes) VALUES (?,?,?,?)",
+                (
+                    client_id,
+                    f"{b['event_name']} — {shoot_date}",
+                    shoot_date,
+                    notion_sync.intake_summary(b) or None,
+                ),
+            ).lastrowid
+        # An already linked booking with a cleared stamp can reflect an explicit Undo.
+        # The owner writes the stamp and audit together below on manual promotion.
+        if not promote and project_id is not None and b["project_id"] is None:
+            stamp_conversion(con, inquiry_id, client_id, project_id)
+    if (b["client_id"], b["project_id"]) != (client_id, project_id):
+        con.execute(
+            "UPDATE bookings SET client_id=?, project_id=? WHERE id=?",
+            (client_id, project_id, booking_id),
+        )
+    return client_id, project_id
+
+
+def stamp_conversion(
+    con: sqlite3.Connection, inquiry_id: int, client_id: int | None, project_id: int | None
+) -> None:
+    con.execute(
+        """UPDATE inquiries SET converted_at=datetime('now'),
+              converted_client_id=?, converted_project_id=? WHERE id=?""",
+        (client_id, project_id, inquiry_id),
+    )
 
 
 def convert_to_records(con: sqlite3.Connection, inquiry_id: int) -> tuple[int | None, int | None]:
@@ -55,8 +164,6 @@ def convert_to_records(con: sqlite3.Connection, inquiry_id: int) -> tuple[int | 
             "inquiry.email_too_long",
             "The inquiry email is too long to convert safely.",
         )
-    name = bounded_text(inquiry["name"], maximum=2000, fallback="Unnamed client")
-    business = bounded_text(inquiry["business"], maximum=2000)
     shoot_on = None
     if inquiry["kind"] == "booking" and str(inquiry["shoot_date"] or "").strip():
         shoot_on = parse_date(inquiry["shoot_date"])
@@ -66,38 +173,16 @@ def convert_to_records(con: sqlite3.Connection, inquiry_id: int) -> tuple[int | 
                 "inquiry.shoot_date_invalid",
                 "The booking shoot date must be a valid ISO date.",
             )
-    existing = (
-        con.execute("SELECT id FROM clients WHERE email=?", (email,)).fetchone() if email else None
-    )
-    if existing:
-        client_id = int(existing["id"])
+    booking = None
+    if inquiry["kind"] == "booking":
+        booking = con.execute(
+            "SELECT id FROM bookings WHERE inquiry_id=?", (inquiry_id,)
+        ).fetchone()
+    if booking:
+        client_id, project_id = link_booking_records(con, booking["id"], inquiry_id, promote=True)
     else:
-        client_id = int(
-            con.execute(
-                "INSERT INTO clients (name, company, email, notes) VALUES (?,?,?,?)",
-                (
-                    name,
-                    business,
-                    email or None,
-                    f"From inquiry {inquiry['created_at'][:10]}:\n{inquiry['message']}",
-                ),
-            ).lastrowid
-        )
-    project_id = None
-    if shoot_on is not None:
-        service = bounded_text(inquiry["service"], maximum=1987, fallback="Shoot")
-        title = f"{service} — {shoot_on.isoformat()}"
-        project_id = int(
-            con.execute(
-                "INSERT INTO projects (client_id, title, shoot_date) VALUES (?,?,?)",
-                (client_id, title, shoot_on.isoformat()),
-            ).lastrowid
-        )
-    con.execute(
-        """UPDATE inquiries SET converted_at=datetime('now'),
-              converted_client_id=?, converted_project_id=? WHERE id=?""",
-        (client_id, project_id, inquiry_id),
-    )
+        client_id, project_id = _create_inquiry_records(con, inquiry, email, shoot_on)
+    stamp_conversion(con, inquiry_id, client_id, project_id)
     audit.log(
         con,
         "inquiry",
@@ -109,4 +194,36 @@ def convert_to_records(con: sqlite3.Connection, inquiry_id: int) -> tuple[int | 
         },
         actor="owner",
     )
+    return client_id, project_id
+
+
+def _find_or_create_client(con, *, name, email, notes, company=None, phone=None):
+    if email:
+        existing = con.execute("SELECT id FROM clients WHERE email=?", (email,)).fetchone()
+        if existing:
+            return existing["id"]
+    return con.execute(
+        "INSERT INTO clients (name, company, email, phone, notes) VALUES (?,?,?,?,?)",
+        (name, company, email or None, phone, notes),
+    ).lastrowid
+
+
+def _create_inquiry_records(con, inquiry, email, shoot_on):
+    client_id = _find_or_create_client(
+        con,
+        name=bounded_text(inquiry["name"], maximum=2000, fallback="Unnamed client"),
+        company=bounded_text(inquiry["business"], maximum=2000),
+        email=email,
+        notes=f"From inquiry {inquiry['created_at'][:10]}:\n{inquiry['message']}",
+    )
+    project_id = None
+    if shoot_on is not None:
+        service = bounded_text(inquiry["service"], maximum=1987, fallback="Shoot")
+        title = f"{service} — {shoot_on.isoformat()}"
+        project_id = int(
+            con.execute(
+                "INSERT INTO projects (client_id, title, shoot_date) VALUES (?,?,?)",
+                (client_id, title, shoot_on.isoformat()),
+            ).lastrowid
+        )
     return client_id, project_id
