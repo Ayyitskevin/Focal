@@ -28,6 +28,38 @@ def parse_date(value: object) -> dt.date | None:
         return None
 
 
+def _reschedule_records(con, booking_id, client_id):
+    """Find compatible records via booking links, including later replacements.
+
+    UNION visits each booking ID once, even if imported links contain a cycle.
+    Two different existing projects are ambiguous and need an owner's decision.
+    """
+    candidates = con.execute(
+        """WITH RECURSIVE chain(id) AS (
+               VALUES (?)
+               UNION
+               SELECT b.reschedule_of FROM bookings b JOIN chain ON chain.id=b.id
+                WHERE b.reschedule_of IS NOT NULL
+               UNION
+               SELECT b.id FROM bookings b JOIN chain ON b.reschedule_of=chain.id
+           )
+           SELECT DISTINCT coalesce(p.client_id, b.client_id) AS linked_client, p.id AS project_id
+             FROM chain JOIN bookings b ON b.id=chain.id
+             LEFT JOIN projects p ON p.id=b.project_id
+            WHERE coalesce(p.client_id, b.client_id) IS NOT NULL
+              AND (? IS NULL OR coalesce(p.client_id, b.client_id)=?)
+            ORDER BY project_id IS NULL, project_id, linked_client LIMIT 2""",
+        (booking_id, client_id, client_id),
+    ).fetchall()
+    if len(candidates) == 2 and candidates[1]["project_id"] is not None:
+        raise ConversionError(
+            409,
+            "inquiry.booking_project_conflict",
+            "These rescheduled bookings already link to different projects.",
+        )
+    return candidates[0] if candidates else None
+
+
 def link_booking_records(
     con: sqlite3.Connection, booking_id: int, inquiry_id: int, *, promote: bool
 ) -> tuple[int | None, int | None]:
@@ -54,6 +86,12 @@ def link_booking_records(
         client_id, project_id = b["client_id"], b["project_id"]
         if client_id is None and project_id is None:
             client_id, project_id = b["original_client_id"], b["original_project_id"]
+        # Rescheduling cancels the source in the same transaction as the replacement.
+        # A confirmed first appointment has neither an ancestor nor a replacement.
+        if project_id is None and (b["reschedule_of"] is not None or b["status"] == "cancelled"):
+            related = _reschedule_records(con, booking_id, client_id)
+            if related is not None:
+                client_id, project_id = related["linked_client"], related["project_id"]
         if client_id is None and project_id is not None:
             client_id = con.execute(
                 "SELECT client_id FROM projects WHERE id=?", (project_id,)

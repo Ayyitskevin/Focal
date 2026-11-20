@@ -228,6 +228,11 @@ the booking must reflect the project chosen by that conversion. A rescheduled
 booking inherits established links from its source. Reusing links preserves
 existing record edits and the first conversion stamp.
 
+If the owner promotes a consultation after rescheduling it, the next conversion
+or confirmation of any booking in that appointment's reschedule history reuses
+the first project. A separate appointment for the same client keeps its own
+project. Reusing the project leaves earlier inquiries' conversion stamps intact.
+
 SQLite must serialize the choice of identity with the writes that publish it.
 Readers and retries see either the committed links or the prior state after a
 rollback. Email, calendar and Notion calls stay outside that transaction.

@@ -1,12 +1,13 @@
 """A scheduler confirmation and an owner's conversion publish a single Studio identity."""
 
+import datetime as dt
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app import booking_notify, config, db, ratelimit
+from app import booking_notify, config, db, ratelimit, scheduling
 from app.main import app
 
 
@@ -285,3 +286,57 @@ def test_failed_confirmation_write_rolls_back_and_can_retry(browser, caplog):
     assert [row["id"] for row in db.all_("SELECT id FROM inquiries")] == [iid]
     assert [row["id"] for row in db.all_("SELECT id FROM clients")] == [cid]
     assert [row["id"] for row in db.all_("SELECT id FROM projects")] == [pid]
+
+
+@pytest.mark.parametrize("first", ["source", "replacement"])
+def test_late_promotion_shares_a_project_only_within_its_reschedule_chain(browser, first):
+    day = dt.date.today() + dt.timedelta(days=5)
+    event = db.run(
+        "INSERT INTO event_types(slug,name,creates_notion_session,min_notice_hours) VALUES ('consult','Consult',0,0)"
+    )
+    db.run(
+        "INSERT INTO availability_rules(event_type_id,weekday,start_min,end_min) VALUES(?,?,540,1020)",
+        (event, day.weekday()),
+    )
+    slots = scheduling.slots_for_day(scheduling.event_by_slug("consult"), day)
+
+    def schedule(url, slot):
+        result = browser.post(
+            url, data={"start": slot["utc"], "name": "Studio", "email": "studio@example.test"}
+        )
+        assert result.status_code == 303
+        token = result.headers["location"].rsplit("/", 1)[1]
+        return scheduling.booking_by_token(token)
+
+    source = schedule("/book/consult", slots[0])
+    middle = schedule(f"/booking/{source['token']}/reschedule", slots[1])
+    replacement = schedule(f"/booking/{middle['token']}/reschedule", slots[2])
+    other = schedule("/book/consult", slots[3])
+    cid = source["client_id"]
+    assert cid and middle["reschedule_of"] == source["id"]
+    assert replacement["reschedule_of"] == middle["id"] and other["reschedule_of"] is None
+    for b in [source, middle, replacement, other]:
+        assert booking_links(b["id"]) == (b["inquiry_id"], cid, None)
+        assert inquiry_links(b["inquiry_id"]) == (None, None)
+    assert db.all_("SELECT id FROM projects") == []
+
+    # Another consultation with this same email already has its own project.
+    other_destination = owner_convert(browser, other["inquiry_id"])
+    _, other_pid = inquiry_links(other["inquiry_id"])
+    assert other_pid and other_destination == f"/admin/studio/projects/{other_pid}"
+
+    winner, opposite = (source, replacement) if first == "source" else (replacement, source)
+    destination = owner_convert(browser, winner["inquiry_id"])
+    owner_cid, pid = inquiry_links(winner["inquiry_id"])
+    assert owner_cid == cid and pid and pid != other_pid
+    assert destination == f"/admin/studio/projects/{pid}"
+    assert owner_convert(browser, opposite["inquiry_id"]) == destination
+    assert owner_convert(browser, middle["inquiry_id"]) == destination
+
+    for b in [source, middle, replacement]:
+        booking_notify.confirm(b["id"])
+        assert booking_links(b["id"]) == (b["inquiry_id"], cid, pid)
+        assert inquiry_links(b["inquiry_id"]) == (cid, pid)
+        assert owner_convert(browser, b["inquiry_id"]) == destination
+    assert booking_links(other["id"]) == (other["inquiry_id"], cid, other_pid)
+    assert {r["id"] for r in db.all_("SELECT id FROM projects")} == {pid, other_pid}
