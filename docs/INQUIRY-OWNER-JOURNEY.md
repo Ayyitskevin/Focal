@@ -202,10 +202,7 @@ since been deleted, a retry keeps the surviving links. When both links are gone,
 the browser returns 410 and explains that the records are unavailable. The
 iPhone keeps its current owner-write requirement and returns
 the converted inquiry from the same transaction. Quote creation and explicit
-Undo retain their own workflows. Automated booking confirmation also links
-records separately. When it creates an inquiry, an owner can convert it before
-the scheduler finishes linking the booking. The scheduler can then replace the
-owner’s project link. Coordinating those two operations is a follow-up.
+Undo retain their own workflows.
 
 **Acceptance.** Submit the browser and iPhone requests in both orders, retry each
 surface, and overlap their first requests for a fresh booking. Compare both
@@ -214,6 +211,34 @@ Confirm that two blank-email contacts remain distinct through retries and create
 zero projects. In the iPhone simulator, race the actual Convert action with a
 signed-in browser request. Simulate losing the first successful phone response,
 retry from the phone, then open both linked records and return to the inquiry.
+
+### Keep the booking and its inquiry linked to the same records
+
+Booking confirmation creates an inquiry for the studio inbox. If an owner
+converts that inquiry while confirmation is still running, the booking, the
+inquiry, and the owner’s response must all identify the same client and project.
+The first committed pair is authoritative. Retrying either identity operation
+must reuse that pair and the original inquiry. Existing unrelated projects for
+the same client are never candidates for the booking.
+
+For a shoot, confirmation creates one project with the shoot date and booking
+intake. For a consultation, confirmation links only the client and leaves the
+inquiry available for manual conversion. If an owner explicitly promotes it,
+the booking must reflect the project chosen by that conversion. A rescheduled
+booking inherits established links from its source. Reusing links preserves
+existing record edits and the first conversion stamp.
+
+SQLite must serialize the choice of identity with the writes that publish it.
+Readers and retries see either the committed links or the prior state after a
+rollback. Email, calendar and Notion calls stay outside that transaction.
+This change covers future confirmation and conversion attempts. Repairing old
+duplicate projects or changing how often notifications are delivered is separate.
+
+**Acceptance.** On disposable studio data, overlap confirmation and the owner's
+conversion on the same booking in both orders. Compare the first result, the
+booking and inquiry rows, and the owner's retry. Verify one linked client and
+one project for the shoot, stable IDs on replay, consultation promotion and
+reschedule inheritance. Keep external providers disabled or stubbed.
 
 Separately fix existing gallery correctness issues (large-gallery
 pagination, owner drafts, video playback) without expanding gallery scope. Reconcile
