@@ -180,9 +180,42 @@ This phase requires its own schema, APNs, privacy, and production-readiness revi
 
 ## Phase 4 — semantic consolidation and existing correctness
 
-Unify browser and native inquiry-conversion semantics in one small domain-service
-change with regression tests, including blank-email handling and duplicate-project
-prevention. Separately fix existing gallery correctness issues (large-gallery
+### Convert an inquiry once across browser and iPhone
+
+An owner can have the same inquiry open in web admin and on an iPhone. Whichever
+**Convert** request reaches the studio first determines the client and project.
+A retry, including one submitted while the first request is still running,
+returns those same stored IDs. The inquiry keeps its first conversion timestamp.
+
+The browser’s **Convert to Client** action and the iPhone’s conversion endpoint
+share the [existing atomic conversion rules](INQUIRY-MOBILE-CONVERSION.md#api-contract).
+The transaction checks the conversion stamp before creating records, links a
+client by trimmed nonempty email, creates a project for a dated booking, and
+writes one conversion audit entry. A failure rolls back the entire operation.
+An empty or whitespace-only email supplies no identity: two such contacts each
+get their own client, even when another client already has a blank email.
+Contact inquiries create no projects.
+
+The browser preserves its 303 redirect to the original project or client and
+honors its existing local admin return destination. If linked records have
+since been deleted, a retry keeps the surviving links. When both links are gone,
+the browser returns 410 and explains that the records are unavailable. The
+iPhone keeps its current owner-write requirement and returns
+the converted inquiry from the same transaction. Quote creation and explicit
+Undo retain their own workflows. Automated booking confirmation also links
+records separately. When it creates an inquiry, an owner can convert it before
+the scheduler finishes linking the booking. The scheduler can then replace the
+owner’s project link. Coordinating those two operations is a follow-up.
+
+**Acceptance.** Submit the browser and iPhone requests in both orders, retry each
+surface, and overlap their first requests for a fresh booking. Compare both
+responses with the stored client ID, project ID, conversion stamp and audit count.
+Confirm that two blank-email contacts remain distinct through retries and create
+zero projects. In the iPhone simulator, race the actual Convert action with a
+signed-in browser request. Simulate losing the first successful phone response,
+retry from the phone, then open both linked records and return to the inquiry.
+
+Separately fix existing gallery correctness issues (large-gallery
 pagination, owner drafts, video playback) without expanding gallery scope. Reconcile
 closed issues and retain independent review and macOS CI for every slice.
 

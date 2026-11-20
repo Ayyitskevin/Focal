@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from . import audit, db, mobile_auth
 from .admin import common as admin_common
 from .admin import studio as admin_studio
+from .inquiries import ConversionError, bounded_text, convert_to_records, parse_date
 from .mobile_api_helpers import cursor_problem as _cursor_problem
 from .mobile_api_helpers import decode_keyset_cursor as _decode_keyset_cursor
 from .mobile_api_helpers import encode_keyset_cursor as _encode_keyset_cursor
@@ -699,21 +700,6 @@ def project_detail(
     return _conditional(request, response, _project_summary(row))
 
 
-def _inquiry_text(value: object, *, maximum: int, fallback: str | None = None) -> str | None:
-    cleaned = str(value or "").strip()
-    return cleaned[:maximum] or fallback
-
-
-def _inquiry_date(value: object) -> dt.date | None:
-    raw = str(value or "").strip()
-    if len(raw) != 10:
-        return None
-    try:
-        return dt.date.fromisoformat(raw)
-    except ValueError:
-        return None
-
-
 def _inquiry_summary(row) -> InquirySummary:
     if row["converted_at"]:
         status = InquiryStatus.CONVERTED
@@ -727,13 +713,13 @@ def _inquiry_summary(row) -> InquirySummary:
     preview = " ".join(preview_source.split())[:280]
     return InquirySummary(
         id=int(row["id"]),
-        name=_inquiry_text(row["name"], maximum=2000, fallback=""),
-        business=_inquiry_text(row["business"], maximum=2000),
-        email=_inquiry_text(row["email"], maximum=2000),
-        phone=_inquiry_text(row["phone"], maximum=2000),
-        kind=_inquiry_text(row["kind"], maximum=64, fallback="unknown"),
-        service=_inquiry_text(row["service"], maximum=2000),
-        shoot_on=_inquiry_date(row["shoot_date"]),
+        name=bounded_text(row["name"], maximum=2000, fallback=""),
+        business=bounded_text(row["business"], maximum=2000),
+        email=bounded_text(row["email"], maximum=2000),
+        phone=bounded_text(row["phone"], maximum=2000),
+        kind=bounded_text(row["kind"], maximum=64, fallback="unknown"),
+        service=bounded_text(row["service"], maximum=2000),
+        shoot_on=parse_date(row["shoot_date"]),
         message_preview=preview,
         status=status,
         is_replied=bool(row["is_replied"]),
@@ -788,7 +774,7 @@ def _inquiry_message(message_id: int, direction, channel, body, created_at) -> I
     return InquiryMessage(
         id=message_id,
         direction="out" if direction == "out" else "in",
-        channel=_inquiry_text(channel, maximum=64, fallback="unknown"),
+        channel=bounded_text(channel, maximum=64, fallback="unknown"),
         body=bounded[:65_536],
         recorded_at=_utc_timestamp(created_at),
         is_truncated=len(bounded) > 65_536,
@@ -932,94 +918,6 @@ def restore_inquiry(
     return result
 
 
-def _convert_inquiry(inquiry_id: int) -> InquiryDetail:
-    con = db.connect()
-    con.isolation_level = None
-    try:
-        con.execute("BEGIN IMMEDIATE")
-        inquiry = con.execute("SELECT * FROM inquiries WHERE id=?", (inquiry_id,)).fetchone()
-        if inquiry is None:
-            raise mobile_auth.MobileAuthError(404, "inquiry.not_found", "Inquiry not found.")
-        if not inquiry["converted_at"]:
-            if inquiry["dismissed_at"]:
-                raise mobile_auth.MobileAuthError(
-                    409,
-                    "inquiry.dismissed",
-                    "Restore the inquiry before converting it.",
-                )
-            email = str(inquiry["email"] or "").strip()
-            if len(email) > 2000:
-                raise mobile_auth.MobileAuthError(
-                    422,
-                    "inquiry.email_too_long",
-                    "The inquiry email is too long to convert safely.",
-                )
-            name = _inquiry_text(inquiry["name"], maximum=2000, fallback="Unnamed client")
-            business = _inquiry_text(inquiry["business"], maximum=2000)
-            shoot_on = None
-            if inquiry["kind"] == "booking" and str(inquiry["shoot_date"] or "").strip():
-                shoot_on = _inquiry_date(inquiry["shoot_date"])
-                if shoot_on is None:
-                    raise mobile_auth.MobileAuthError(
-                        422,
-                        "inquiry.shoot_date_invalid",
-                        "The booking shoot date must be a valid ISO date.",
-                    )
-            existing = (
-                con.execute("SELECT id FROM clients WHERE email=?", (email,)).fetchone()
-                if email
-                else None
-            )
-            if existing:
-                client_id = int(existing["id"])
-            else:
-                client_id = int(
-                    con.execute(
-                        "INSERT INTO clients (name, company, email, notes) VALUES (?,?,?,?)",
-                        (
-                            name,
-                            business,
-                            email or None,
-                            f"From inquiry {inquiry['created_at'][:10]}:\n{inquiry['message']}",
-                        ),
-                    ).lastrowid
-                )
-            project_id = None
-            if shoot_on is not None:
-                service = _inquiry_text(inquiry["service"], maximum=1987, fallback="Shoot")
-                title = f"{service} — {shoot_on.isoformat()}"
-                project_id = int(
-                    con.execute(
-                        "INSERT INTO projects (client_id, title, shoot_date) VALUES (?,?,?)",
-                        (client_id, title, shoot_on.isoformat()),
-                    ).lastrowid
-                )
-            con.execute(
-                """UPDATE inquiries SET converted_at=datetime('now'),
-                      converted_client_id=?, converted_project_id=? WHERE id=?""",
-                (client_id, project_id, inquiry_id),
-            )
-            audit.log(
-                con,
-                "inquiry",
-                inquiry_id,
-                "convert",
-                diff={
-                    "converted_client_id": [None, client_id],
-                    "converted_project_id": [None, project_id],
-                },
-                actor="owner",
-            )
-        result = _inquiry_detail_payload(_inquiry_record(inquiry_id, con=con), con=con)
-        con.commit()
-    except Exception:
-        con.rollback()
-        raise
-    finally:
-        con.close()
-    return result
-
-
 @router.put("/inquiries/{inquiry_id}/conversion", response_model=InquiryDetail)
 def convert_inquiry(
     inquiry_id: Annotated[int, Path(ge=1, le=_INT64_MAX)],
@@ -1027,7 +925,12 @@ def convert_inquiry(
     response: Response,
 ) -> InquiryDetail:
     _require_studio_write(principal)
-    result = _convert_inquiry(inquiry_id)
+    try:
+        with db.tx() as con:
+            convert_to_records(con, inquiry_id)
+            result = _inquiry_detail_payload(_inquiry_record(inquiry_id, con=con), con=con)
+    except ConversionError as exc:
+        raise mobile_auth.MobileAuthError(exc.status_code, exc.code, str(exc)) from exc
     response.headers["Cache-Control"] = "no-store"
     return result
 
