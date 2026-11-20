@@ -30,6 +30,8 @@ enum OwnerRepositoryError: LocalizedError, Sendable {
     case invalidInquiryResponse
     case invalidClientRecord
     case clientRecordSessionChanged
+    case invalidProjectRecord
+    case projectRecordSessionChanged
     case inquiryReplySessionMismatch
     case pendingInquiryReplyConflict
     case staleRead
@@ -59,6 +61,10 @@ enum OwnerRepositoryError: LocalizedError, Sendable {
             "The server returned a different client record."
         case .clientRecordSessionChanged:
             "Sign in again to open this client record."
+        case .invalidProjectRecord:
+            "The server returned a different project record."
+        case .projectRecordSessionChanged:
+            "Sign in again to open this project record."
         case .inquiryReplySessionMismatch:
             "The saved reply draft belongs to a different session."
         case .pendingInquiryReplyConflict:
@@ -183,17 +189,20 @@ actor OwnerRepository {
     }
 
     func clientRecord(id: Int64) async throws -> ClientSummary {
-        try await requireClientRecordSession()
-        let record = try await send(MiseEndpoints.Clients.detail(id: id))
-        try await requireClientRecordSession()
+        let record = try await readRecord(
+            MiseEndpoints.Clients.detail(id: id), sessionError: .clientRecordSessionChanged
+        )
         guard record.id == id else { throw OwnerRepositoryError.invalidClientRecord }
         return record
     }
 
-    private func requireClientRecordSession() async throws {
-        guard await isCurrentLogin(), cacheIsActive else {
-            throw OwnerRepositoryError.clientRecordSessionChanged
-        }
+    private func readRecord<Record: Decodable & Sendable>(
+        _ endpoint: APIEndpoint<Record>, sessionError: OwnerRepositoryError
+    ) async throws -> Record {
+        guard await isCurrentLogin(), cacheIsActive else { throw sessionError }
+        let record = try await send(endpoint)
+        guard await isCurrentLogin(), cacheIsActive else { throw sessionError }
+        return record
     }
 
     func cachedProjects() async throws -> ResourceSnapshot<[ProjectSummary]>? {
@@ -206,6 +215,14 @@ actor OwnerRepository {
             MiseEndpoints.Projects.list(cursor: cursor, limit: 100)
         }
         return try await persist(values, key: Key.projects, expectedGeneration: generation)
+    }
+
+    func projectRecord(id: Int64) async throws -> ProjectSummary {
+        let record = try await readRecord(
+            MiseEndpoints.Projects.detail(id: id), sessionError: .projectRecordSessionChanged
+        )
+        guard record.id == id else { throw OwnerRepositoryError.invalidProjectRecord }
+        return record
     }
 
     func cachedInquiries() async throws -> ResourceSnapshot<[InquirySummary]>? {

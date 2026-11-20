@@ -4,6 +4,8 @@
 **Date:** 2026-11-17
 **Depends on:** `INQUIRY-MOBILE-TRIAGE.md`
 
+This document records the initial conversion slice. The [owner journey](INQUIRY-OWNER-JOURNEY.md#phase-2--native-records-and-compressed-navigation) specifies the current native destinations for the converted records.
+
 ## Review findings
 
 The browser's `/admin/studio/inquiries/{id}/client` action already converts an
@@ -88,8 +90,8 @@ No command sends messages, creates a proposal, or deletes any existing record.
   converted client ID.
 - **Open client record** uses the converted client ID and the owner's existing
   session to show the [native client record](INQUIRY-OWNER-JOURNEY.md#first-slice--open-the-converted-client).
-  **Open project record** opens `/admin/studio/projects/{id}` in web admin on the
-  current workspace origin and may require browser sign-in.
+  **Open project record** uses the converted project ID to show the [native project
+  record](INQUIRY-OWNER-JOURNEY.md#second-slice--open-the-converted-project) in the same owner session.
 - Repository success invalidates only inquiry, dashboard, client, and project
   snapshots. Unrelated snapshots remain untouched. Each affected cache key also has
   a mutation generation: a read that began before the mutation cannot persist or

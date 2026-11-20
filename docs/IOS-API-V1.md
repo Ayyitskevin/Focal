@@ -167,7 +167,7 @@ not become a client-wide session.
 | `GET /api/v1/clients` | `Page<ClientSummary>` |
 | `GET /api/v1/clients/{client_id}` | `ClientSummary` for the requested client |
 | `GET /api/v1/projects` | `Page<ProjectSummary>` |
-| `GET /api/v1/projects/{id}` | project detail and links |
+| `GET /api/v1/projects/{project_id}` | `ProjectSummary` for the requested project |
 | `GET /api/v1/galleries` | `Page<GallerySummary>` |
 | `GET /api/v1/galleries/{id}` | `GalleryDetail` manifest |
 | `GET /api/v1/projects/{id}/proposals` | `Page<Proposal>` |
@@ -180,8 +180,7 @@ not become a client-wide session.
 | `GET /api/v1/galleries/{id}/cull` | paged cull deck/results |
 
 The Milestone 2 endpoints are available only to the exact `studio_owner`
-principal with `studio:read`. Project detail, AI-run, and
-cull-result reads remain reserved contract surface until their delivery slices.
+principal with `studio:read`. AI-run and cull-result reads remain reserved contract surface until their delivery slices.
 
 For the converted-client screen, `GET /api/v1/clients/{client_id}` reads the
 record identified by the inquiry’s `converted_client_id`. A conversion may link
@@ -189,6 +188,12 @@ an existing client. The response uses the owner directory’s projection, includ
 contact information, project count and published portal status. Conditional reads
 revalidate the owner before returning 304. A missing record returns 404
 with code `client.not_found`.
+
+For a converted project, `GET /api/v1/projects/{project_id}` reads the project
+named by `converted_project_id`. It returns the same fields as a project directory
+entry, including the linked client’s display name, status and optional shoot date.
+Conditional reads revalidate the owner. A missing project returns 404 with code
+`project.not_found`.
 
 `GET /api/v1/inquiries` includes open, converted, and dismissed rows newest-first.
 It returns bounded contact fields and a whitespace-collapsed message preview rather
@@ -294,9 +299,8 @@ client; blank emails never match. Dated booking inquiries also create an
 `inquiry_received` project, while other kinds intentionally leave
 `converted_project_id` null. Dismissed inquiries return `409 inquiry.dismissed`.
 Only real transitions change the timestamp and append an `inquiry`/`convert` audit
-row as actor `owner`; no proposal, message, or external delivery is created. Native
-converted-record links open the canonical web admin rather than duplicating those
-pages in Swift. See `INQUIRY-MOBILE-CONVERSION.md`.
+row as actor `owner`; no proposal, message, or external delivery is created. The native
+app opens each linked record by its returned ID. See the [owner journey](INQUIRY-OWNER-JOURNEY.md#second-slice--open-the-converted-project).
 
 Inquiry reply requires a UUID `Idempotency-Key` and exact owner + `studio:write`.
 Before provider I/O the server records a session-bound `202 inquiry.delivery_unknown`

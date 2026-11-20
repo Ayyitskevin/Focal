@@ -20,10 +20,14 @@ from pathlib import Path
 from uuid import UUID
 
 import uvicorn
+from starlette.responses import Response
 
 ROOT = Path(__file__).resolve().parents[2]
 INQUIRY_ID = 73
 CLIENT_ID = 402
+SERVICE = "Orchard portraits"
+SHOOT_DATE = "2030-10-13"
+PROJECT_TITLE = f"{SERVICE} — {SHOOT_DATE}"
 
 
 @contextmanager
@@ -84,12 +88,53 @@ def synthetic_studio():
             "INSERT INTO clients(id,name,email) VALUES(?,?,?)",
             (CLIENT_ID, "Juniper Portrait Studio", address),
         )
+        # A lookup using the inquiry ID would return this other project for the same client.
         db.run(
-            "INSERT INTO inquiries(id,name,email,message,kind) VALUES(?,?,?,?,?)",
-            (INQUIRY_ID, "Autumn portrait request", address, "Portrait session", "contact"),
+            "INSERT INTO projects(id,client_id,title) VALUES(?,?,?)",
+            (INQUIRY_ID, CLIENT_ID, "Previous headshots"),
         )
+        db.run(
+            """INSERT INTO inquiries(id,name,email,message,kind,service,shoot_date)
+               VALUES(?,?,?,?,'booking',?,?)""",
+            (
+                INQUIRY_ID,
+                "Autumn portrait request",
+                address,
+                "Portrait session",
+                SERVICE,
+                SHOOT_DATE,
+            ),
+        )
+        db.run(
+            "INSERT INTO inquiries(name,email,message,kind) VALUES(?,?,?,'contact')",
+            ("Winter portrait request", address, "Different inquiry from the same client"),
+        )
+        from app.main import app
+
+        project_reads: list[tuple[str, int]] = []
+
+        @app.middleware("http")
+        async def record_project_read(request, call_next):
+            response = await call_next(request)
+            path = request.url.path
+            if request.method == "GET" and path.startswith("/api/v1/projects/"):
+                # URLSession may revalidate the first response with If-None-Match.
+                origin_status = response.status_code
+                if origin_status in (200, 304) and project_reads == [(path, 200)]:
+                    linked = db.one(
+                        "SELECT converted_project_id FROM inquiries WHERE id=?", (INQUIRY_ID,)
+                    )
+                    if path == f"/api/v1/projects/{linked['converted_project_id']}":
+                        response = Response(status_code=503, headers={"Cache-Control": "no-store"})
+                project_reads.append((path, response.status_code))
+                print(
+                    f"Simulator GET {path}: studio {origin_status}, sent {response.status_code}",
+                    flush=True,
+                )
+            return response
+
         # Keep this exact socket bound until shutdown. Concurrent runs get distinct origins.
-        server = uvicorn.Server(uvicorn.Config("app.main:app", access_log=False))
+        server = uvicorn.Server(uvicorn.Config(app, access_log=False))
         thread = threading.Thread(target=server.run, kwargs={"sockets": [sock]}, daemon=True)
         thread.start()
         try:
@@ -98,17 +143,21 @@ def synthetic_studio():
                 if not thread.is_alive() or time.monotonic() >= deadline:
                     raise RuntimeError("The synthetic Focal studio did not start.")
                 time.sleep(0.1)
-            yield port, password
+            yield port, password, project_reads
         finally:
             server.should_exit = True
             thread.join()
 
 
 def main(reference_udid: str) -> int:
-    with empty_iphone(reference_udid) as udid, synthetic_studio() as (port, password):
+    with (
+        empty_iphone(reference_udid) as udid,
+        synthetic_studio() as (port, password, project_reads),
+    ):
         env = {key: value for key, value in os.environ.items() if not key.startswith("MISE_")}
         env["TEST_RUNNER_FOCAL_JOURNEY_PORT"] = str(port)
         env["TEST_RUNNER_FOCAL_JOURNEY_PASSWORD"] = password
+        env["TEST_RUNNER_FOCAL_JOURNEY_PROJECT_TITLE"] = PROJECT_TITLE
         command = [
             "xcodebuild",
             "test",
@@ -128,9 +177,27 @@ def main(reference_udid: str) -> int:
             return result.returncode
         from app import db
 
-        row = db.one("SELECT converted_client_id FROM inquiries WHERE id=?", (INQUIRY_ID,))
-        if row["converted_client_id"] != CLIENT_ID:
-            raise RuntimeError("The simulator did not convert the inquiry into the linked client.")
+        row = db.one(
+            """SELECT i.converted_client_id, p.id AS project_id, p.title
+                 FROM inquiries i JOIN projects p
+                   ON p.id=i.converted_project_id AND p.client_id=i.converted_client_id
+                WHERE i.id=?""",
+            (INQUIRY_ID,),
+        )
+        if row is None or row["converted_client_id"] != CLIENT_ID or row["title"] != PROJECT_TITLE:
+            raise RuntimeError(
+                "The simulator did not convert the booking into the expected records."
+            )
+        path = f"/api/v1/projects/{row['project_id']}"
+        if project_reads not in (
+            [(path, 200), (path, 503), (path, 200)],
+            [(path, 200), (path, 503), (path, 304)],
+        ):
+            raise RuntimeError(f"Unexpected simulator project reads: {project_reads!r}")
+        print(
+            f"Verified inquiry {INQUIRY_ID} opened its stored project {row['project_id']}, "
+            "then recovered from the synthetic 503 on the second visit."
+        )
         return 0
 
 

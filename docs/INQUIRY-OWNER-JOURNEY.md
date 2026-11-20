@@ -1,6 +1,6 @@
 # Inquiry owner-journey specification
 
-**Status:** Phase 1 merged in #228. Phase 2 starts with the converted client record.
+**Status:** Phase 1 merged in #228. The converted client record shipped in #229. The second Phase 2 slice opens the converted project.
 **Updated:** 2026-11-19
 **Depends on:** merged inquiry detail/triage (#225) and conversion (#226)
 
@@ -126,7 +126,7 @@ inside Focal and use Back to return to the same inquiry and its converted state.
 This works for both a newly created client and an existing client linked by
 conversion. The destination uses the returned `converted_client_id`. A linked
 client can have a different name and contact details from the original inquiry.
-The project action still opens web admin.
+At the end of this first slice, the project action still opened web admin.
 
 The app reads `GET /api/v1/clients/{client_id}` with its existing owner session.
 The response uses the same `ClientSummary` fields as the owner client directory.
@@ -147,6 +147,29 @@ Assert a client-only value on the detail screen and the identity of the original
 inquiry after Back. Cover the authorization, missing-record and identity cases
 at the API or repository boundary. Keep project detail and tab reorganization
 for separate changes.
+
+### Second slice — open the converted project
+
+From a converted inquiry, **Open project record** pushes a read-only project screen
+when the inquiry has a `converted_project_id`. Back returns to that same inquiry
+with its converted state visible. A conversion that only created or linked a
+client continues to show just its client action.
+
+The screen reads `GET /api/v1/projects/{project_id}` using the signed-in owner’s
+existing `studio:read` access. It shows the stored project title, linked client
+name, and status. Show the shoot date when present. The API returns the directory’s
+`ProjectSummary` shape for the requested ID and reports a missing project as 404.
+Conditional requests run the same owner access checks. The screen handles an
+unavailable record or failed read with Retry and Back. A different project ID or
+a response for an ended or replaced session cannot populate the screen. Project
+detail stays in memory.
+
+On an iPhone simulator, sign in to a synthetic studio, convert a dated booking
+inquiry, then open its project. Distinguish the stored project from another
+project for the same client. Check the title, client, status, and shoot date on
+screen, then use Back to verify the original inquiry and its converted actions.
+On a second visit, simulate one failed read. Verify Retry opens the same project
+and Back still returns to that inquiry. Keep the converted-client journey covered.
 
 ## Phase 3 — notifications and exact deep links
 

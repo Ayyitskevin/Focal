@@ -182,14 +182,65 @@ def test_client_detail_matches_directory_and_revalidates_owner_fields(owner):
     assert updated.headers["etag"] != response.headers["etag"]
 
 
-def test_client_detail_reauthorizes_conditional_reads(owner):
+def test_converted_project_record_reads_exact_project_and_revalidates_fields(owner):
+    client, headers, _ = owner
+    inquiry_id = _insert_inquiry(
+        "Photography Client",
+        business="Wedding Studio",
+        kind="booking",
+        service="Wedding",
+        shoot_date="2026-10-03",
+    )
+    converted = client.put(f"/api/v1/inquiries/{inquiry_id}/conversion", headers=headers)
+    assert converted.status_code == 200
+    summary = converted.json()["summary"]
+    client_id = summary["converted_client_id"]
+    project_id = summary["converted_project_id"]
+    newer_project = db.run(
+        "INSERT INTO projects (client_id,title) VALUES (?,?)", (client_id, "Other project")
+    )
+
+    path = f"/api/v1/projects/{project_id}"
+    response = client.get(path, headers=headers)
+    assert response.status_code == 200
+    record = response.json()
+    projects = client.get("/api/v1/projects", headers=headers).json()["items"]
+    assert [p["id"] for p in projects] == [newer_project, project_id]
+    assert record == projects[1]
+    assert record["id"] == project_id
+    assert record["client_id"] == client_id
+    assert record["title"] == "Wedding — 2026-10-03"
+    assert record["client_display_name"] == "Wedding Studio"
+    assert record["status"] == "inquiry_received"
+    assert record["shoot_on"] == "2026-10-03"
+    conditional = {**headers, "If-None-Match": response.headers["etag"]}
+    cached = client.get(path, headers=conditional)
+    assert cached.status_code == 304
+    assert not cached.content
+    for item in (response, cached):
+        assert item.headers["cache-control"] == "private, no-cache"
+        assert "authorization" in item.headers["vary"].lower()
+
+    db.run("UPDATE projects SET shoot_date=NULL WHERE id=?", (project_id,))
+    updated = client.get(path, headers=conditional)
+    assert updated.status_code == 200
+    assert updated.json()["shoot_on"] is None
+    assert updated.headers["etag"] != response.headers["etag"]
+
+
+@pytest.mark.parametrize("resource", ["clients", "projects"])
+def test_owner_record_reauthorizes_conditional_reads(owner, resource):
     client, headers, _ = owner
     client_id = db.run("INSERT INTO clients (name) VALUES ('Private client')")
     db.run(
         "INSERT INTO portals (client_id,slug,pin,published) VALUES (?,?,?,1)",
         (client_id, "client-portal", "2853"),
     )
-    path = f"/api/v1/clients/{client_id}"
+    project_id = db.run(
+        "INSERT INTO projects (client_id,title) VALUES (?,'Private project')", (client_id,)
+    )
+    record_id = client_id if resource == "clients" else project_id
+    path = f"/api/v1/{resource}/{record_id}"
     db.run(
         """UPDATE api_sessions SET scopes_json='["studio:read"]' WHERE principal_kind='studio_owner'"""
     )
@@ -220,14 +271,18 @@ def test_client_detail_reauthorizes_conditional_reads(owner):
     assert client.get(path, headers={**headers, **conditional}).status_code == 401
 
 
-def test_client_detail_missing_and_out_of_range(owner):
+@pytest.mark.parametrize(
+    ("resource", "missing_code"),
+    [("clients", "client.not_found"), ("projects", "project.not_found")],
+)
+def test_owner_record_missing_and_out_of_range(owner, resource, missing_code):
     client, headers, _ = owner
     conditional = {**headers, "If-None-Match": "*"}
-    missing = client.get("/api/v1/clients/123", headers=conditional)
+    missing = client.get(f"/api/v1/{resource}/123", headers=conditional)
     assert missing.status_code == 404
-    assert missing.json()["code"] == "client.not_found"
+    assert missing.json()["code"] == missing_code
     for invalid in (0, -1, 2**63, "abc"):
-        invalid_id = client.get(f"/api/v1/clients/{invalid}", headers=conditional)
+        invalid_id = client.get(f"/api/v1/{resource}/{invalid}", headers=conditional)
         assert invalid_id.status_code == 422
         assert invalid_id.json()["code"] == "request.validation_failed"
 

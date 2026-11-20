@@ -147,7 +147,7 @@ final class OwnerDataTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let cache = TenantJSONCache(cacheNamespace: "tenant", rootDirectory: root)
-        let response = try Self.clientReply()
+        let response = try Self.recordReply(Self.client)
         let client = QueuedOwnerClient(replies: [
             response, response, .failure(.notFound(nil)), .failure(.forbidden(nil)),
         ])
@@ -185,7 +185,7 @@ final class OwnerDataTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let cache = TenantJSONCache(cacheNamespace: "tenant", rootDirectory: root)
-        let client = QueuedOwnerClient(replies: [try Self.clientReply()])
+        let client = QueuedOwnerClient(replies: [try Self.recordReply(Self.client)])
         let repository = OwnerRepository(
             client: client, cache: cache, sessionID: "owner", isCurrentLogin: { true }
         )
@@ -202,7 +202,7 @@ final class OwnerDataTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let active = LockedBox(true)
         let cache = TenantJSONCache(cacheNamespace: "tenant", rootDirectory: root)
-        let client = QueuedOwnerClient(replies: [try Self.clientReply()])
+        let client = QueuedOwnerClient(replies: [try Self.recordReply(Self.client)])
         let repository = OwnerRepository(
             client: client, cache: cache, sessionID: "owner",
             isCurrentLogin: { active.withValue { $0 } }
@@ -220,9 +220,70 @@ final class OwnerDataTests: XCTestCase {
         XCTAssertEqual(paths, ["/api/v1/clients/7"])
     }
 
-    private static func clientReply() throws -> QueuedOwnerClient.Reply {
+    func testProjectRecordRequiresItsExactIDAndGetsFreshData() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = TenantJSONCache(cacheNamespace: "tenant", rootDirectory: root)
+        let response = try Self.recordReply(Self.project)
+        let client = QueuedOwnerClient(replies: [
+            response, response, .failure(.notFound(nil)), .failure(.forbidden(nil)),
+        ])
+        let repository = OwnerRepository(client: client, cache: cache, isCurrentLogin: { true })
+
+        let record = try await repository.projectRecord(id: 42)
+        XCTAssertEqual(record, Self.project)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+
+        do {
+            _ = try await repository.projectRecord(id: 43)
+            XCTFail("A project returned for another ID must not reach the screen.")
+        } catch OwnerRepositoryError.invalidProjectRecord {}
+
+        try await cache.write([record], key: "projects.v1", etag: nil)
+        do {
+            _ = try await repository.projectRecord(id: 42)
+            XCTFail("A missing project cannot be read from an old directory entry.")
+        } catch APIError.notFound(_) {}
+        do {
+            _ = try await repository.projectRecord(id: 42)
+            XCTFail("A forbidden project cannot be read from an old directory entry.")
+        } catch APIError.forbidden(_) {}
+
+        let paths = await client.requestPaths()
+        XCTAssertEqual(paths, ["/api/v1/projects/42", "/api/v1/projects/43", "/api/v1/projects/42", "/api/v1/projects/42"])
+        let endpoint = MiseEndpoints.Projects.detail(id: 42)
+        XCTAssertEqual(endpoint.authentication, .bearer)
+        XCTAssertEqual(endpoint.method, .get)
+    }
+
+    func testProjectRecordDiscardsResponseAfterLoginReplacement() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let active = LockedBox(true)
+        let cache = TenantJSONCache(cacheNamespace: "tenant", rootDirectory: root)
+        let client = QueuedOwnerClient(replies: [try Self.recordReply(Self.project)])
+        let repository = OwnerRepository(
+            client: client, cache: cache, isCurrentLogin: { active.withValue { $0 } }
+        )
+
+        await client.beforeNextReply { active.withValue { $0 = false } }
+        do {
+            _ = try await repository.projectRecord(id: 42)
+            XCTFail("A project fetched under the old login must be discarded.")
+        } catch OwnerRepositoryError.projectRecordSessionChanged {}
+        do {
+            _ = try await repository.projectRecord(id: 42)
+            XCTFail("The old repository must not send a request under the replacement login.")
+        } catch OwnerRepositoryError.projectRecordSessionChanged {}
+
+        let paths = await client.requestPaths()
+        XCTAssertEqual(paths, ["/api/v1/projects/42"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    private static func recordReply<Record: Encodable>(_ record: Record) throws -> QueuedOwnerClient.Reply {
         .value(
-            try MiseJSON.encoder().encode(client),
+            try MiseJSON.encoder().encode(record),
             APIResponseMetadata(etag: nil, lastModified: nil, receivedAt: Date())
         )
     }
@@ -245,6 +306,12 @@ final class OwnerDataTests: XCTestCase {
         upcomingShoots: [],
         openInvoices: [],
         recentActivity: []
+    )
+
+    private static let project = ProjectSummary(
+        id: 42, clientID: 7, clientDisplayName: "Fixture client", title: "Fixture project",
+        status: .sessionPlanning, galleryID: nil, shootOn: LocalDate(rawValue: "2026-12-09"),
+        workspacePublished: false, createdAt: Date(timeIntervalSince1970: 1_700_000_000)
     )
 
     private static let client = ClientSummary(

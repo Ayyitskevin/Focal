@@ -108,6 +108,7 @@ def test_tenant_discovery_and_openapi_are_scoped_native_contracts(mobile_client)
         "/inquiries/{inquiry_id}/conversion",
         "/inquiries/{inquiry_id}/reply",
         "/projects",
+        "/projects/{project_id}",
         "/galleries",
         "/galleries/{gallery_id}",
         "/galleries/{gallery_id}/assets/{asset_id}/favorite",

@@ -133,6 +133,10 @@ enum MiseEndpoints {
     }
 
     enum Projects {
+        static func detail(id: Int64) -> APIEndpoint<ProjectSummary> {
+            APIEndpoint(method: .get, path: "/api/v1/projects/\(id)")
+        }
+
         static func list(
             cursor: String? = nil,
             limit: Int = 25
